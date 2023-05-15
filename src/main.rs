@@ -1,20 +1,7 @@
-use anyhow::Context;
-use noodles::gff::record::attributes;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::str::FromStr;
-// use noodles::gff::{Record, Line};
-use grangers::*;
-use noodles::gff::record::Phase as gff_Phase;
-use noodles::gff::record::Strand as gff_Strand;
-use noodles::{gff, gtf};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::time::{Duration, Instant};
-use polars::prelude::*;
-use polars::datatypes::CategoricalType;
-use crate::grangers::grangers_utils::file_line_count;
 use crate::grangers::reader::*;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, EnvFilter};
 
 pub mod grangers;
 
@@ -23,29 +10,42 @@ use peak_alloc::PeakAlloc;
 #[global_allocator]
 static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 
-
 fn main() -> anyhow::Result<()> {
+    // Check the `RUST_LOG` variable for the logger level and
+    // respect the value found there. If this environment
+    // variable is not set then set the logging level to
+    // INFO.
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .init();
+
     let gtf_file = PathBuf::from(
         "/mnt/scratch3/alevin_fry_submission/refs/refdata-gex-GRCh38-2020-A/genes/genes.gtf",
     );
+    println!("Start parsing GTF");
 
-        let start = Instant::now();
-        
-        let gs = GStruct::from_gtf(gtf_file.as_path(),GStructMode::Essential)?;
+    let start = Instant::now();
 
-        let duration: Duration = start.elapsed();
-        println!("Parsed GTF in {:?}", duration);
+    let gs = GStruct::from_gtf(gtf_file.as_path(), AttributeMode::Essential)?;
 
-        let start = Instant::now();
-        
-        let df = gs.to_df()?;
+    let duration: Duration = start.elapsed();
+    println!("Parsed GTF in {:?}", duration);
 
-        println!("{:?}",df);
-        
-        let duration = start.elapsed();
-        println!("Convert GStruct to Polars using {:?}", duration);
+    let start = Instant::now();
 
-        let peak_mem = PEAK_ALLOC.peak_usage_as_gb();
-        println!("Peak Memory usage was {} GB", peak_mem);
+    let df = gs.to_df()?;
+
+    println!("{:?}", df);
+
+    let duration = start.elapsed();
+    println!("Convert GStruct to Polars using {:?}", duration);
+
+    let peak_mem = PEAK_ALLOC.peak_usage_as_gb();
+    println!("Peak Memory usage was {} GB", peak_mem);
     Ok(())
 }

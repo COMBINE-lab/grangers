@@ -1,42 +1,112 @@
-use crate::grangers_utils::*;
-use anyhow::{self, Ok};
-use noodles::gff::record::{Phase, Strand};
+use anyhow;
 use noodles::{gff, gtf};
 use polars::prelude::*;
+// use std::fmt::Display;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::time::Instant;
-use std::{
-    collections::HashMap,
-    hash::Hash,
-    path::{self, Path, PathBuf},
-};
-use tracing::{info, warn};
+use std::{collections::HashMap, path::Path};
+use tracing::info;
 
 pub enum FileType {
     GTF,
-    GFF2,
-    GFF3,
+    GFF,
 }
 
-pub enum GStructMode {
+impl FileType {
+    pub fn get_essential(&self) -> &[&str] {
+        match self {
+            FileType::GTF => GTFESSENTIALATTRIBUTES.as_ref(),
+            FileType::GFF => GFFESSENTIALATTRIBUTES.as_ref(),
+        }
+    }
+}
+
+pub enum AttributeMode {
     Essential,
     Full,
 }
 
-impl GStructMode {
-    pub fn from(is_full: bool) -> GStructMode {
+impl AttributeMode {
+    pub fn from(is_full: bool) -> AttributeMode {
         if is_full {
-            GStructMode::Full
+            AttributeMode::Full
         } else {
-            GStructMode::Essential
+            AttributeMode::Essential
         }
     }
 
     pub fn is_full(&self) -> bool {
         match self {
-            GStructMode::Full => true,
-            GStructMode::Essential => false,
+            AttributeMode::Full => true,
+            AttributeMode::Essential => false,
+        }
+    }
+}
+
+const GTFESSENTIALATTRIBUTES: [&str; 3] = ["gene_id", "gene_name", "transcript_id"];
+const GFFESSENTIALATTRIBUTES: [&str; 4] = ["ID","gene_id", "gene_name", "transcript_id"];
+
+// struct AttributeWorker {
+//     hm: HashMap<String, String>,
+// }
+
+// impl AttributeWorker {
+//     fn update<T>(&mut self, it: Iterator) {
+//         self.hm.clear();
+//         for attr in it {
+//             &self.hm.insert(attr.key().to_string(), attr.value().to_string());
+//         }
+//     }
+// }
+struct Attributes {
+    file_type: FileType,
+    essential: HashMap<String, Vec<Option<String>>>,
+    extra: Option<HashMap<String, Vec<Option<String>>>>,
+}
+
+impl Attributes {
+    fn new(mode: AttributeMode, file_type: FileType) -> anyhow::Result<Attributes> {
+        // create essential from an iterator
+        let essential = HashMap::from_iter(
+            file_type.get_essential()
+                .iter()
+                .map(|s| (s.to_string(), Vec::new())),
+        );
+
+        // if in full mode, create extra
+        let extra = if mode.is_full() {
+            Some(HashMap::new())
+        } else {
+            None
+        };
+        Ok(Attributes { file_type, essential, extra })
+    }
+
+    fn push(&mut self, hm: &mut HashMap<String, String>) {
+        // parse essential attributes
+        for &ea in self.file_type.get_essential() {
+            if let Some(vec) = self.essential.get_mut(ea) {
+                vec.push(hm.remove(ea))
+            };
+        }
+        // the rest items are all extra attributes
+        // parse them if we are in full modes
+        if let Some(extra) = &mut self.extra {
+            // consume hm so that we can reuse it in next iteration
+            for (k, v) in hm.into_iter() {
+                // if the attribute doesn't exist, insert a vector for it
+                if !extra.contains_key(k) {
+                    // create a None vec.
+                    // the length should be the same as the essential attributes before insertion
+                    let nr = self.essential.values().next().unwrap().len();
+                    extra.insert(k.to_string(), vec![None; if nr == 0 { 0 } else { nr - 1}]);
+                }
+
+                // then, push value for this record
+                if let Some(vec) = extra.get_mut(k) {
+                    vec.push(Some(v.to_string()))
+                }
+            }
         }
     }
 }
@@ -46,27 +116,12 @@ impl GStructMode {
 /// this is a uniform wrapper
 
 // pub struct Attributes;
-pub enum Attributes {
-    GeneID,
-    GeneName,
-    TranscriptID,
-}
-
-impl AsRef<str> for Attributes {
-    fn as_ref(&self) -> &str {
-        match self {
-            Self::GeneID => "gene_id",
-            Self::GeneName => "gene_name",
-            Self::TranscriptID => "transcript_id",
-        }
-    }
-}
 
 pub enum FeatureType {
     Gene,
     Transcript,
     Exon,
-    Other
+    Other,
 }
 
 impl std::str::FromStr for FeatureType {
@@ -83,28 +138,156 @@ impl std::str::FromStr for FeatureType {
     }
 }
 
-
 /// This struct contains all information in a GTF file. it will be used to construct the
 /// polars data frame. If this is no faster than generating
 pub struct GStruct {
-    pub mode: GStructMode,
-    pub seqid: Vec<String>,
-    pub source: Vec<String>,
-    pub feature_type: Vec<String>,
-    pub start: Vec<u64>,
-    pub end: Vec<u64>,
-    pub score: Vec<Option<f32>>,
-    pub strand: Vec<Option<String>>,
-    pub phase: Vec<Option<String>>,
-    pub gene_id: Vec<Option<String>>,
-    pub gene_name: Vec<Option<String>>,
-    pub transcript_id: Vec<Option<String>>,
-    // this is memory intensive: use 1G more memory
-    pub attributes: Option<HashMap<String, Vec<Option<String>>>>,
+    seqid: Vec<String>,
+    source: Vec<String>,
+    feature_type: Vec<String>,
+    start: Vec<u64>,
+    end: Vec<u64>,
+    score: Vec<Option<f32>>,
+    strand: Vec<Option<String>>,
+    phase: Vec<Option<String>>,
+    attributes: Attributes,
 }
 
+// implement GTF reader
 impl GStruct {
-    pub fn new(mode: GStructMode) -> anyhow::Result<GStruct> {
+
+    fn _from_gtf<T: BufRead>(&mut self, rdr: &mut gtf::Reader<T>) -> anyhow::Result<()> {
+        // initiate a reusable hashmap to take the attributes of each record
+        let mut rec_attr_hm: HashMap<String, String> = HashMap::with_capacity(100);
+        let mut n_comments = 0usize;
+        let mut n_records = 0usize;
+
+        // parse the file
+        for l in rdr.lines() {
+            let line = l?;
+            match line {
+                gtf::Line::Comment(_) => {
+                    n_comments += 1;
+                    continue;
+                }
+                gtf::Line::Record(r) => {
+                    n_records += 1;
+                    // parse essential fields
+
+                    GStruct::push(&mut self.seqid, r.reference_sequence_name().to_string());
+                    GStruct::push(&mut self.source, r.source().to_string());
+                    GStruct::push(&mut self.feature_type, r.ty().to_string());
+                    GStruct::push(&mut self.start, r.start().get().to_owned() as u64);
+                    GStruct::push(&mut self.end, r.end().get().to_owned() as u64);
+                    GStruct::push(&mut self.score, r.score());
+                    GStruct::push(&mut self.strand, if let Some(st) = r.strand() {
+                        Some(st.as_ref().to_owned())
+                    } else {
+                        None
+                    });
+
+                    GStruct::push(&mut self.phase, if let Some(ph) = r.frame() {
+                        Some(ph.to_string())
+                    } else {
+                        None
+                    });
+
+                    // parse attributes
+                    rec_attr_hm.clear();
+                    for attr in r.attributes().iter() {
+                        rec_attr_hm.insert(attr.key().to_string(), attr.value().to_string());
+                    }
+                    self.attributes.push(&mut rec_attr_hm);
+                }
+            }
+        }
+        info!(
+            "Finished parsing the input file. Found {} comments and {} records.",
+            n_comments, n_records
+        );
+        Ok(())
+    }
+
+    pub fn from_gtf<T: AsRef<Path>>(file_path: T, am: AttributeMode) -> anyhow::Result<GStruct> {
+        // instantiate the struct
+        let mut rdr: gtf::Reader<BufReader<File>> =
+            gtf::Reader::new(BufReader::new(File::open(file_path)?));
+
+        let mut gr = GStruct::new(am, FileType::GTF)?;
+        gr._from_gtf(&mut rdr)?;
+        Ok(gr)
+    }
+}
+
+// implement GFF reader
+impl GStruct {
+    pub fn from_gff<T: AsRef<Path>>(file_path: T, am: AttributeMode) -> anyhow::Result<GStruct> {
+        // instantiate the struct
+        let mut rdr =
+            gff::Reader::new(BufReader::new(File::open(file_path)?));
+
+        let mut gr = GStruct::new(am, FileType::GTF)?;
+        gr._from_gff(&mut rdr)?;
+        Ok(gr)
+    }
+    fn _from_gff<T: BufRead>(&mut self, rdr: &mut gff::Reader<T>) -> anyhow::Result<()> {
+        // initiate a reusable hashmap to take the attributes of each record
+        let mut rec_attr_hm: HashMap<String, String> = HashMap::with_capacity(100);
+        let mut n_comments = 0usize;
+        let mut n_records = 0usize;
+        let mut n_directives = 0usize;
+
+        // parse the file
+        for l in rdr.lines() {
+            let line = l?;
+            match line {
+                gff::Line::Record(r) => {
+                    n_records += 1;
+                    GStruct::push(&mut self.seqid, r.reference_sequence_name().to_string());
+                    GStruct::push(&mut self.source, r.source().to_string());
+                    GStruct::push(&mut self.feature_type, r.ty().to_string());
+                    GStruct::push(&mut self.start, r.start().get().to_owned() as u64);
+                    GStruct::push(&mut self.end, r.end().get().to_owned() as u64);
+                    GStruct::push(&mut self.score, r.score());
+                    GStruct::push(&mut self.strand, match r.strand() {
+                        gff::record::Strand::Forward | gff::record::Strand::Reverse => {
+                            Some(r.strand().to_string())
+                        }
+                        _ => None,
+                    });
+                    GStruct::push(&mut self.phase, if let Some(ph) = r.phase() {
+                        Some(ph.to_string())
+                    } else {
+                        None
+                    });
+
+                    // parse attributes
+                    rec_attr_hm.clear();
+                    for attr in r.attributes().iter() {
+                        rec_attr_hm.insert(attr.key().to_string(), attr.value().to_string());
+                    }
+                    self.attributes.push(&mut rec_attr_hm);
+                }
+                gff::Line::Comment(_) => {
+                    n_comments += 1;
+                    continue;
+                }
+                gff::Line::Directive(_) => {
+                    n_directives += 1;
+                    continue;
+                }
+            }
+        }
+        info!(
+            "Finished parsing the input file. Found {} comments, {} directives, and {} records.",
+            n_comments, n_directives, n_records
+        );
+        Ok(())
+    }
+}
+
+// implenment general functions
+impl GStruct {
+    pub fn new(attribute_mode: AttributeMode, file_type: FileType) -> anyhow::Result<GStruct> {
         let gr = GStruct {
             seqid: Vec::new(),
             source: Vec::new(),
@@ -114,199 +297,130 @@ impl GStruct {
             score: Vec::new(),
             strand: Vec::new(),
             phase: Vec::new(),
-            gene_id: Vec::new(),
-            gene_name: Vec::new(),
-            transcript_id: Vec::new(),
-            attributes: if mode.is_full() {Some(HashMap::new())} else {None},
-            mode,
+            attributes: Attributes::new(attribute_mode,file_type)?,
         };
         Ok(gr)
     }
-    pub fn from_gtf<T: AsRef<Path>>(gtf_file: T, gm: GStructMode) -> anyhow::Result<GStruct> {
-        
 
-        // instantiate the struct with a proper size
-        let mut rdr: gtf::Reader<BufReader<File>> = gtf::Reader::new(BufReader::new(File::open(gtf_file)?));
-        let mut gr = GStruct::new(gm)?;
-        // initiate a hashmap for attributes. This hashmap will receive all attributes in all records
-        let mut attribute_hms: HashMap<String, Vec<Option<String>>> =  HashMap::new();
-        // initiate a hashmap for the attributes in one record
-        let mut rec_attr_hm: HashMap<String, String> = HashMap::with_capacity(100);
-
-        // we want to record how many records have invalid fields or attributes.
-        let mut invalid_strand = 0usize;
-        let mut missing_gene_id = 0usize;
-        let mut missing_gene_name = 0usize;  
-        let mut missing_transcript_id = 0usize;
-
-        // let mut s1 = Series::new("1", vec![Attributes::GeneID.as_ref(), Attributes::GeneID.as_ref(),Attributes::GeneName.as_ref()])
-        // .cast(&DataType::Categorical(None))
-        // .unwrap();
-        let start = Instant::now();
-        let mut recid = 0usize;
-        // parse the file
-        for l in rdr.lines() {
-            let line = l?;
-    
-            // ignore comments
-            if let gtf::Line::Record(r) = line {
-                // receive fields
-                // noodles reader will take care most of thing for us. 
-                // however, we do need to impose something we required.
-                // That is, we require each none-gene-type record to have a transcript_id 
-                // build attribute hashmap
-
-                // then, parse essential fields
-                let seqid = r.reference_sequence_name().to_string();
-                let source = r.source().to_string();
-                let feature_type: String = r.ty().to_string();
-                let start = r.start().get().to_owned() as u64;
-                let end: u64 = r.end().get().to_owned() as u64;
-                let score = r.score();
-                let strand = if let Some(st) = r.strand() {
-                    Some(st.as_ref().to_owned())
-                } else {
-                    None
-                };
-
-                // gtf frame is the same thing as gff phase
-                let phase = if let Some(ph) = r.frame() {
-                    Some(ph.to_string())
-                } else {
-                    None
-                };
-                rec_attr_hm.extend(r.attributes().iter().map(|a| (a.key().to_string(),a.value().to_string())));
-
-                // parse attributes
-                // for (k, v) in rec_attr_hm.iter() {
-                //     // if the attribute doesn't exist, insert a vector for it
-                //     if !gr.attributes.contains_key(k) {
-                //         gr.attributes.insert(k.to_string(), vec![None;nl]);
-                //     };
-
-                //     // then, insert value for this record according to line number
-                //     if let Some(av) = gr.attributes.get_mut(k) {
-                //         // it is safe to use unwrap as we created the vec
-                //         let mptr = av.get_mut(recid).unwrap();
-                //         *mptr = Some(v.to_owned());
-                //     }
-                // }
-
-
-                // // if tid does not exist, skip
-                // let mut transcript_id = if let Some(tid) = rec_attr_hm.get(Attributes::TranscriptID.as_ref()) {
-                //     Some(tid.to_owned())
-                // } else if is_gene {
-                //     missing_transcript_id += 1;
-                //     continue
-                // } else {
-                //     None
-                // };
-
-                // // if strand is unknown, skip
-                // let st = if let Some(st) = r.strand() {
-                //     Some(st.as_ref().to_owned())
-                // } else {
-                //     invalid_strand+=1;
-                //     None
-                // };
-
-                // // gtf frame is the same thing as gff phase
-                // let fr = if let Some(fr) = r.frame() {
-                //     Some(fr.to_string())
-                // } else {
-                //     None
-                // };
-    
-                // parse essential attributes
-                // we need gene id for all
-                let transcript_id = if let Some(tid) = rec_attr_hm.get(Attributes::TranscriptID.as_ref()) {
-                    Some(tid.to_owned())
-                } else {
-                    None
-                };
-
-                let gene_id = if let Some(gid) = rec_attr_hm.get(Attributes::GeneID.as_ref()) {
-                    Some(gid.to_owned())
-                } else {
-                    None
-                };
-
-                let gene_name = if let Some(gn) = rec_attr_hm.get(Attributes::GeneName.as_ref()) {
-                    Some(gn.to_owned())
-                } else {
-                    None
-                };
-                // let gene_id: String;
-                // let gene_name: String;
-                // if ogene_id.is_none() && ogene_name.is_none() {
-                //     missing_gene_id += 1;
-                //     missing_gene_name += 1;
-                //     // if it is a gene 
-                //     if is_gene {
-                //         continue
-                //     } else {
-                //         gene_id = transcript_id.to_owned();
-                //         gene_name = transcript_id.to_owned();
-                //     }
-                // } else {
-                //     gene_id = if let Some(gid) = ogene_id {
-                //         gid.to_owned()
-                //     } else {
-                //         missing_gene_id += 1;
-                //         ogene_name.unwrap().to_owned()
-                //     };
-                //     gene_name = if let Some(gname) = ogene_name {
-                //         gname.to_owned()
-                //     } else {
-                //         missing_gene_name += 1;
-                //         ogene_id.unwrap().to_owned()
-                //     };
-                // }
-                gr.seqid.push(seqid);
-                gr.source.push(source);
-                gr.feature_type.push(feature_type);
-                gr.start.push(start);
-                gr.end.push(end);
-                gr.score.push(score);
-                gr.strand.push(strand);
-                gr.phase.push(phase);
-                gr.gene_id.push(gene_id);
-                gr.gene_name.push(gene_name);
-                gr.transcript_id.push(transcript_id);
-                rec_attr_hm.clear();
-                recid += 1;
-            }
-        }
-
-        let duration = start.elapsed();
-        println!("Runtime: {:?}", duration);
-
-        Ok(gr)
+    // TODO: might need a better generic type
+    fn push<T: std::fmt::Debug+Clone>(vec: &mut Vec<T>, val: T) {
+        vec.push(val);
     }
 
     pub fn to_df(self) -> anyhow::Result<DataFrame> {
         // create dataframe!
-        // for fields
+        // we want to make some columns categorical because of this https://docs.rs/polars/latest/polars/docs/performance/index.html
+        // fields
         let mut df_vec = vec![
-            Series::new("seqid", self.seqid),
-            Series::new("source", self.source),
-            Series::new("type", self.feature_type),
+            Series::new("seqid", self.seqid)
+                .cast(&DataType::Categorical(None))
+                .unwrap(),
+            Series::new("source", self.source)
+                .cast(&DataType::Categorical(None))
+                .unwrap(),
+            Series::new("type", self.feature_type)
+                .cast(&DataType::Categorical(None))
+                .unwrap(),
             Series::new("start", self.start),
             Series::new("end", self.end),
             Series::new("score", self.score),
-            Series::new("strand", self.strand),
-            Series::new("phase", self.phase),
+            Series::new("strand", self.strand)
+                .cast(&DataType::Categorical(None))
+                .unwrap(),
+            Series::new("phase", self.phase)
+                .cast(&DataType::Categorical(None))
+                .unwrap(),
         ];
-        
-        if let Some(attributes) = self.attributes {
-            for (k,v) in attributes {
-                df_vec.push(
-                    Series::new(k.as_str(), v),
-                )
+
+        //for essential attributes
+        // categorical as we want to do operations on them
+        for (k, v) in self.attributes.essential {
+            let s = Series::new(k.as_str(), v)
+                .cast(&DataType::Categorical(None))
+                .unwrap();
+            df_vec.push(s);
+        }
+
+        // for extra attributes
+        if let Some(attributes) = self.attributes.extra {
+            for (k, v) in attributes {
+                df_vec.push(Series::new(k.as_str(), v))
             }
         }
         let gr = DataFrame::new(df_vec)?;
         Ok(gr)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const GTF_RECORD: &[u8] = b"##provider: GENCODE\nchr1\tHAVANA\tgene\t29554\t31109\t.\t+\t.\tgene_id \"ENSG00000243485\"; gene_version \"5\"; gene_type \"lncRNA\"; gene_name \"MIR1302-2HG\"; level 2; hgnc_id \"HGNC:52482\"; tag \"ncRNA_host\"; havana_gene \"OTTHUMG00000000959.2\";\nchr1\tHAVANA\ttranscript\t29554\t31097\t.\t+\t.\tgene_id \"ENSG00000243485\"; gene_version \"5\"; transcript_id \"ENST00000473358\"; transcript_version \"1\"; gene_type \"lncRNA\"; gene_name \"MIR1302-2HG\"; transcript_type \"lncRNA\"; transcript_name \"MIR1302-2HG-202\"; level 2; transcript_support_level \"5\"; hgnc_id \"HGNC:52482\"; tag \"not_best_in_genome_evidence\"; tag \"dotter_confirmed\"; tag \"basic\"; havana_gene \"OTTHUMG00000000959.2\"; havana_transcript \"OTTHUMT00000002840.1\";\nchr1\tHAVANA\texon\t29554\t30039\t.\t+\t.\tgene_id \"ENSG00000243485\"; gene_version \"5\"; transcript_id \"ENST00000473358\"; transcript_version \"1\"; gene_type \"lncRNA\"; gene_name \"MIR1302-2HG\"; transcript_type \"lncRNA\"; transcript_name \"MIR1302-2HG-202\"; exon_number 1; exon_id \"ENSE00001947070\"; exon_version \"1\"; level 2; transcript_support_level \"5\"; hgnc_id \"HGNC:52482\"; tag \"not_best_in_genome_evidence\"; tag \"dotter_confirmed\"; tag \"basic\"; havana_gene \"OTTHUMG00000000959.2\"; havana_transcript \"OTTHUMT00000002840.1\";\nchr1\tHAVANA\texon\t30564\t30667\t.\t+\t.\tgene_id \"ENSG00000243485\"; gene_version \"5\"; transcript_id \"ENST00000473358\"; transcript_version \"1\"; gene_type \"lncRNA\"; gene_name \"MIR1302-2HG\"; transcript_type \"lncRNA\"; transcript_name \"MIR1302-2HG-202\"; exon_number 2; exon_id \"ENSE00001922571\"; exon_version \"1\"; level 2; transcript_support_level \"5\"; hgnc_id \"HGNC:52482\"; tag \"not_best_in_genome_evidence\"; tag \"dotter_confirmed\"; tag \"basic\"; havana_gene \"OTTHUMG00000000959.2\"; havana_transcript \"OTTHUMT00000002840.1\";\nchr1\tHAVANA\ttranscript\t30267\t31109\t.\t+\t.\tgene_id \"ENSG00000243485\"; gene_version \"5\"; transcript_id \"ENST00000469289\"; transcript_version \"1\"; gene_type \"lncRNA\"; gene_name \"MIR1302-2HG\"; transcript_type \"lncRNA\"; transcript_name \"MIR1302-2HG-201\"; level 2; transcript_support_level \"5\"; hgnc_id \"HGNC:52482\"; tag \"not_best_in_genome_evidence\"; tag \"basic\"; havana_gene \"OTTHUMG00000000959.2\"; havana_transcript \"OTTHUMT00000002841.2\";";
+
+    const GFF_RECORD: &[u8] = 
+    b"##gff-version 3\n#description: evidence-based annotation of the human genome (GRCh38), version 43 (Ensembl 109)\n#provider: GENCODE\n#contact: gencode-help@ebi.ac.uk\n#format: gff3\n#date: 2022-11-29\n##sequence-region chr1 1 248956422\nchr1\tHAVANA\tgene\t11869\t14409\t.\t+\t.\tID=ENSG00000290825.1;gene_id=ENSG00000290825.1;gene_type=lncRNA;gene_name=DDX11L2;level=2;tag=overlaps_pseudogene\nchr1\tHAVANA\ttranscript\t11869\t14409\t.\t+\t.\tID=ENST00000456328.2;Parent=ENSG00000290825.1;gene_id=ENSG00000290825.1;transcript_id=ENST00000456328.2;gene_type=lncRNA;gene_name=DDX11L2;transcript_type=lncRNA;transcript_name=DDX11L2-202;level=2;transcript_support_level=1;tag=basic,Ensembl_canonical;havana_transcript=OTTHUMT00000362751.1\nchr1\tHAVANA\texon\t11869\t12227\t.\t+\t.\tID=exon:ENST00000456328.2:1;Parent=ENST00000456328.2;gene_id=ENSG00000290825.1;transcript_id=ENST00000456328.2;gene_type=lncRNA;gene_name=DDX11L2;transcript_type=lncRNA;transcript_name=DDX11L2-202;exon_number=1;exon_id=ENSE00002234944.1;level=2;transcript_support_level=1;tag=basic,Ensembl_canonical;havana_transcript=OTTHUMT00000362751.1\nchr1\tHAVANA\texon\t12613\t12721\t.\t+\t.\tID=exon:ENST00000456328.2:2;Parent=ENST00000456328.2;gene_id=ENSG00000290825.1;transcript_id=ENST00000456328.2;gene_type=lncRNA;gene_name=DDX11L2;transcript_type=lncRNA;transcript_name=DDX11L2-202;exon_number=2;exon_id=ENSE00003582793.1;level=2;transcript_support_level=1;tag=basic,Ensembl_canonical;havana_transcript=OTTHUMT00000362751.1\nchr1\tHAVANA\texon\t13221\t14409\t.\t+\t.\tID=exon:ENST00000456328.2:3;Parent=ENST00000456328.2;gene_id=ENSG00000290825.1;transcript_id=ENST00000456328.2;gene_type=lncRNA;gene_name=DDX11L2;transcript_type=lncRNA;transcript_name=DDX11L2-202;exon_number=3;exon_id=ENSE00002312635.1;level=2;transcript_support_level=1;tag=basic,Ensembl_canonical;havana_transcript=OTTHUMT00000362751.1\n";
+
+    #[test]
+    fn test_from_gtf() {
+        let mut rdr = gtf::Reader::new(GTF_RECORD);
+        let mut gr = GStruct::new(AttributeMode::Full,FileType::GTF).unwrap();
+        gr._from_gtf(&mut rdr).unwrap();
+        // check values
+        match gr {
+            GStruct{seqid, source, feature_type, start, end, score, strand, phase, attributes} => {
+                assert_eq!(seqid, vec![String::from("chr1");5]);
+                assert_eq!(source, vec![String::from("HAVANA");5]);
+                assert_eq!(feature_type, vec![String::from("gene"),String::from("transcript"),String::from("exon"),String::from("exon"),String::from("transcript")]);
+                assert_eq!(start, vec![29554,29554,29554,30564,30267]);
+                assert_eq!(end, vec![31109,31097,30039,30667,31109]);
+                assert_eq!(score, vec![None;5]);
+                assert_eq!(strand, vec![Some(String::from("+"));5]);
+                assert_eq!(phase, vec![None;5]);
+                match attributes {
+                    Attributes{file_type,essential,extra} => {
+                        assert!(file_type.get_essential() == &["gene_id", "gene_name", "transcript_id"]);
+                        assert!(essential.get("gene_id").unwrap().iter().map(|v| v.clone().unwrap().eq(&String::from("ENSG00000243485"))).collect::<Vec<bool>>().iter().all(|v| *v));
+
+                        assert!(essential.get("gene_name").unwrap().iter().map(|v| v.clone().unwrap().eq(&String::from("MIR1302-2HG"))).collect::<Vec<bool>>().iter().all(|v| *v));
+
+                        assert_eq!(essential.get("transcript_id").unwrap().iter().map(|v| if let Some(id) = v.clone() {id} else {String::from("none")}).collect::<Vec<String>>(), vec![String::from("none"), String::from("ENST00000473358"), String::from("ENST00000473358"), String::from("ENST00000473358"), String::from("ENST00000469289")]);
+                        assert_eq!(extra.unwrap().get("gene_type").unwrap().iter().map(|v| if let Some(id) = v.clone() {id} else {String::from("none")}).collect::<Vec<String>>(), vec![String::from("lncRNA");5]);
+
+                    },
+                }
+            },            
+        }
+    }
+
+    #[test]
+    fn test_from_gff() {
+        let mut rdr = gff::Reader::new(GFF_RECORD);
+        let mut gr = GStruct::new(AttributeMode::Full, FileType::GFF).unwrap();
+        gr._from_gff(&mut rdr).unwrap();
+        // check values
+        match gr {
+            GStruct{seqid, source, feature_type, start, end, score, strand, phase, attributes} => {
+                assert_eq!(seqid, vec![String::from("chr1");5]);
+                assert_eq!(source, vec![String::from("HAVANA");5]);
+                assert_eq!(feature_type, vec![String::from("gene"),String::from("transcript"),String::from("exon"),String::from("exon"),String::from("exon")]);
+                assert_eq!(start, vec![11869,11869,11869,12613,13221]);
+                assert_eq!(end, vec![14409,14409,12227,12721,14409]);
+                assert_eq!(score, vec![None;5]);
+                assert_eq!(strand, vec![Some(String::from("+"));5]);
+                assert_eq!(phase, vec![None;5]);
+                match attributes {
+                    Attributes{file_type,essential,extra} => {
+                        assert!(file_type.get_essential() == &["ID", "gene_id", "gene_name", "transcript_id"]);
+                        assert!(essential.get("gene_id").unwrap().iter().map(|v| v.clone().unwrap().eq(&String::from("ENSG00000290825.1"))).collect::<Vec<bool>>().iter().all(|v| *v));
+
+                        assert!(essential.get("gene_name").unwrap().iter().map(|v| v.clone().unwrap().eq(&String::from("DDX11L2"))).collect::<Vec<bool>>().iter().all(|v| *v));
+
+                        assert_eq!(essential.get("transcript_id").unwrap().iter().map(|v| if let Some(id) = v.clone() {id} else {String::from("none")}).collect::<Vec<String>>(), vec![String::from("none"), String::from("ENST00000456328.2"), String::from("ENST00000456328.2"), String::from("ENST00000456328.2"), String::from("ENST00000456328.2")]);
+                        assert_eq!(extra.unwrap().get("gene_type").unwrap().iter().map(|v| if let Some(id) = v.clone() {id} else {String::from("none")}).collect::<Vec<String>>(), vec![String::from("lncRNA");5]);
+
+                    },
+                }
+            },            
+        }
     }
 }

@@ -9,7 +9,7 @@ pub fn file_line_count<T: AsRef<Path>>(file_path: T) -> anyhow::Result<usize> {
     for l in reader.lines() {
         let line = l?;
         if !(line.trim().starts_with("#") | line.trim().is_empty()) {
-            num_lines+=1;
+            num_lines += 1;
         }
     }
     Ok(num_lines)
