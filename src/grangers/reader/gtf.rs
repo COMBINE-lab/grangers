@@ -3,6 +3,7 @@ use noodles::{gff, gtf};
 use polars::prelude::*;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::str::FromStr;
 use std::{collections::HashMap, path::Path};
 use tracing::info;
 use super::reader_utils::*;
@@ -21,6 +22,26 @@ impl FileType {
             FileType::GTF => GTFESSENTIALATTRIBUTES.as_ref(),
             FileType::GFF => GFFESSENTIALATTRIBUTES.as_ref(),
         }
+    }
+    pub fn is_gtf(&self) -> bool {
+        match self {
+            FileType::GTF => true,
+            FileType::GFF => false,
+        }
+    }
+}
+impl FromStr for FileType {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> anyhow::Result<FileType> {
+        let ft = match s.to_uppercase().as_str() {
+            "gtf" => FileType::GTF,
+            "gff2" => FileType::GTF,
+            "gff" => FileType::GFF,
+            "gff3" => FileType::GFF,
+            _ => anyhow::bail!("Cannot parse the file type."),
+        };
+        Ok(ft)
     }
 }
 
@@ -48,15 +69,15 @@ impl AttributeMode {
 }
 
 #[derive(Clone)]
-struct Attributes {
-    file_type: FileType,
-    essential: HashMap<String, Vec<Option<String>>>,
-    extra: Option<HashMap<String, Vec<Option<String>>>>,
-    tally: usize,
+pub struct Attributes {
+    pub file_type: FileType,
+    pub essential: HashMap<String, Vec<Option<String>>>,
+    pub extra: Option<HashMap<String, Vec<Option<String>>>>,
+    pub tally: usize,
 }
 
 impl Attributes {
-    fn new(mode: AttributeMode, file_type: FileType) -> anyhow::Result<Attributes> {
+    pub fn new(mode: AttributeMode, file_type: FileType) -> anyhow::Result<Attributes> {
         // create essential from an iterator
         let essential = HashMap::from_iter(
             file_type.get_essential()
@@ -139,17 +160,17 @@ impl std::str::FromStr for FeatureType {
 /// polars data frame. If this is no faster than generating
 #[derive(Clone)]
 pub struct GStruct {
-    seqid: Vec<String>,
-    source: Vec<String>,
-    feature_type: Vec<String>,
-    start: Vec<u64>,
-    end: Vec<u64>,
-    score: Vec<Option<f32>>,
-    strand: Vec<Option<String>>,
-    phase: Vec<Option<String>>,
-    attributes: Attributes,
-    comments: Vec<String>,
-    directives: Option<Vec<String>>,
+    pub seqid: Vec<String>,
+    pub source: Vec<String>,
+    pub feature_type: Vec<String>,
+    pub start: Vec<i64>,
+    pub end: Vec<i64>,
+    pub score: Vec<Option<f32>>,
+    pub strand: Vec<Option<String>>,
+    pub phase: Vec<Option<String>>,
+    pub attributes: Attributes,
+    pub comments: Vec<String>,
+    pub directives: Option<Vec<String>>,
 }
 
 // implement GTF reader
@@ -171,8 +192,8 @@ impl GStruct {
                     GStruct::push(&mut self.seqid, r.reference_sequence_name().to_string());
                     GStruct::push(&mut self.source, r.source().to_string());
                     GStruct::push(&mut self.feature_type, r.ty().to_string());
-                    GStruct::push(&mut self.start, r.start().get().to_owned() as u64);
-                    GStruct::push(&mut self.end, r.end().get().to_owned() as u64);
+                    GStruct::push(&mut self.start, r.start().get().to_owned() as i64);
+                    GStruct::push(&mut self.end, r.end().get().to_owned() as i64);
                     GStruct::push(&mut self.score, r.score());
                     GStruct::push(&mut self.strand, if let Some(st) = r.strand() {
                         Some(st.as_ref().to_owned())
@@ -245,8 +266,8 @@ impl GStruct {
                     GStruct::push(&mut self.seqid, r.reference_sequence_name().to_string());
                     GStruct::push(&mut self.source, r.source().to_string());
                     GStruct::push(&mut self.feature_type, r.ty().to_string());
-                    GStruct::push(&mut self.start, r.start().get().to_owned() as u64);
-                    GStruct::push(&mut self.end, r.end().get().to_owned() as u64);
+                    GStruct::push(&mut self.start, r.start().get().to_owned() as i64);
+                    GStruct::push(&mut self.end, r.end().get().to_owned() as i64);
                     GStruct::push(&mut self.score, r.score());
                     GStruct::push(&mut self.strand, match r.strand() {
                         gff::record::Strand::Forward | gff::record::Strand::Reverse => {
@@ -317,7 +338,7 @@ impl GStruct {
         vec.push(val);
     }
 
-    pub fn to_grangers(self) -> anyhow::Result<Grangers> {
+    pub fn into_grangers(self) -> anyhow::Result<Grangers> {
         // create dataframe!
         // we want to make some columns categorical because of this https://docs.rs/polars/latest/polars/docs/performance/index.html
         // fields
@@ -328,7 +349,7 @@ impl GStruct {
             Series::new("source", self.source)
                 .cast(&DataType::Categorical(None))
                 .unwrap(),
-            Series::new("type", self.feature_type)
+            Series::new("feature_type", self.feature_type)
                 .cast(&DataType::Categorical(None))
                 .unwrap(),
             Series::new("start", self.start),
@@ -336,7 +357,8 @@ impl GStruct {
             Series::new("score", self.score),
             Series::new("strand", self.strand)
                 .cast(&DataType::Categorical(None))
-                .unwrap(),
+                .unwrap()
+                ,
             Series::new("phase", self.phase)
                 .cast(&DataType::Categorical(None))
                 .unwrap(),
