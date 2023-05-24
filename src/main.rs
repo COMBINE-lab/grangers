@@ -1,17 +1,20 @@
 use crate::grangers::reader::*;
+use anyhow::{Ok, Context};
 use bedrs::{Container, GenomicIntervalSet, Merge};
 use polars::export::ahash::{HashMap, HashMapExt};
 // use polars::lazy::dsl::*;
 // use polars::lazy::prelude::*;
 use polars;
+use polars::export::rayon::vec;
 use polars::prelude::*;
+use tracing::warn;
 use std::collections::HashSet;
 use std::ops::{Add, Mul, Sub};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, EnvFilter};
 pub mod grangers;
-use crate::grangers::grangers::{Grangers, MergeOption};
+use crate::grangers::grangers::{Grangers, MergeOptions};
 use peak_alloc::PeakAlloc;
 
 #[global_allocator]
@@ -46,7 +49,7 @@ fn main() -> anyhow::Result<()> {
     println!("build grangers in {:?}", duration);
 
     let meta_cols = HashSet::from([String::from("seqnames"), String::from("gene_id"), String::from("transcript_id")]);
-    let mo = MergeOption::new(vec![String::from("seqnames"), String::from("gene_id"), String::from("transcript_id")], false, 0);
+    let mo = MergeOptions::new(vec!["seqnames", "gene_id", "transcript_id"], false, 0);
     let start = Instant::now();
 
     gr.build_lapper(&mo.by)?;
@@ -72,8 +75,8 @@ fn main() -> anyhow::Result<()> {
             seqid: vec![String::from("chr1");9],
             source: vec![String::from("HAVANA");9],
             feature_type: vec![String::from("gene"), String::from("transcript"), String::from("exon"), String::from("exon"), String::from("exon"), String::from("gene"), String::from("transcript"), String::from("exon"), String::from("exon")],
-            start: vec![1010, 101, 101, 121,141, 201, 201, 201, 221],
-            end: vec![1500, 150, 110, 130, 150, 250, 250, 210,250],
+            start: vec![101, 101, 101, 121,141, 201, 201, 201, 221],
+            end: vec![150, 150, 110, 130, 150, 250, 250, 210,250],
             score: vec![Some(10.0);9],
             strand: vec![Some(String::from("+")), Some(String::from("+")), Some(String::from("+")), Some(String::from("+")), Some(String::from("+")), Some(String::from("-")), Some(String::from("-")), Some(String::from("-")), Some(String::from("-"))],
             phase: vec![Some(String::from("0"));9],
@@ -96,20 +99,34 @@ fn main() -> anyhow::Result<()> {
 
     let mut gr = Grangers::from_gstruct(gs)?;
 
-    println!("{:?}", gr.df());
+    println!("{:?}", gr.df().select(["seqnames", "start", "end", "gene_id", "transcript_id"]));
     
-    let mo = MergeOption::default();
+    let mo = MergeOptions::default();
 
-    gr.build_lapper(&mo.by);
+    gr.build_lapper(&mo.by)?;
 
     let mut lapper = gr.lapper().clone().unwrap();
 
     lapper.merge_overlaps();
     
-    println!("{:?}", lapper.intervals);
+    // println!("{:?}", lapper.intervals);
 
+    // check null values
+    let df = gr.df().drop_nulls::<String>(None).with_context(|| format!("Failed when trying to drop null values; Cannot proceed"))?;
 
+    if df.shape() != gr.df().shape() {
+        warn!("Dropped null values from the dataframe");
+    }
 
+    let by = vec![String::from("seqnames"), String::from("gene_id")];
+    let pos = vec![String::from("start"), String::from("end")];
+    let mut selected = by.clone();
+    selected.append(pos.clone().as_mut());
+    let slack = 0;
+    // let mut count = Vec::new();
+    // agg df
+    let new_gr = gr.merge(MergeOptions::default())?;
+    println!("{:?}", new_gr.df());
     // find the best interval crate
     // bed-rs
 

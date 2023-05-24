@@ -419,17 +419,12 @@ impl Grangers {
         Ok(self.clone())
     }
 
-    /// merge the features by the given columns via the `by` argument to generate a new Grangers object.
-    /// *** Argument:
-    /// - `by`: a vector of string representing which group(s) to merge by. Each string should be a valid column name.
-    /// - `ignore_strand`: whether to ignore the strand information when merging.
-    /// - `slack`: the maximum distance between two features to be merged.
-    pub fn merge<I, S>(
-        &mut self,
-        mo: MergeOption,
-    ) -> anyhow::Result<Grangers> {
+    /// Find the gap between features in each group identified by the provided `by` vector.
+    /// As this function will call the `merge` function first, so it takes a `MergeOptions` as the parameter 
+    pub fn gap(&self, merge_option: MergeOptions) -> anyhow::Result<Grangers> {
         // check if the `by` vector contains valid column namess
-        for col_name in mo.by.iter() {
+        let mut by = merge_option.by.clone();
+        for col_name in by.iter() {
             if self.is_column(col_name.as_ref()) {
                 bail!(
                     " `by` contains non-existing column - {}. Cannot proceed",
@@ -437,7 +432,113 @@ impl Grangers {
                 );
             }
         }
-        self.build_lapper(&mo.by)?;
+
+        let mut gr = self.merge(merge_option)?;
+
+        let mut selected = by.clone();
+        selected.append(vec![String::from("start"), String::from("end")].as_mut());
+        let selection = selected.iter().map(|n|col(n.as_str())).collect::<Vec<Expr>>();
+
+        let df = self.df().select(&selected)?
+            .lazy().sort_by_exprs(selection, vec![false; selected.len()], false)
+            .groupby(by.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
+            .agg([
+                all().exclude(["start", "end"]).first(),
+                // process two columns at once
+                // Notice the df is sorted
+                col("start").shift(-1).sub(lit(1)).alias("end"),
+                col("end").shift(1).sub(lit(1)).alias("end"),
+
+            ]).explode(["pos"]).select([
+                col("seqnames"),
+                col("pos").arr().get(lit(0)).alias("start"),
+                col("pos").arr().get(lit(1)).alias("end"),
+                all().exclude(["seqnames", "pos"]),
+                // col("pos").arr().get(lit(2)).alias("count"),
+            ])
+            .collect()?;
+    
+        let gr = Grangers::new(df, self.seqinfo.clone(), self.misc.clone(), None)?;
+        Ok(gr)
+    }
+
+
+    /// merge the features by the given columns via the `by` argument to generate a new Grangers object.
+    /// *** Argument:
+    /// Merge Option: a struct containing the following fields:
+    /// - `by`: a vector of string representing which group(s) to merge by. Each string should be a valid column name.
+    /// - `ignore_strand`: whether to ignore the strand information when merging.
+    /// - `slack`: the maximum distance between two features to be merged.
+    pub fn merge(
+        &self,
+        options: MergeOptions,
+    ) -> anyhow::Result<Grangers> {
+        // check if the `by` vector contains valid column namess
+        for col_name in options.by.iter() {
+            if self.is_column(col_name.as_ref()) {
+                bail!(
+                    " `by` contains non-existing column - {}. Cannot proceed",
+                    col_name
+                );
+            }
+        }
+        self.apply(options.by, options.slack, apply_merge)
+    }
+
+
+    fn apply<F>(&self, 
+        by: Vec::<String>,
+        slack: i64,
+        apply_fn: F
+    ) -> anyhow::Result<Grangers> 
+    where
+        F: Fn(Series, i64) -> Result::<Option<polars::prelude::Series>, PolarsError> 
+            + Copy 
+            + std::marker::Send 
+            + std::marker::Sync 
+            + 'static
+    {
+
+        let mut selected = by.clone();
+        selected.append(vec![String::from("start"), String::from("end")].as_mut());
+        let selection = selected.iter().map(|n|col(n.as_str())).collect::<Vec<Expr>>();
+
+        let df = self.df().select(&selected)?
+            .lazy().sort_by_exprs(selection, vec![false; selected.len()], false)
+            .groupby(by.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
+            .agg([
+                all().exclude(["start", "end"]).first(),
+                // process two columns at once
+                // Notice the df is sorted
+                as_struct(&[col("start"), col("end")]).apply( move |s| apply_fn(s, slack),
+                GetOutput::from_type(DataType::List((DataType::Int64).into()))
+            ).alias("pos")
+            ]).explode(["pos"]).select([
+                col("seqnames"),
+                col("pos").arr().get(lit(0)).alias("start"),
+                col("pos").arr().get(lit(1)).alias("end"),
+                all().exclude(["seqnames", "pos"]),
+                // col("pos").arr().get(lit(2)).alias("count"),
+            ])
+            .collect()?;
+    
+        let gr = Grangers::new(df, self.seqinfo.clone(), self.misc.clone(), None)?;
+        Ok(gr)
+    }
+
+    /// merge the features by the given columns via the `by` argument to generate a new Grangers object.
+    /// *** Argument:
+    /// - `by`: a vector of string representing which group(s) to merge by. Each string should be a valid column name.
+    /// - `ignore_strand`: whether to ignore the strand information when merging.
+    /// - `slack`: the maximum distance between two features to be merged.
+    // TODO: add slack to this function
+    pub fn _lapper_merge(
+        &mut self,
+        by: Vec<String>,
+        _slack: i64
+    ) -> anyhow::Result<Grangers> {
+        
+        self.build_lapper(&by)?;
 
         let mut lapper = if let Some(lapper) = self.lapper.clone() {
             lapper
@@ -451,7 +552,7 @@ impl Grangers {
             info!("Did not find overlapping features. Nothing to merge.")
         }
 
-        let lapper_vecs = LapperVecs::new(&lapper, &mo.by);
+        let lapper_vecs = LapperVecs::new(&lapper, &by);
         let df = lapper_vecs.to_df()?;
         Grangers::new(df, self.seqinfo.clone(), self.misc.clone(), Some(lapper))
     }
@@ -477,6 +578,7 @@ impl Grangers {
             .collect::<Vec<_>>();
 
         // build meta_vec
+        // iterate over the iterator of each selected column
         for row in 0..df.height() {
             for iter in &mut iters {
                 let value = iter
@@ -488,7 +590,7 @@ impl Grangers {
                 if let Some(v) = meta_vec.get_mut(row) {
                     v.push(value);
                 } else {
-                    bail!("meta_vec length is not equal to the dataframe height! Please Reort this bug!")
+                    bail!("meta_vec length is not equal to the dataframe height! Please Report this bug!")
                 }
             }
         }
@@ -631,40 +733,215 @@ impl FlankOption {
     }
 }
 
-pub struct MergeOption {
+/// Options used for the merge function
+/// - by: a vector of string representing which column(s) to merge by. Each string should be a valid column name.
+/// - slack: the maximum distance between two features to be merged.
+/// - output_count: whether to output the count of ranges of the merged features.
+pub struct MergeOptions {
     pub by: Vec<String>,
-    pub slack: usize,
+    pub slack: i64,
 }
 
-impl MergeOption {
-    pub fn default() -> MergeOption {
-        MergeOption {
+impl MergeOptions {
+    pub fn default() -> MergeOptions {
+        MergeOptions {
             by: vec![String::from("seqnames"), String::from("strand")],
             slack: 0,
+
         }
     }
 
-    pub fn new(by: Vec<String>, ignore_strand: bool, slack: usize) -> MergeOption {
+    pub fn new<T: ToString>(by: Vec<T>, ignore_strand: bool, slack: i64) -> MergeOptions {
 
         // avoid duplicated columns
-        let mut by_hash: HashSet<String> = by.into_iter().collect();
+        let mut by_hash: HashSet<String> = by.into_iter().map(|n| n.to_string()).collect();
+
+        if by_hash.take(&String::from("start")).is_some() | by_hash.take(&String::from("end")).is_some() {
+            warn!("The provided `by` vector should not contain the start or end column; Please instantiate it manually if you intend to not include it.")
+        };
         
-        if !ignore_strand {
+        if ignore_strand {
+            if by_hash.take(&String::from("strand")).is_some() {
+                warn!("Remove `strand` from the provided `by` vector as the ignored_strand flag is set. Please instantiate it manually if you intend to not include it.")
+            }
+        } else {
             by_hash.insert(String::from("strand"));
         }
-
-
+        
         // add chromosome name and strand if needed
         if by_hash.insert(String::from("seqnames")) {
             warn!("Added `seqnames` to the provided `by` vector as it is missing. Please instantiate it manually if you intend to not include it.")
         };
 
-        MergeOption {
+        MergeOptions {
             by: by_hash.into_iter().collect(),
             slack,
         }
     }
 }
+
+
+
+fn apply_merge(s: Series, slack: i64,) -> Result::<Option<polars::prelude::Series>, PolarsError> {
+    // get the two columns from the struct
+    let ca: StructChunked = s.struct_()?.clone();
+
+    // get the start and end series
+    let start_series = &ca.fields()[0];
+    let end_series = &ca.fields()[1];
+
+    // downcast the `Series` to their known type and turn them into iterators
+    let mut start_iter = start_series.i64()?.into_iter();
+    let mut end_iter = end_series.i64()?.into_iter();
+
+    // initialize variables for finding groups
+    // we sorted the group, so the most left feature is the first one
+
+    let (mut window_start, mut window_end) = if let (Some(Some(start)),Some(Some(end))) = (start_iter.next(), end_iter.next()) {
+        (start,end)
+    } else {
+        // this should not happen as we dropped all null values
+        // rust will always use anyhow result by default
+        return Result::<Option<polars::prelude::Series>, polars::prelude::PolarsError>::Ok(Some(Series::new_empty("pos", &DataType::List((DataType::Int64).into()))));
+    };
+    // initialize variables for new features
+    let mut out_list: Vec<Series> = Vec::with_capacity(start_series.len());
+    let mut curr_count = 1;
+
+    // iter each feature
+    // we sorted the group, so the most left feature is the first one
+    for (id, (start,end)) in start_iter.zip(end_iter).enumerate() {
+        let (curr_start, curr_end) = if let (Some(start),Some(end)) = (start, end) {
+            (start,end)
+        } else {
+            // rust will always use anyhow result by default
+            return Result::<Option<polars::prelude::Series>, polars::prelude::PolarsError>::Ok(Some(Series::new_empty("pos", &DataType::List((DataType::Int64).into()))));
+        };
+
+        // we know the df is sorted and the window starts from the leftmost feature
+        // we want to check four cases:
+        // 1. the feature is within the window
+        // 2. the feature overlaps the window on the right end
+        // 3. the window is within the feature
+
+        if  ((curr_start - slack) <= window_end) | // case 1 and 2
+            ((curr_start <= window_start) & (curr_end >= window_end)) // case 3
+        { // extend the group
+            // update group start and end 
+            curr_count += 1;
+            // start is sorted so we only need to check end
+            if curr_end > window_end {
+                window_end = curr_end;
+            }
+        } else {
+            out_list.push(Series::new(id.to_string().as_str(), [window_start, window_end]));
+            // out_list.push(Series::new(id.to_string().as_str(), [window_start, window_end, curr_count]));
+
+            window_start = curr_start;
+            window_end = curr_end;
+            curr_count=1;
+        }
+    }
+
+    // Dont forget the last group
+    if curr_count > 1 {
+        out_list.push(Series::new("one more", [window_start, window_end]));
+        // out_list.push(Series::new("one more", [window_start, window_end, curr_count]));
+    }
+
+    let ls = Series::new("pos", 
+        out_list
+    );
+    Result::<Option<polars::prelude::Series>, PolarsError>::Ok(Some(ls))
+}
+
+
+
+
+fn apply_gaps(s: Series, slack: i64) -> Result::<Option<polars::prelude::Series>, PolarsError> {
+    // get the two columns from the struct
+    let ca: StructChunked = s.struct_()?.clone();
+
+    // get the start and end series
+    let start_series = &ca.fields()[0];
+    let end_series = &ca.fields()[1];
+
+    // we have merged this already. so 
+
+    let new_end = start_series.shift(-1) - 1;
+    let 
+    // downcast the `Series` to their known type and turn them into iterators
+    let mut start_iter = start_series.i64()?.into_iter();
+    let mut end_iter = end_series.i64()?.into_iter();
+
+    // initialize variables for finding groups
+    // we sorted the group, so the most left feature is the first one
+
+    let (mut min_start, mut max_end) = if let (Some(Some(start)),Some(Some(end))) = (start_iter.min(), end_iter.max()) {
+        (start,end)
+    } else {
+        // this should not happen as we dropped all null values
+        // rust will always use anyhow result by default
+        return Result::<Option<polars::prelude::Series>, polars::prelude::PolarsError>::Ok(Some(Series::new_empty("pos", &DataType::List((DataType::Int64).into()))));
+    };
+    // initialize variables for new features
+    let mut out_list: Vec<Series> = Vec::with_capacity(start_series.len());
+    let mut curr_count = 1;
+
+    // iter each feature
+    // we sorted the group, so the most left feature is the first one
+    for (id, (start,end)) in start_iter.zip(end_iter).enumerate() {
+        let (curr_start, curr_end) = if let (Some(start),Some(end)) = (start, end) {
+            (start,end)
+        } else {
+            // rust will always use anyhow result by default
+            return Result::<Option<polars::prelude::Series>, polars::prelude::PolarsError>::Ok(Some(Series::new_empty("pos", &DataType::List((DataType::Int64).into()))));
+        };
+
+        // we know the df is sorted and the window starts from the leftmost feature
+        // we want to check four cases:
+        // 1. the feature is within the window
+        // 2. the feature overlaps the window on the right end
+        // 3. the window is within the feature
+
+        if  ((curr_start - slack) <= window_end) | // case 1 and 2
+            ((curr_start <= window_start) & (curr_end >= window_end)) // case 3
+        { // extend the group
+            // update group start and end 
+            curr_count += 1;
+            // start is sorted so we only need to check end
+            if curr_end > window_end {
+                window_end = curr_end;
+            }
+        } else {
+            out_list.push(Series::new(id.to_string().as_str(), [window_start, window_end, curr_count]));
+            // new_start.push(window_start);
+            // new_end.push(window_end);
+            // new_count.push(curr_count);
+
+            window_start = curr_start;
+            window_end = curr_end;
+            curr_count=1;
+        }
+    }
+
+    // Dont forget the last group
+    if curr_count > 1 {
+        out_list.push(Series::new("one more", [window_start, window_end, curr_count]));
+        // new_start.push(window_start);
+        // new_end.push(window_end);
+        // new_count.push(curr_count);
+    }
+
+    // let new_start_series = Series::new("start", new_start);
+    // let new_end_series = Series::new("end", new_end);
+    // let new_count_series = Series::new("count", new_count);
+    let ls = Series::new("pos", 
+        out_list
+    );
+    Result::<Option<polars::prelude::Series>, PolarsError>::Ok(Some(ls))
+}
+
 
 #[cfg(test)]
 mod tests {
