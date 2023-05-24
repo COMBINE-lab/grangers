@@ -1,9 +1,6 @@
 use super::reader_utils::*;
-use crate::grangers::grangers::Grangers;
 use anyhow;
 use noodles::{gff, gtf};
-use polars::prelude::*;
-use polars;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::str::FromStr;
@@ -183,8 +180,8 @@ pub struct GStruct {
     pub strand: Vec<Option<String>>,
     pub phase: Vec<Option<String>>,
     pub attributes: Attributes,
-    pub misc: Option<HashMap<String, Vec<String>>
-    // , polars::export::ahash::RandomState
+    pub misc: Option<
+        HashMap<String, Vec<String>>, // , polars::export::ahash::RandomState
     >,
 }
 
@@ -197,8 +194,7 @@ impl GStruct {
 
         let mut gr = GStruct::new(am, FileType::GTF)?;
         if let Some(misc) = gr.misc.as_mut() {
-        misc
-            .insert(String::from("file_type"), vec![String::from("GTF")]);
+            misc.insert(String::from("file_type"), vec![String::from("GTF")]);
         }
         gr._from_gtf(&mut rdr)?;
         Ok(gr)
@@ -252,11 +248,9 @@ impl GStruct {
                 gtf::Line::Comment(c) => {
                     n_comments += 1;
                     if let Some(misc) = self.misc.as_mut() {
-                        misc
-                            .entry(String::from("comments"))
+                        misc.entry(String::from("comments"))
                             .and_modify(|v| v.push(c.clone()))
                             .or_insert(vec![c]);
-
                     }
                     continue;
                 }
@@ -326,8 +320,7 @@ impl GStruct {
                 gff::Line::Comment(c) => {
                     n_comments += 1;
                     if let Some(misc) = self.misc.as_mut() {
-                        misc
-                            .entry(String::from("comments"))
+                        misc.entry(String::from("comments"))
                             .and_modify(|v| v.push(c.clone()))
                             .or_insert(vec![c]);
                     }
@@ -338,8 +331,7 @@ impl GStruct {
                     // this must be Some
 
                     if let Some(misc) = self.misc.as_mut() {
-                        misc
-                            .entry(String::from("directives"))
+                        misc.entry(String::from("directives"))
                             .and_modify(|v| v.push(dstring.clone()))
                             .or_insert(vec![dstring]);
                     }

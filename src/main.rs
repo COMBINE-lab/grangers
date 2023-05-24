@@ -1,18 +1,11 @@
 use crate::grangers::reader::*;
-use anyhow::{Ok, Context};
-use bedrs::{Container, GenomicIntervalSet, Merge};
-use polars::export::ahash::{HashMap, HashMapExt};
-// use polars::lazy::dsl::*;
-// use polars::lazy::prelude::*;
+use anyhow;
 use polars;
-use polars::export::rayon::vec;
 use polars::prelude::*;
-use tracing::warn;
-use std::collections::HashSet;
-use std::ops::{Add, Mul, Sub};
+use std::ops::Sub;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, EnvFilter};
+// use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, EnvFilter};
 pub mod grangers;
 use crate::grangers::grangers::{Grangers, MergeOptions};
 use peak_alloc::PeakAlloc;
@@ -41,15 +34,22 @@ fn main() -> anyhow::Result<()> {
 
     let gr = Grangers::from_gstruct(gs)?;
     let df = gr.df().clone();
-    let mut df: DataFrame = df.lazy().select([all().exclude(["start"]), col("start").sub(lit(1000000))]).collect()?;
+    let df: DataFrame = df
+        .lazy()
+        .select([all().exclude(["start"]), col("start").sub(lit(1000000))])
+        .collect()?;
     let mut gr = Grangers::new(df, None, None, None)?;
-    
-    println!("{:?}", gr.df().select(["seqnames", "start", "gene_id", "transcript_id"])?.tail(Some(3)));
+
+    println!(
+        "{:?}",
+        gr.df()
+            .select(["seqnames", "start", "gene_id", "transcript_id"])?
+            .tail(Some(3))
+    );
     let duration: Duration = start.elapsed();
     println!("build grangers in {:?}", duration);
 
-    let meta_cols = HashSet::from([String::from("seqnames"), String::from("gene_id"), String::from("transcript_id")]);
-    let mo = MergeOptions::new(vec!["seqnames", "gene_id", "transcript_id"], false, 0);
+    let mo = MergeOptions::new(vec!["seqnames", "gene_id", "transcript_id"], false, 0)?;
     let start = Instant::now();
 
     gr.build_lapper(&mo.by)?;
@@ -57,90 +57,125 @@ fn main() -> anyhow::Result<()> {
     let duration: Duration = start.elapsed();
     println!("build lapper in {:?}", duration);
 
-
     let start = Instant::now();
-    gr = Grangers::flank(gr, 10, None)?;
+    gr = gr.flank(10, None)?;
     let duration: Duration = start.elapsed();
     println!("flank in {:?}", duration);
+    println!("flanked gr {:?}", gr.df().head(Some(5)));
 
     // let duration = start.elapsed();
     // println!("Convert GStruct to Polars using {:?}", duration);
 
     // println!("{:?}",gr.df().head(Some(5)));
     // println!("{:?}",gr.strand()?.equal("+")?);
-
-    let misc_vec = vec![("comments".to_string(), vec!["comment1".to_string(), "comment2".to_string()])];
-
     let mut gs = grangers::reader::GStruct {
-            seqid: vec![String::from("chr1");9],
-            source: vec![String::from("HAVANA");9],
-            feature_type: vec![String::from("gene"), String::from("transcript"), String::from("exon"), String::from("exon"), String::from("exon"), String::from("gene"), String::from("transcript"), String::from("exon"), String::from("exon")],
-            start: vec![101, 101, 101, 121,141, 201, 201, 201, 221],
-            end: vec![150, 150, 110, 130, 150, 250, 250, 210,250],
-            score: vec![Some(10.0);9],
-            strand: vec![Some(String::from("+")), Some(String::from("+")), Some(String::from("+")), Some(String::from("+")), Some(String::from("+")), Some(String::from("-")), Some(String::from("-")), Some(String::from("-")), Some(String::from("-"))],
-            phase: vec![Some(String::from("0"));9],
-            attributes: grangers::reader::gtf::Attributes::new(AttributeMode::Full,FileType::GTF)?,
-            misc: None,
-            // comments: vec!["comment1".to_sring(), "comment2".to_string()],
-            // directives: Some(vec!["directive1".to_string(), "directive2".to_string()]),
+        seqid: vec![String::from("chr1"); 9],
+        source: vec![String::from("HAVANA"); 9],
+        feature_type: vec![
+            String::from("gene"),
+            String::from("transcript"),
+            String::from("exon"),
+            String::from("exon"),
+            String::from("exon"),
+            String::from("gene"),
+            String::from("transcript"),
+            String::from("exon"),
+            String::from("exon"),
+        ],
+        start: vec![101, 101, 101, 121, 141, 201, 201, 201, 221],
+        end: vec![150, 150, 110, 130, 150, 250, 250, 210, 250],
+        score: vec![Some(10.0); 9],
+        strand: vec![
+            Some(String::from("+")),
+            Some(String::from("+")),
+            Some(String::from("+")),
+            Some(String::from("+")),
+            Some(String::from("+")),
+            Some(String::from("-")),
+            Some(String::from("-")),
+            Some(String::from("-")),
+            Some(String::from("-")),
+        ],
+        phase: vec![Some(String::from("0")); 9],
+        attributes: grangers::reader::gtf::Attributes::new(AttributeMode::Full, FileType::GTF)?,
+        misc: None,
+        // comments: vec!["comment1".to_sring(), "comment2".to_string()],
+        // directives: Some(vec!["directive1".to_string(), "directive2".to_string()]),
     };
 
     let gsr = &mut gs;
     gsr.attributes.file_type = FileType::GTF;
-    gsr.attributes.essential.insert(String::from("gene_id"), vec![Some(String::from("g1")),Some(String::from("g1")),Some(String::from("g1")),Some(String::from("g1")),Some(String::from("g1")),Some(String::from("g2")),Some(String::from("g2")),Some(String::from("g2")),Some(String::from("g2"))]);
-    gsr.attributes.essential.insert(String::from("gene_name"), vec![Some(String::from("g1")),Some(String::from("g1")),Some(String::from("g1")),Some(String::from("g1")),Some(String::from("g1")),Some(String::from("g2")),Some(String::from("g2")),Some(String::from("g2")),Some(String::from("g2"))]);
-    gsr.attributes.essential.insert(String::from("transcript_id"), vec![None,Some(String::from("t1")),Some(String::from(String::from("t1"))),Some(String::from("t1")),None,Some(String::from("t2")),Some(String::from("t2")),Some(String::from("t2")),Some(String::from("t2"))]);
+    gsr.attributes.essential.insert(
+        String::from("gene_id"),
+        vec![
+            Some(String::from("g1")),
+            Some(String::from("g1")),
+            Some(String::from("g1")),
+            Some(String::from("g1")),
+            Some(String::from("g1")),
+            Some(String::from("g2")),
+            Some(String::from("g2")),
+            Some(String::from("g2")),
+            Some(String::from("g2")),
+        ],
+    );
+    gsr.attributes.essential.insert(
+        String::from("gene_name"),
+        vec![
+            Some(String::from("g1")),
+            Some(String::from("g1")),
+            Some(String::from("g1")),
+            Some(String::from("g1")),
+            Some(String::from("g1")),
+            Some(String::from("g2")),
+            Some(String::from("g2")),
+            Some(String::from("g2")),
+            Some(String::from("g2")),
+        ],
+    );
+    gsr.attributes.essential.insert(
+        String::from("transcript_id"),
+        vec![
+            None,
+            Some(String::from("t1")),
+            Some(String::from(String::from("t1"))),
+            Some(String::from("t1")),
+            None,
+            Some(String::from("t2")),
+            Some(String::from("t2")),
+            Some(String::from("t2")),
+            Some(String::from("t2")),
+        ],
+    );
 
     if let Some(extra) = &mut gsr.attributes.extra {
-        extra.insert(String::from("gene_version"), vec![Some(String::from("1"));9]);
+        extra.insert(
+            String::from("gene_version"),
+            vec![Some(String::from("1")); 9],
+        );
     }
 
+    let gr = Grangers::from_gstruct(gs)?;
 
-    let mut gr = Grangers::from_gstruct(gs)?;
+    println!(
+        "{:?}",
+        gr.df()
+            .select(["seqnames", "start", "end", "gene_id", "transcript_id"])?
+    );
 
-    println!("{:?}", gr.df().select(["seqnames", "start", "end", "gene_id", "transcript_id"]));
-    
-    let mo = MergeOptions::default();
+    let mut merged_gr = gr.merge(&MergeOptions::new(
+        vec!["seqnames", "gene_id", "transcript_id"],
+        false,
+        0,
+    )?)?;
 
-    gr.build_lapper(&mo.by)?;
+    println!("merged_gr: \n{:?}", merged_gr.df().head(Some(5)));
 
-    let mut lapper = gr.lapper().clone().unwrap();
+    merged_gr.drop_nulls(None)?;
+    println!("drop_nulls: \n{:?}", merged_gr.df().head(Some(5)));
 
-    lapper.merge_overlaps();
-    
-    // println!("{:?}", lapper.intervals);
-
-    // check null values
-    let df = gr.df().drop_nulls::<String>(None).with_context(|| format!("Failed when trying to drop null values; Cannot proceed"))?;
-
-    if df.shape() != gr.df().shape() {
-        warn!("Dropped null values from the dataframe");
-    }
-
-    let by = vec![String::from("seqnames"), String::from("gene_id")];
-    let pos = vec![String::from("start"), String::from("end")];
-    let mut selected = by.clone();
-    selected.append(pos.clone().as_mut());
-    let slack = 0;
-    // let mut count = Vec::new();
-    // agg df
-    let new_gr = gr.merge(MergeOptions::default())?;
-    println!("{:?}", new_gr.df());
-    // find the best interval crate
-    // bed-rs
-
-    // build bedrs struct in 126.878161ms
-    // found 1413205 cluters in posistive strand
-    // merge positive records in 7.945216ms
-    // found 1352764 cluters in negative strand
-    // merge negative records in 7.328224ms
-
-    // COITrees
-
-    // println!("{:?}",gr.df().select(["start, end"]));
-
-    // let start_flags = gr.flank(10, true, true, false)?;
+    let flanked_gr = gr.flank(10, None)?;
+    println!("flanked_gr: \n{:?}", flanked_gr.df().head(Some(5)));
 
     // library(GenomicRanges)
     // gr <- GRanges(
