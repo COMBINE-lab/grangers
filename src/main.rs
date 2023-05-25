@@ -10,6 +10,8 @@ pub mod grangers;
 use crate::grangers::grangers::{Grangers, MergeOptions};
 use peak_alloc::PeakAlloc;
 
+use crate::grangers::FileFormat;
+
 #[global_allocator]
 static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 
@@ -32,13 +34,13 @@ fn main() -> anyhow::Result<()> {
 
     let start = Instant::now();
 
-    let gr = Grangers::from_gstruct(gs)?;
+    let gr = Grangers::from_gstruct(gs, None)?;
     let df = gr.df().clone();
     let df: DataFrame = df
         .lazy()
         .select([all().exclude(["start"]), col("start").sub(lit(1000000))])
         .collect()?;
-    let mut gr = Grangers::new(df, None, None, None)?;
+    let mut gr = Grangers::new(df, None, None, None, None)?;
 
     println!(
         "{:?}",
@@ -97,14 +99,14 @@ fn main() -> anyhow::Result<()> {
             Some(String::from("-")),
         ],
         phase: vec![Some(String::from("0")); 9],
-        attributes: grangers::reader::gtf::Attributes::new(AttributeMode::Full, FileType::GTF)?,
+        attributes: grangers::reader::gtf::Attributes::new(AttributeMode::Full, FileFormat::GTF)?,
         misc: None,
         // comments: vec!["comment1".to_sring(), "comment2".to_string()],
         // directives: Some(vec!["directive1".to_string(), "directive2".to_string()]),
     };
 
     let gsr = &mut gs;
-    gsr.attributes.file_type = FileType::GTF;
+    gsr.attributes.file_type = FileFormat::GTF;
     gsr.attributes.essential.insert(
         String::from("gene_id"),
         vec![
@@ -155,7 +157,7 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    let gr = Grangers::from_gstruct(gs)?;
+    let gr = Grangers::from_gstruct(gs, None)?;
 
     println!(
         "{:?}",
@@ -174,9 +176,11 @@ fn main() -> anyhow::Result<()> {
     merged_gr.drop_nulls(None)?;
     println!("drop_nulls: \n{:?}", merged_gr.df().head(Some(5)));
 
-    let flanked_gr = gr.flank(10, None)?;
+    let mut flanked_gr = gr.flank(10, None)?;
     println!("flanked_gr: \n{:?}", flanked_gr.df().head(Some(5)));
 
+    flanked_gr.extend(10, grangers::grangers::ExtendOption::Both)?;
+    println!("added_gr: \n{:?}", flanked_gr.df().head(Some(5)));
     // library(GenomicRanges)
     // gr <- GRanges(
     //     seqnames = Rle(rep("chr1", 9)),

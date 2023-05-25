@@ -1,5 +1,5 @@
-use super::reader::fasta::SeqInfo;
-use crate::grangers::reader;
+use crate::grangers::reader::fasta::SeqInfo;
+use crate::grangers::{reader};
 use anyhow::{bail, Context};
 use polars::lazy::dsl::col;
 use polars::{lazy::prelude::*, prelude::*, series::Series};
@@ -18,19 +18,26 @@ const ESSENTIAL_FIELDS: [&str; 4] = ["seqnames", "start", "end", "strand"];
 // GTF files are 1-based with closed intervals.
 /// The Grangers struct contains the following fields:
 /// - df: the underlying polars dataframe
-/// - comments: the comments in the GTF file
-/// - chromsize: the chromosome size (set as none before calling `add_chromsize`)
-/// - directives: the directives in the GFF file (set as none for GTF files)
+/// - misc: the additional information
+/// - seqinfo: the reference information
+/// - lapper: the lapper interval tree
+/// 
+/// **Notice** that Granges uses 1-based closed intervals for the ranges.
+/// If your ranges are not like this, when instantiating new Grangers, 
+/// you should use the `interval_type` parameter to help the builder
+/// to convert the ranges to 1-based closed intervals.
 #[derive(Clone)]
 pub struct Grangers {
-    // file_type: Option<reader::FileType>,
+    /// The underlying dataframe
     df: DataFrame,
+    /// The additional information
     misc: Option<HashMap<String, Vec<String>>>,
-    // comments: Option<Vec<String>>,
+    /// The reference information
     seqinfo: Option<SeqInfo>,
-    // directives: Option<Vec<String>>,
-    // attribute_names: Option<Vec<String>>,
+    /// The lapper interval tree
     lapper: Option<Lapper<u64, Vec<String>>>,
+    /// The interval type
+    interval_type: IntervalType,
 }
 
 // IO
@@ -67,25 +74,42 @@ impl Grangers {
     /// - a range dataframe that contain the ranges of the genomic features
     /// - an optional SeqInfo struct contains the reference information (usually chromosome)
     /// - an optional HashMap<String, Vec<String>>> contains additional information.
+    /// - an optional Lapper interval tree
+    /// - an optional IntervalType representing the coordinate system and interval type of the ranges. If passing None, the default 
     /// The datafram should contain the ranges of the genomic features, and the SeqInfo struct should contain the chromosome sizes. The  
     pub fn new(
         mut df: DataFrame,
         seqinfo: Option<SeqInfo>,
         misc: Option<HashMap<String, Vec<String>>>,
         lapper: Option<Lapper<u64, Vec<String>>>,
+        interval_type: Option<IntervalType>,
     ) -> anyhow::Result<Grangers> {
         // validate the dataframe
         Grangers::validate(&mut df)?;
+
+        let interval_type = if interval_type.is_none() {
+            IntervalType::Inclusive(1)
+        } else {
+            interval_type.unwrap()
+        };
+        if interval_type.start_offset() != 0 {
+            df.with_column(df.column("start").unwrap() - interval_type.start_offset())?;
+        }
+
+        if interval_type.end_offset() != 0 {
+            df.with_column(df.column("end").unwrap() - interval_type.end_offset())?;
+        }
 
         Ok(Grangers {
             df,
             misc,
             seqinfo,
             lapper,
+            interval_type,
         })
     }
 
-    pub fn from_gstruct(gstruct: reader::GStruct) -> anyhow::Result<Grangers> {
+    pub fn from_gstruct(gstruct: reader::GStruct, interval_type: Option<IntervalType>) -> anyhow::Result<Grangers> {
         // create dataframe!
         // we want to make some columns categorical because of this https://docs.rs/polars/latest/polars/docs/performance/index.html
         // fields
@@ -119,7 +143,7 @@ impl Grangers {
             }
         }
         let df = DataFrame::new(df_vec)?;
-        let gr = Grangers::new(df, None, gstruct.misc, None)?;
+        let gr = Grangers::new(df, None, gstruct.misc, None, interval_type)?;
         Ok(gr)
     }
 
@@ -131,7 +155,7 @@ impl Grangers {
     pub fn from_gtf(file_path: &std::path::Path, only_essential: bool) -> anyhow::Result<Grangers> {
         let am = reader::AttributeMode::from(!only_essential);
         let gstruct = reader::GStruct::from_gtf(file_path, am)?;
-        let gr = Grangers::from_gstruct(gstruct)?;
+        let gr = Grangers::from_gstruct(gstruct, None)?;
         Ok(gr)
     }
 
@@ -143,7 +167,7 @@ impl Grangers {
     pub fn from_gff(file_path: &std::path::Path, only_essential: bool) -> anyhow::Result<Grangers> {
         let am = reader::AttributeMode::from(!only_essential);
         let gstruct = reader::GStruct::from_gff(file_path, am)?;
-        let gr = Grangers::from_gstruct(gstruct)?;
+        let gr = Grangers::from_gstruct(gstruct, None)?;
         Ok(gr)
     }
 
@@ -161,10 +185,10 @@ impl Grangers {
             )
         })?)?;
         // match self.file_type {
-        //     reader::FileType::GTF => {
+        //     reader::FileFormat::GTF => {
         //         unimplemented!()
         //     }
-        //     reader::FileType::GFF => {
+        //     reader::FileFormat::GFF => {
         //         unimplemented!()
         //     }
         // }
@@ -179,6 +203,11 @@ impl Grangers {
     /// get the reference of the underlying dataframe
     pub fn df(&self) -> &DataFrame {
         &self.df
+    }
+
+    /// get the interval type
+    pub fn interval_type(&self) -> &IntervalType {
+        &self.interval_type
     }
 
     /// get the reference of the seqinfo
@@ -276,6 +305,24 @@ impl Grangers {
         Ok(self.clone())
     }
 
+    /// extend each genomic feature by a given length from the start, end, or both sides.
+    pub fn extend(&mut self, length: i32, extend_option: ExtendOption) -> anyhow::Result<()> {
+        match extend_option {
+            ExtendOption::Start => {
+                self.df.with_column(self.df.column("start")?.clone() - length)?;
+
+            },
+            ExtendOption::End => {
+                self.df.with_column(self.df.column("end")?.clone() + length)?;
+            },
+            ExtendOption::Both => {
+                self.df.with_column(self.df.column("start")?.clone() - length)?;
+                self.df.with_column(self.df.column("end")?.clone() + length)?;
+            },
+        }
+        Ok(())
+    }
+
     /// The function consumes a Grangers object, flank the genomic features of it by a given width, and returns a new Grangers.
     /// The logic for flanking - (from the BiocPy/GenomicRanges)
 
@@ -320,6 +367,7 @@ impl Grangers {
 
     /// Returns:
     ///     Grangers: a new `Grangers` object with the flanked ranges.
+    // flank doesn't not related to interval thing
     pub fn flank(&self, width: i64, option: Option<FlankOption>) -> anyhow::Result<Grangers> {
         let start;
         let both;
@@ -391,6 +439,7 @@ impl Grangers {
             seqinfo: self.seqinfo.clone(),
             misc: self.misc.clone(),
             lapper: self.lapper.clone(),
+            interval_type: self.interval_type.clone(),
         })
     }
 
@@ -434,6 +483,7 @@ impl Grangers {
             seqinfo: gr.seqinfo,
             misc: gr.misc,
             lapper: gr.lapper,
+            interval_type: self.interval_type.clone(),
         })
     }
 
@@ -490,6 +540,7 @@ impl Grangers {
             seqinfo: self.seqinfo.clone(),
             misc: self.misc.clone(),
             lapper: self.lapper.clone(),
+            interval_type: self.interval_type.clone(),
         })
     }
 
@@ -530,6 +581,8 @@ impl Grangers {
         {
             warn!("Found null value(s) in the selected columns. As null will be used for grouping, we recommend dropping all null values by calling gr.drops_nulls() beforehand.")
         }
+
+        // 
 
         // we will do the following
         // 1. sort the dataframe by the `by` columns + start and end columns
@@ -585,7 +638,7 @@ impl Grangers {
     /// - `ignore_strand`: whether to ignore the strand information when merging.
     /// - `slack`: the maximum distance between two features to be merged.
     // TODO: add slack to this function
-    pub fn _lapper_merge(&mut self, by: Vec<String>, _slack: i64) -> anyhow::Result<Grangers> {
+    pub fn lapper_merge(&mut self, by: Vec<String>, _slack: i64) -> anyhow::Result<Grangers> {
         self.build_lapper(&by)?;
 
         let mut lapper = if let Some(lapper) = self.lapper.clone() {
@@ -602,7 +655,13 @@ impl Grangers {
 
         let lapper_vecs = LapperVecs::new(&lapper, &by);
         let df = lapper_vecs.to_df()?;
-        Grangers::new(df, self.seqinfo.clone(), self.misc.clone(), Some(lapper))
+        Ok(Grangers {
+            df,
+            seqinfo: self.seqinfo.clone(),
+            misc: self.misc.clone(),
+            lapper: Some(lapper),
+            interval_type: self.interval_type.clone(),
+        })
     }
 
     /// Instantiate a Lapper struct for interval search and overlap detection
@@ -825,6 +884,7 @@ impl MergeOptions {
 }
 
 fn apply_merge(s: Series, slack: i64) -> Result<Option<polars::prelude::Series>, PolarsError> {
+
     // get the two columns from the struct
     let ca: StructChunked = s.struct_()?.clone();
 
@@ -875,7 +935,7 @@ fn apply_merge(s: Series, slack: i64) -> Result<Option<polars::prelude::Series>,
         // 2. the feature overlaps the window on the right end
         // 3. the window is within the feature
 
-        if ((curr_start - slack) <= window_end) | // case 1 and 2
+        if ((curr_start - slack) <= (window_end)) | // case 1 and 2
             ((curr_start <= window_start) & (curr_end >= window_end))
         // case 3
         {
@@ -916,7 +976,6 @@ fn apply_merge(s: Series, slack: i64) -> Result<Option<polars::prelude::Series>,
 fn apply_gaps(s: Series, _slack: i64) -> Result<Option<polars::prelude::Series>, PolarsError> {
     // get the two columns from the struct
     let ca: StructChunked = s.struct_()?.clone();
-
     // get the start and end series
     let start_series = &ca.fields()[0];
     let end_series = &ca.fields()[1];
@@ -958,12 +1017,76 @@ fn apply_gaps(s: Series, _slack: i64) -> Result<Option<polars::prelude::Series>,
     Result::<Option<polars::prelude::Series>, PolarsError>::Ok(Some(ls))
 }
 
+pub enum ExtendOption {
+    /// Extend the feature to the start
+    Start,
+    /// Extend the feature to the end
+    End,
+    /// Extend the feature to both sides
+    Both,
+}
+
+
+#[derive(Clone, Copy)]
+/// This enum is used for specifying the interval type of the input ranges.\
+/// Each variant takes a `i64` to represent the coordinate system.\
+/// For example, `Inclusive(1)` means 1-based [start,end]. This is also the format used in Grangers.\
+pub enum IntervalType {
+    /// Inclusive interval, e.g. [start, end]. GTF and GFF use this. 
+    Inclusive(i64),
+    /// Exclusive interval, e.g. (start, end). VCF uses this.
+    Exclusive(i64),
+    /// Left inclusive, right exclusive, e.g. [start, end). 
+    LeftInclusive(i64),
+    /// Left exclusive, right inclusive, e.g. (start, end]. BED uses this.
+    RightInclusive(i64),
+}
+
+
+impl IntervalType {
+    /// Get the default interval type, which is 1-based inclusive.
+    pub fn default() -> Self {
+        IntervalType::Inclusive(1)
+    }
+
+    pub fn from<T: ToString>(file_type: T) -> Self {
+        match file_type.to_string().to_lowercase().as_str() {
+
+            "gtf" | "gff" | "bam" | "sam" => IntervalType::Inclusive(1),
+            "bed" => IntervalType::RightInclusive(0),
+            _ => panic!("The file type is not supported"),
+        }
+    }
+    pub fn start_offset(&self) -> i64 {
+        // 1 - c is for coordinate
+        // the other 1 is for exclusive
+        match self {
+            IntervalType::Inclusive(c) => 1 - c,
+            IntervalType::LeftInclusive(c) => 1 - c,
+            IntervalType::RightInclusive(c) => 1 + 1 - c,
+            IntervalType::Exclusive(c) => 1 + 1 - c,
+        }
+    }
+    pub fn end_offset(&self) -> i64 {
+        // 1 - c is for coordinate
+        // -1 is for exclusive
+        match self {
+            IntervalType::Inclusive(c) => 1 - c,
+            IntervalType::LeftInclusive(c) => 1 - c,
+            IntervalType::RightInclusive(c) => -1 + 1 - c,
+            IntervalType::Exclusive(c) => -1 + 1 - c,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // use polars::prelude::*;
 
     use super::*;
-    use crate::gtf::{AttributeMode, Attributes, FileType, GStruct};
+    use crate::gtf::{AttributeMode, Attributes, GStruct};
+
+    use crate::grangers::grangers_utils::FileFormat;
     #[test]
     fn test_graners() {
         // let df = df!(
@@ -981,7 +1104,7 @@ mod tests {
         // ).unwrap();
         // let comments = vec!["comment1".to_string(), "comment2".to_string()];
         // let directives = Some(vec!["directive1".to_string(), "directive2".to_string()]);
-        // let file_type = reader::FileType::GTF;
+        // let file_type = reader::FileFormat::GTF;
 
         let mut gs = GStruct {
             seqid: vec![String::from("chr1"); 9],
@@ -1012,11 +1135,11 @@ mod tests {
                 Some(String::from("-")),
             ],
             phase: vec![Some(String::from("0")); 9],
-            attributes: Attributes::new(AttributeMode::Full, FileType::GTF).unwrap(),
+            attributes: Attributes::new(AttributeMode::Full, FileFormat::GTF).unwrap(),
             misc: Some(HashMap::new()),
         };
         let gsr = &mut gs;
-        gsr.attributes.file_type = FileType::GTF;
+        gsr.attributes.file_type = FileFormat::GTF;
         gsr.attributes.essential.insert(
             String::from("gene_id"),
             vec![
@@ -1066,7 +1189,7 @@ mod tests {
                 vec![Some(String::from("1")); 9],
             );
         }
-        let _gr = Grangers::from_gstruct(gs).unwrap();
+        let _gr = Grangers::from_gstruct(gs, None).unwrap();
 
         // test builder
         // assert_eq!(gr.df(), &df);
@@ -1458,11 +1581,11 @@ mod tests {
                 Some(String::from("-")),
             ],
             phase: vec![Some(String::from("0")); 9],
-            attributes: Attributes::new(AttributeMode::Full, FileType::GTF)?,
+            attributes: Attributes::new(AttributeMode::Full, FileFormat::GTF)?,
             misc: Some(HashMap::new()),
         };
         let gsr = &mut gs;
-        gsr.attributes.file_type = FileType::GTF;
+        gsr.attributes.file_type = FileFormat::GTF;
         gsr.attributes.essential.insert(
             String::from("gene_id"),
             vec![
@@ -1513,7 +1636,12 @@ mod tests {
             );
         }
 
-        let mut gr = Grangers::from_gstruct(gs)?;
+        let gr = Grangers::from_gstruct(gs, None)?;
         Ok(gr)
+    }
+
+    #[test]
+    fn test_merge() {
+
     }
 }

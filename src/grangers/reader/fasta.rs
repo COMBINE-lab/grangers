@@ -1,4 +1,4 @@
-use super::reader_utils::equal_length;
+use crate::grangers::grangers_utils::equal_length;
 use anyhow::bail;
 use noodles::fasta;
 use std::collections::HashMap;
@@ -15,6 +15,36 @@ pub struct SeqInfo {
 }
 
 impl SeqInfo {
+    /// get the seqnames of the genome/reference set
+    pub fn seqnames(&self) -> &Vec<String> {
+        &self.seqnames
+    }
+
+    /// get the seqlengths of the genome/reference set
+    pub fn seqlengths(&self) -> &Option<Vec<usize>> {
+        &self.seqlengths
+    }
+
+    /// get the is_circular of the genome/reference set
+    pub fn is_circular(&self) -> &Option<Vec<bool>> {
+        &self.is_circular
+    }
+
+    /// get the genome of the genome/reference set
+    pub fn genome(&self) -> &Option<String> {
+        &self.genome
+    }
+
+    /// get the extra of the genome/reference set
+    pub fn extra(&self) -> &Option<HashMap<String, Vec<String>>> {
+        &self.extra
+    }
+
+    /// set the seqnames of the genome/reference set
+    pub fn set_seqnames(&mut self, seqnames: Vec<String>) {
+        self.seqnames = seqnames;
+    }
+
     pub fn new(
         seqnames: Vec<String>,
         seqlengths: Option<Vec<usize>>,

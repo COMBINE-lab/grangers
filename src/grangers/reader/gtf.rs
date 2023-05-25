@@ -1,55 +1,10 @@
-use super::reader_utils::*;
 use anyhow;
 use noodles::{gff, gtf};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::str::FromStr;
+use crate::grangers::grangers_utils::FileFormat;
 use std::{collections::HashMap, path::Path};
 use tracing::info;
-
-#[derive(Copy, Clone)]
-pub enum FileType {
-    GTF,
-    GFF,
-}
-
-impl FileType {
-    pub fn get_essential(&self) -> &[&str] {
-        match self {
-            FileType::GTF => GTFESSENTIALATTRIBUTES.as_ref(),
-            FileType::GFF => GFFESSENTIALATTRIBUTES.as_ref(),
-        }
-    }
-    pub fn is_gtf(&self) -> bool {
-        match self {
-            FileType::GTF => true,
-            FileType::GFF => false,
-        }
-    }
-}
-impl FromStr for FileType {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> anyhow::Result<FileType> {
-        let ft = match s.to_uppercase().as_str() {
-            "gtf" => FileType::GTF,
-            "gff2" => FileType::GTF,
-            "gff" => FileType::GFF,
-            "gff3" => FileType::GFF,
-            _ => anyhow::bail!("Cannot parse the file type."),
-        };
-        Ok(ft)
-    }
-}
-
-impl std::fmt::Display for FileType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FileType::GTF => write!(f, "GTF"),
-            FileType::GFF => write!(f, "GFF"),
-        }
-    }
-}
 
 #[derive(Copy, Clone)]
 pub enum AttributeMode {
@@ -76,14 +31,14 @@ impl AttributeMode {
 
 #[derive(Clone)]
 pub struct Attributes {
-    pub file_type: FileType,
+    pub file_type: FileFormat,
     pub essential: HashMap<String, Vec<Option<String>>>,
     pub extra: Option<HashMap<String, Vec<Option<String>>>>,
     pub tally: usize,
 }
 
 impl Attributes {
-    pub fn new(mode: AttributeMode, file_type: FileType) -> anyhow::Result<Attributes> {
+    pub fn new(mode: AttributeMode, file_type: FileFormat) -> anyhow::Result<Attributes> {
         // create essential from an iterator
         let essential = HashMap::from_iter(
             file_type
@@ -192,7 +147,7 @@ impl GStruct {
         let mut rdr: gtf::Reader<BufReader<File>> =
             gtf::Reader::new(BufReader::new(File::open(file_path)?));
 
-        let mut gr = GStruct::new(am, FileType::GTF)?;
+        let mut gr = GStruct::new(am, FileFormat::GTF)?;
         if let Some(misc) = gr.misc.as_mut() {
             misc.insert(String::from("file_type"), vec![String::from("GTF")]);
         }
@@ -270,7 +225,7 @@ impl GStruct {
         // instantiate the struct
         let mut rdr = gff::Reader::new(BufReader::new(File::open(file_path)?));
 
-        let mut gr = GStruct::new(am, FileType::GFF)?;
+        let mut gr = GStruct::new(am, FileFormat::GFF)?;
         gr._from_gff(&mut rdr)?;
         Ok(gr)
     }
@@ -349,8 +304,8 @@ impl GStruct {
 
 // implenment general functions
 impl GStruct {
-    pub fn new(attribute_mode: AttributeMode, file_type: FileType) -> anyhow::Result<GStruct> {
-        let mut gr = GStruct {
+    pub fn new(attribute_mode: AttributeMode, file_type: FileFormat) -> anyhow::Result<GStruct> {
+        let gr = GStruct {
             seqid: Vec::new(),
             source: Vec::new(),
             feature_type: Vec::new(),
@@ -382,7 +337,7 @@ mod tests {
     #[test]
     fn test_from_gtf() {
         let mut rdr = gtf::Reader::new(GTF_RECORD);
-        let mut gr = GStruct::new(AttributeMode::Full, FileType::GTF).unwrap();
+        let mut gr = GStruct::new(AttributeMode::Full, FileFormat::GTF).unwrap();
         gr._from_gtf(&mut rdr).unwrap();
         // check values
         match gr {
@@ -396,7 +351,7 @@ mod tests {
                 strand,
                 phase,
                 attributes,
-                misc,
+                misc: _,
             } => {
                 assert_eq!(seqid, vec![String::from("chr1"); 5]);
                 assert_eq!(source, vec![String::from("HAVANA"); 5]);
@@ -486,7 +441,7 @@ mod tests {
     #[test]
     fn test_from_gff() {
         let mut rdr = gff::Reader::new(GFF_RECORD);
-        let mut gr = GStruct::new(AttributeMode::Full, FileType::GFF).unwrap();
+        let mut gr = GStruct::new(AttributeMode::Full, FileFormat::GFF).unwrap();
         gr._from_gff(&mut rdr).unwrap();
         // check values
         match gr {
@@ -500,7 +455,7 @@ mod tests {
                 strand,
                 phase,
                 attributes,
-                misc,
+                misc: _,
             } => {
                 assert_eq!(seqid, vec![String::from("chr1"); 5]);
                 assert_eq!(source, vec![String::from("HAVANA"); 5]);

@@ -1,5 +1,9 @@
 pub mod grangers;
 pub mod reader;
+mod grangers_utils;
+pub use grangers_utils::FileFormat;
+pub use grangers::Grangers;
+
 // This function traverses the GTF file:
 // - If everything is good, count the # of transcripts for each gene and number of exons for each txp to instantiate the struct
 // - If there is any invalid record, report an error and write a clean_gtf.gtf file.
