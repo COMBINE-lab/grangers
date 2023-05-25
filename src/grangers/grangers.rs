@@ -293,16 +293,17 @@ impl Grangers {
 
 // implement GenomicFeatures for Grangers
 impl Grangers {
-    /// get the intronic sequences of each gene by the "gene_id" attribute.
-    /// This function calls the gaps function internally.
-    pub fn intron_by_gene(&self) -> anyhow::Result<Grangers> {
-        Ok(self.clone())
-    }
+    /// get the intronic sequences of each gene or transcript according to the given column name.
+    /// The `by` parameter should specify the column name of the gene or transcript ID.
+    pub fn introns<T: ToString>(&self, by: T) -> anyhow::Result<Grangers> {
+        let by_string = by.to_string();
+        let by = by_string.as_str();
+        if !self.is_column(by) {
+            anyhow::bail!("The column {} does not exist in the Grangers struct.", by);
+        }
 
-    /// get the intronic sequences of each gene by the "gene_id" attribute.
-    /// This function calls the gaps function internally, so you need to provide .
-    pub fn intron_by_transcript(&self) -> anyhow::Result<Grangers> {
-        Ok(self.clone())
+        let gr = self.gaps(&MergeOptions::new(vec![by], false, 0)?)?;
+        Ok(gr)
     }
 
     /// extend each genomic feature by a given length from the start, end, or both sides.
@@ -935,7 +936,7 @@ fn apply_merge(s: Series, slack: i64) -> Result<Option<polars::prelude::Series>,
         // 2. the feature overlaps the window on the right end
         // 3. the window is within the feature
 
-        if ((curr_start - slack) <= (window_end)) | // case 1 and 2
+        if ((curr_start - slack) <= window_end) | // case 1 and 2
             ((curr_start <= window_start) & (curr_end >= window_end))
         // case 3
         {
