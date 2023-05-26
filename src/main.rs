@@ -1,6 +1,7 @@
 use std::path::PathBuf;
+use std::env;
 use std::time::{Duration, Instant};
-// use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, EnvFilter};
+use tracing_subscriber::prelude::*;
 pub mod grangers;
 // use crate::grangers::{FileFormat, FlankOptions};
 use crate::grangers::{Grangers, IntervalType, MergeOptions};
@@ -11,8 +12,15 @@ use polars::prelude::*;
 static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 
 fn main() -> anyhow::Result<()> {
+    let stdout_log = tracing_subscriber::fmt::layer()
+        .pretty();
+    let subscriber = tracing_subscriber::Registry::default()
+    .with(stdout_log);
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+
+    let args: Vec<String> = env::args().collect();
     let gtf_file = PathBuf::from(
-        "/mnt/scratch4/dongze/af_example_best_practices_book/af_xmpl_run/data/refdata-gex-GRCh38-2020-A/genes/genes.gtf",
+        args.get(1).unwrap()
     );
 
     // let _fasta_file = PathBuf::from(

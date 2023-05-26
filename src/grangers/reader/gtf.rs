@@ -4,6 +4,7 @@ use noodles::{gff, gtf};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::{collections::HashMap, path::Path};
+use flate2::read::GzDecoder;
 use tracing::info;
 
 #[derive(Copy, Clone)]
@@ -143,15 +144,32 @@ pub struct GStruct {
 // implement GTF reader
 impl GStruct {
     pub fn from_gtf<T: AsRef<Path>>(file_path: T, am: AttributeMode) -> anyhow::Result<GStruct> {
-        // instantiate the struct
-        let mut rdr: gtf::Reader<BufReader<File>> =
-            gtf::Reader::new(BufReader::new(File::open(file_path)?));
+        // first, see if the input file path is a gzipped file or not
+        let is_gzipped = if let Some(ext) = file_path.as_ref().extension() {
+            match ext.to_str() {
+                Some("gz") | Some("GZ") => true,
+                _ => false
+            }
+        } else {
+            false
+        };
 
         let mut gr = GStruct::new(am, FileFormat::GTF)?;
         if let Some(misc) = gr.misc.as_mut() {
             misc.insert(String::from("file_type"), vec![String::from("GTF")]);
         }
-        gr._from_gtf(&mut rdr)?;
+
+        let file = File::open(file_path)?;
+        // instantiate the struct
+        if is_gzipped {
+            info!("auto-detected gzipped file - reading via decompression");
+            let mut rdr = gtf::Reader::new( BufReader::new(GzDecoder::new(file)) );
+            gr._from_gtf(&mut rdr)?;
+        } else {
+            let mut rdr = gtf::Reader::new( BufReader::new(file) );
+            gr._from_gtf(&mut rdr)?;
+        }
+
         Ok(gr)
     }
 
@@ -211,13 +229,31 @@ impl GStruct {
 // implement GFF reader
 impl GStruct {
     pub fn from_gff<T: AsRef<Path>>(file_path: T, am: AttributeMode) -> anyhow::Result<GStruct> {
-        // instantiate the struct
-        let mut rdr = gff::Reader::new(BufReader::new(File::open(file_path)?));
+        // first, see if the input file path is a gzipped file or not
+        let is_gzipped = if let Some(ext) = file_path.as_ref().extension() {
+            match ext.to_str() {
+                Some("gz") | Some("GZ") => true,
+                _ => false
+            }
+        } else {
+            false
+        };
 
         let mut gr = GStruct::new(am, FileFormat::GFF)?;
-        gr._from_gff(&mut rdr)?;
+
+        let file = File::open(file_path)?;
+        // instantiate the struct
+        if is_gzipped {
+            info!("auto-detected gzipped file - reading via decompression");
+            let mut rdr = gff::Reader::new( BufReader::new(GzDecoder::new(file)) );
+            gr._from_gff(&mut rdr)?;
+        } else {
+            let mut rdr = gff::Reader::new( BufReader::new(file) );
+            gr._from_gff(&mut rdr)?;
+        }
         Ok(gr)
     }
+
     fn _from_gff<T: BufRead>(&mut self, rdr: &mut gff::Reader<T>) -> anyhow::Result<()> {
         // initiate a reusable hashmap to take the attributes of each record
         let mut rec_attr_hm: HashMap<String, String> = HashMap::with_capacity(100);
