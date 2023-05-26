@@ -58,13 +58,13 @@ impl SeqInfo {
             }
         }
         if let Some(v) = &is_circular {
-            if equal_length(&seqnames, &v) {
+            if equal_length(&seqnames, v) {
                 bail!("seqnames and is_circular have different length; Could not create SeqInfo")
             }
         }
         if let Some(hm) = &extra {
             for (k, v) in hm.iter() {
-                if equal_length(&seqnames, &v) {
+                if equal_length(&seqnames, v) {
                     bail!(
                         "seqnames and {} have different length; Could not create SeqInfo",
                         k

@@ -1,10 +1,11 @@
+use crate::grangers::reader;
 use crate::grangers::reader::fasta::SeqInfo;
-use crate::grangers::{reader};
 use anyhow::{bail, Context};
 use polars::lazy::dsl::col;
 use polars::{lazy::prelude::*, prelude::*, series::Series};
 use rust_lapper::{Interval, Lapper};
 use std::collections::HashMap;
+use std::default::Default;
 use std::fs;
 use std::path::Path;
 use std::{
@@ -21,9 +22,9 @@ const ESSENTIAL_FIELDS: [&str; 4] = ["seqnames", "start", "end", "strand"];
 /// - misc: the additional information
 /// - seqinfo: the reference information
 /// - lapper: the lapper interval tree
-/// 
+///
 /// **Notice** that Granges uses 1-based closed intervals for the ranges.
-/// If your ranges are not like this, when instantiating new Grangers, 
+/// If your ranges are not like this, when instantiating new Grangers,
 /// you should use the `interval_type` parameter to help the builder
 /// to convert the ranges to 1-based closed intervals.
 #[derive(Clone)]
@@ -42,19 +43,17 @@ pub struct Grangers {
 
 // IO
 impl Grangers {
-    /// add one column into the dataframe
+    /// add or replace a column in the dataframe
     // TODO: use this in the unstranded case
     pub fn add_column<T: SeriesTrait>(&mut self, series: Series) -> anyhow::Result<()> {
-        if let Err(_) = self.column("strand") {
-            warn!("The dataframe does not contain the required column `seqnames`; Cannot proceed");
-            self.df.with_column(series)?;
-        }
+        self.df.with_column(series)?;
+
         Ok(())
     }
     fn validate(df: &mut DataFrame) -> anyhow::Result<()> {
         // check essential fields
         for ef in ESSENTIAL_FIELDS {
-            if let Err(_) = df.column(ef) {
+            if df.column(ef).is_err() {
                 bail!(
                     "The dataframe does not contain the required column {}; Cannot proceed",
                     ef
@@ -63,8 +62,8 @@ impl Grangers {
         }
 
         // check strand
-        if let Err(_) = df.column("strand") {
-            warn!("The dataframe does not contain the required column seqnames; Cannot proceed");
+        if df.column("strand").is_err() {
+            warn!("The dataframe does not contain the strand column; adding a null strand column.");
             df.with_column(Series::new_null("strand", df.height()))?;
         }
 
@@ -75,23 +74,18 @@ impl Grangers {
     /// - an optional SeqInfo struct contains the reference information (usually chromosome)
     /// - an optional HashMap<String, Vec<String>>> contains additional information.
     /// - an optional Lapper interval tree
-    /// - an optional IntervalType representing the coordinate system and interval type of the ranges. If passing None, the default 
+    /// - an optional IntervalType representing the coordinate system and interval type of the ranges. If passing None, the default
     /// The datafram should contain the ranges of the genomic features, and the SeqInfo struct should contain the chromosome sizes. The  
     pub fn new(
         mut df: DataFrame,
         seqinfo: Option<SeqInfo>,
         misc: Option<HashMap<String, Vec<String>>>,
         lapper: Option<Lapper<u64, Vec<String>>>,
-        interval_type: Option<IntervalType>,
+        interval_type: IntervalType,
     ) -> anyhow::Result<Grangers> {
         // validate the dataframe
         Grangers::validate(&mut df)?;
 
-        let interval_type = if interval_type.is_none() {
-            IntervalType::Inclusive(1)
-        } else {
-            interval_type.unwrap()
-        };
         if interval_type.start_offset() != 0 {
             df.with_column(df.column("start").unwrap() - interval_type.start_offset())?;
         }
@@ -109,7 +103,10 @@ impl Grangers {
         })
     }
 
-    pub fn from_gstruct(gstruct: reader::GStruct, interval_type: Option<IntervalType>) -> anyhow::Result<Grangers> {
+    pub fn from_gstruct(
+        gstruct: reader::GStruct,
+        interval_type: IntervalType,
+    ) -> anyhow::Result<Grangers> {
         // create dataframe!
         // we want to make some columns categorical because of this https://docs.rs/polars/latest/polars/docs/performance/index.html
         // fields
@@ -155,7 +152,7 @@ impl Grangers {
     pub fn from_gtf(file_path: &std::path::Path, only_essential: bool) -> anyhow::Result<Grangers> {
         let am = reader::AttributeMode::from(!only_essential);
         let gstruct = reader::GStruct::from_gtf(file_path, am)?;
-        let gr = Grangers::from_gstruct(gstruct, None)?;
+        let gr = Grangers::from_gstruct(gstruct, IntervalType::Inclusive(1))?;
         Ok(gr)
     }
 
@@ -167,7 +164,7 @@ impl Grangers {
     pub fn from_gff(file_path: &std::path::Path, only_essential: bool) -> anyhow::Result<Grangers> {
         let am = reader::AttributeMode::from(!only_essential);
         let gstruct = reader::GStruct::from_gff(file_path, am)?;
-        let gr = Grangers::from_gstruct(gstruct, None)?;
+        let gr = Grangers::from_gstruct(gstruct, IntervalType::Inclusive(1))?;
         Ok(gr)
     }
 
@@ -223,6 +220,12 @@ impl Grangers {
     /// get the mutable reference to the seqinfo
     pub fn seqinfo_mut(&mut self) -> Option<&mut SeqInfo> {
         self.seqinfo.as_mut()
+    }
+
+    /// sort the dataframe
+    pub fn sort_df_by<T>(&mut self, by: &[&str], descending: Vec<bool>) -> anyhow::Result<()> {
+        self.df.sort(by, descending)?;
+        Ok(())
     }
 }
 
@@ -301,25 +304,114 @@ impl Grangers {
         if !self.is_column(by) {
             anyhow::bail!("The column {} does not exist in the Grangers struct.", by);
         }
+        // we requires that the "feature_type" column exists, which
+        // defines the type of each genomic feature, i.e., gene, transcript, exon, UTR etc
+        if !self.is_column("feature_type") {
+            anyhow::bail!("The column feature_type does not exist in the Grangers struct. This is required for identifying exon records. Cannot proceed");
+        }
 
-        let gr = self.gaps(&MergeOptions::new(vec![by], false, 0)?)?;
-        Ok(gr)
+        let mo = MergeOptions::new(vec![by], false, 1)?;
+        let mut gr = self.clone();
+
+        // polars way to subset
+        let anyvalue_exon = AnyValue::Utf8("exon");
+
+        gr.df = gr.df.filter(
+            &gr.df
+                .column("feature_name")?
+                .iter()
+                .map(|f| f == AnyValue::Utf8("exon"))
+                .collect(),
+        )?;
+        gr.df = gr.df.filter(
+            &gr.df
+                .column("feature_type")?
+                .iter()
+                .map(|f| f.eq(&anyvalue_exon))
+                .collect(),
+        )?;
+
+        gr.gaps(&mo)
     }
 
     /// extend each genomic feature by a given length from the start, end, or both sides.
-    pub fn extend(&mut self, length: i32, extend_option: ExtendOption) -> anyhow::Result<()> {
-        match extend_option {
-            ExtendOption::Start => {
-                self.df.with_column(self.df.column("start")?.clone() - length)?;
+    pub fn extend(
+        &mut self,
+        length: i32,
+        extend_option: &ExtendOption,
+        ignore_strand: bool,
+    ) -> anyhow::Result<()> {
+        // if contains null value in strand, we cannot do strand-specific extension
+        if (!ignore_strand) & (extend_option != &ExtendOption::Both)
+            && self.column("strand")?.is_null().any()
+                | self
+                    .column("strand")?
+                    .unique()?
+                    .is_in(&Series::new("missing strand", ["*"]))?
+                    .any()
+        {
+            bail!("The strand column contains null values. Please remove them first or set ignore_strand to true.")
+        }
 
-            },
-            ExtendOption::End => {
-                self.df.with_column(self.df.column("end")?.clone() + length)?;
-            },
-            ExtendOption::Both => {
-                self.df.with_column(self.df.column("start")?.clone() - length)?;
-                self.df.with_column(self.df.column("end")?.clone() + length)?;
-            },
+        if let ExtendOption::Both = extend_option {
+            self.df
+                .with_column(self.df.column("start")?.clone() - length)?;
+            self.df
+                .with_column(self.df.column("end")?.clone() + length)?;
+            return Ok(());
+        }
+
+        if ignore_strand {
+            match extend_option {
+                ExtendOption::Start => {
+                    self.df
+                        .with_column(self.df.column("start")?.clone() - length)?;
+                    return Ok(());
+                }
+                ExtendOption::End => {
+                    self.df
+                        .with_column(self.df.column("end")?.clone() + length)?;
+                    return Ok(());
+                }
+                _ => {}
+            }
+        } else {
+            let mut df = self.df().select(["start", "end", "strand"])?;
+            df = df
+                .lazy()
+                .with_columns([
+                    // we first consider the start site
+                    // when the strand is + and extend from start, or the strand is - and extend from end, we extend the start site
+                    when(
+                        col("strand")
+                            .eq(lit("+"))
+                            .eq(lit(extend_option == &ExtendOption::Start))
+                            .or(col("strand")
+                                .eq(lit("-"))
+                                .eq(lit(extend_option == &ExtendOption::End))),
+                    )
+                    .then(col("start").sub(lit(length)))
+                    .otherwise(col("start"))
+                    .alias("start"),
+                    // then the end site
+                    // when the strand is - and extend from start, or the strand is + and extend from end, we extend the end site
+                    when(
+                        col("strand")
+                            .eq(lit("-"))
+                            .eq(lit(extend_option == &ExtendOption::Start))
+                            .or(col("strand")
+                                .eq(lit("+"))
+                                .eq(lit(extend_option == &ExtendOption::End))),
+                    )
+                    .then(col("end").add(lit(length)))
+                    .otherwise(col("end"))
+                    .alias("end"),
+                ])
+                .collect()?;
+
+            // Then we update df
+            self.df.with_column(df.column("start")?.clone())?;
+            self.df.with_column(df.column("end")?.clone())?;
         }
         Ok(())
     }
@@ -369,14 +461,14 @@ impl Grangers {
     /// Returns:
     ///     Grangers: a new `Grangers` object with the flanked ranges.
     // flank doesn't not related to interval thing
-    pub fn flank(&self, width: i64, option: Option<FlankOption>) -> anyhow::Result<Grangers> {
+    pub fn flank(&self, width: i64, options: Option<FlankOption>) -> anyhow::Result<Grangers> {
         let start;
         let both;
         let ignore_strand;
-        if let Some(option) = option {
-            start = option.start;
-            both = option.both;
-            ignore_strand = option.ignore_strand;
+        if let Some(options) = options {
+            start = options.start;
+            both = options.both;
+            ignore_strand = options.ignore_strand;
         } else {
             start = true;
             both = false;
@@ -440,7 +532,7 @@ impl Grangers {
             seqinfo: self.seqinfo.clone(),
             misc: self.misc.clone(),
             lapper: self.lapper.clone(),
-            interval_type: self.interval_type.clone(),
+            interval_type: self.interval_type,
         })
     }
 
@@ -468,7 +560,7 @@ impl Grangers {
     pub fn gaps(&self, options: &MergeOptions) -> anyhow::Result<Grangers> {
         // check if the `by` vector contains valid column namess
         for col_name in options.by.iter() {
-            if self.is_column(col_name.as_ref()) {
+            if !self.is_column(col_name.as_ref()) {
                 bail!(
                     " `by` contains non-existing column - {}. Cannot proceed",
                     col_name
@@ -477,15 +569,9 @@ impl Grangers {
         }
 
         // merge returns a sorted and merged Grangers object
-        let gr = self.merge(&options)?;
-        let df = Grangers::apply(self.df(), &options.by, 0, options.ignore_strand, apply_gaps)?;
-        Ok(Grangers {
-            df,
-            seqinfo: gr.seqinfo,
-            misc: gr.misc,
-            lapper: gr.lapper,
-            interval_type: self.interval_type.clone(),
-        })
+        let mut gr = self.merge(options)?;
+        gr.df = Grangers::apply(gr.df(), &options.by, 0, options.ignore_strand, apply_gaps)?;
+        Ok(gr)
     }
 
     /// drop rows inplace that contain missing values in the given columns.
@@ -517,7 +603,10 @@ impl Grangers {
     /// Merge Option: a struct containing the following fields:
     /// - `by`: a vector of string representing which group(s) to merge by. Each string should be a valid column name.
     /// - `ignore_strand`: whether to ignore the strand information when merging.
-    /// - `slack`: the maximum distance between two features to be merged.
+    /// - `slack`: the maximum distance between two features to be merged. Slack should be a non-negative integer. For example we have three intervals, [1,2], [3,4] and [4,5]
+    ///     - slack = 1 means [1,2] and [3,4] will be merged as [1,4]. This is the default (and desired) behavior unless you do not want to merge adjacent intervals.
+    ///     - slack = 0 means [1,2] and [2,3] will stay separated although they are adjacent.
+    ///     - slack=2 means[1,2] and [4,5] will be merged though there is a base [3,3] in between that separate them. The slack here is equivalent to the `min.gapwidth` argument in the GenomicRanges::reduce() function in R.
     pub fn merge(&self, options: &MergeOptions) -> anyhow::Result<Grangers> {
         // check if the `by` vector contains valid column namess
         for col_name in options.by.iter() {
@@ -541,13 +630,13 @@ impl Grangers {
             seqinfo: self.seqinfo.clone(),
             misc: self.misc.clone(),
             lapper: self.lapper.clone(),
-            interval_type: self.interval_type.clone(),
+            interval_type: self.interval_type,
         })
     }
 
     fn apply<F>(
         df: &DataFrame,
-        by: &Vec<String>,
+        by: &[String],
         slack: i64,
         ignore_strand: bool,
         apply_fn: F,
@@ -560,13 +649,30 @@ impl Grangers {
             + 'static,
     {
         // we take the selected columns and add two more columns: start and end
-        let mut selected = by.clone();
+        let mut selected = by.to_owned();
         selected.append(vec![String::from("start"), String::from("end")].as_mut());
         // make the thing as polars friendly
-        let selection = selected
+        // let selection = selected
+        //     .iter()
+        //     .map(|n| col(n.as_str()))
+        //     .collect::<Vec<Expr>>();
+
+        // we want to sort the dataframe by first essential columns, then the rest columns in `by`
+        let mut sorted_by_exprs_essential = vec![col("seqnames"), col("start"), col("end")];
+        let mut sorted_by_desc_essential = vec![false, false, true];
+        if !ignore_strand {
+            sorted_by_exprs_essential.push(col("strand"));
+            sorted_by_desc_essential.push(false);
+        }
+        let mut sorted_by_exprs: Vec<Expr> = by
             .iter()
+            .filter(|&n| !sorted_by_exprs_essential.contains(&col(n.as_str())))
             .map(|n| col(n.as_str()))
-            .collect::<Vec<Expr>>();
+            .collect();
+
+        let mut sorted_by_desc = vec![false; sorted_by_exprs.len()];
+        sorted_by_exprs.extend(sorted_by_exprs_essential);
+        sorted_by_desc.extend(sorted_by_desc_essential);
 
         // the lazy API of polars takes the ownership of a dataframe
         let mut df = df.select(&selected)?;
@@ -583,8 +689,6 @@ impl Grangers {
             warn!("Found null value(s) in the selected columns. As null will be used for grouping, we recommend dropping all null values by calling gr.drops_nulls() beforehand.")
         }
 
-        // 
-
         // we will do the following
         // 1. sort the dataframe by the `by` columns + start and end columns
         // 2. group by the `by` columns
@@ -593,7 +697,7 @@ impl Grangers {
         // 5. drop the intermediate columns
         df = df
             .lazy()
-            .sort_by_exprs(selection, vec![false; selected.len()], false)
+            .sort_by_exprs(&sorted_by_exprs, &sorted_by_desc, false)
             .groupby(by.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
             .agg([
                 all().exclude(["start", "end"]).first(),
@@ -604,6 +708,7 @@ impl Grangers {
                         move |s| apply_fn(s, slack),
                         GetOutput::from_type(DataType::List((DataType::Int64).into())),
                     )
+                    // .arr().sort(SortOptions {descending: if ignore_strand {false} else {col("strand").first() == lit("-")}, nulls_last: false, multithreaded:  true})
                     .alias("pos"),
             ])
             .explode(["pos"])
@@ -618,6 +723,7 @@ impl Grangers {
                     "ignore_strand"
                 }),
             ])
+            .drop_nulls(Some(vec![cols(["start", "end"])]))
             .with_column(lit(NULL).cast(DataType::Utf8).alias("ignore_strand"))
             .select([all().exclude(["pos", "ignore_strand"])])
             // rearrange the columns
@@ -628,6 +734,8 @@ impl Grangers {
                 col("strand"),
                 all().exclude(["seqnames", "start", "end", "strand"]),
             ])
+            // groupby is multithreaded, so the order do not preserve
+            .sort_by_exprs(sorted_by_exprs, sorted_by_desc, false)
             .collect()?;
 
         Ok(df)
@@ -655,13 +763,13 @@ impl Grangers {
         }
 
         let lapper_vecs = LapperVecs::new(&lapper, &by);
-        let df = lapper_vecs.to_df()?;
+        let df = lapper_vecs.into_df()?;
         Ok(Grangers {
             df,
             seqinfo: self.seqinfo.clone(),
             misc: self.misc.clone(),
             lapper: Some(lapper),
-            interval_type: self.interval_type.clone(),
+            interval_type: self.interval_type,
         })
     }
 
@@ -709,7 +817,7 @@ impl Grangers {
             .i64()?
             .min()
             .with_context(|| {
-                format!("Could not get the minimum start value from the dataframe.")
+                "Could not get the minimum start value from the dataframe.".to_string()
             })?;
 
         // let mut pos_vec = vec![Vec::<String>::with_capacity(meta_cols.len()); df.height()];
@@ -790,7 +898,7 @@ impl LapperVecs {
         }
     }
 
-    fn to_df(self) -> anyhow::Result<DataFrame> {
+    fn into_df(self) -> anyhow::Result<DataFrame> {
         let mut df_vec = vec![
             Series::new("start", self.start),
             Series::new("end", self.end),
@@ -812,15 +920,17 @@ pub struct FlankOption {
     ignore_strand: bool,
 }
 
-impl FlankOption {
-    pub fn default() -> FlankOption {
+impl Default for FlankOption {
+    fn default() -> FlankOption {
         FlankOption {
             start: true,
             both: false,
             ignore_strand: false,
         }
     }
+}
 
+impl FlankOption {
     pub fn new(start: bool, both: bool, ignore_strand: bool) -> FlankOption {
         FlankOption {
             start,
@@ -832,7 +942,7 @@ impl FlankOption {
 
 /// Options used for the merge function
 /// - by: a vector of string representing which column(s) to merge by. Each string should be a valid column name.
-/// - slack: the maximum distance between two features to be merged.
+/// - slack: the minimum gap between two features to be merged. It should be a positive integer.
 /// - output_count: whether to output the count of ranges of the merged features.
 pub struct MergeOptions {
     pub by: Vec<String>,
@@ -840,15 +950,17 @@ pub struct MergeOptions {
     pub ignore_strand: bool,
 }
 
-impl MergeOptions {
-    pub fn default() -> MergeOptions {
+impl Default for MergeOptions {
+    fn default() -> MergeOptions {
         MergeOptions {
             by: vec![String::from("seqnames"), String::from("strand")],
-            slack: 0,
+            slack: 1,
             ignore_strand: false,
         }
     }
+}
 
+impl MergeOptions {
     pub fn new<T: ToString>(
         by: Vec<T>,
         ignore_strand: bool,
@@ -856,6 +968,10 @@ impl MergeOptions {
     ) -> anyhow::Result<MergeOptions> {
         // avoid duplicated columns
         let mut by_hash: HashSet<String> = by.into_iter().map(|n| n.to_string()).collect();
+
+        if slack < 1 {
+            warn!("It usually doen't make sense to set a non-positive slack.")
+        }
 
         if by_hash.take(&String::from("start")).is_some()
             | by_hash.take(&String::from("end")).is_some()
@@ -865,7 +981,7 @@ impl MergeOptions {
 
         if ignore_strand {
             if by_hash.take(&String::from("strand")).is_some() {
-                warn!("Remove `strand` from the provided `by` vector as the ignored_strand flag is set. Please instantiate it manually if you intend to not include it.")
+                warn!("Remove `strand` from the provided `by` vector as the ignored_strand flag is set.")
             }
         } else {
             by_hash.insert(String::from("strand"));
@@ -885,7 +1001,6 @@ impl MergeOptions {
 }
 
 fn apply_merge(s: Series, slack: i64) -> Result<Option<polars::prelude::Series>, PolarsError> {
-
     // get the two columns from the struct
     let ca: StructChunked = s.struct_()?.clone();
 
@@ -900,20 +1015,20 @@ fn apply_merge(s: Series, slack: i64) -> Result<Option<polars::prelude::Series>,
     // initialize variables for finding groups
     // we sorted the group, so the most left feature is the first one
 
-    let (mut window_start, mut window_end) = if let (Some(Some(start)), Some(Some(end))) =
-        (start_iter.next(), end_iter.next())
-    {
-        (start, end)
-    } else {
-        // this should not happen as we dropped all null values
-        // rust will always use anyhow result by default
-        return Result::<Option<polars::prelude::Series>, polars::prelude::PolarsError>::Ok(Some(
-            Series::new_empty("pos", &DataType::List((DataType::Int64).into())),
-        ));
-    };
+    let (mut window_start, mut window_end) =
+        if let (Some(Some(start)), Some(Some(end))) = (start_iter.next(), end_iter.next()) {
+            (start, end)
+        } else {
+            // this should not happen as we dropped all null values
+            // rust will always use anyhow result by default
+            return Result::<Option<polars::prelude::Series>, PolarsError>::Ok(None);
+
+            // return Result::<Option<polars::prelude::Series>, polars::prelude::PolarsError>::Ok(Some(
+            //     Series::new_empty("pos", &DataType::List((DataType::Int64).into())),
+            // ));
+        };
     // initialize variables for new features
     let mut out_list: Vec<Series> = Vec::with_capacity(start_series.len());
-    let mut curr_count = 1;
 
     // iter each feature
     // we sorted the group, so the most left feature is the first one
@@ -922,11 +1037,11 @@ fn apply_merge(s: Series, slack: i64) -> Result<Option<polars::prelude::Series>,
             (start, end)
         } else {
             // rust will always use anyhow result by default
-            return Result::<Option<polars::prelude::Series>, polars::prelude::PolarsError>::Ok(
-                Some(Series::new_empty(
-                    "pos",
-                    &DataType::List((DataType::Int64).into()),
-                )),
+            return Result::<Option<polars::prelude::Series>, polars::prelude::PolarsError>::Err(
+                polars::prelude::PolarsError::ComputeError(
+                    "Found missing value in the start or end column. This should not happen."
+                        .into(),
+                ),
             );
         };
 
@@ -942,29 +1057,24 @@ fn apply_merge(s: Series, slack: i64) -> Result<Option<polars::prelude::Series>,
         {
             // extend the group
             // update group start and end
-            curr_count += 1;
             // start is sorted so we only need to check end
             if curr_end > window_end {
                 window_end = curr_end;
             }
         } else {
+            // if window_start >= window_end {
             out_list.push(Series::new(
                 id.to_string().as_str(),
                 [window_start, window_end],
             ));
-            // out_list.push(Series::new(id.to_string().as_str(), [window_start, window_end, curr_count]));
-
+            // }
             window_start = curr_start;
             window_end = curr_end;
-            curr_count = 1;
         }
     }
 
     // Dont forget the last group
-    if curr_count > 1 {
-        out_list.push(Series::new("one more", [window_start, window_end]));
-        // out_list.push(Series::new("one more", [window_start, window_end, curr_count]));
-    }
+    out_list.push(Series::new("one more", [window_start, window_end]));
 
     let ls = Series::new("pos", out_list);
     Result::<Option<polars::prelude::Series>, PolarsError>::Ok(Some(ls))
@@ -980,6 +1090,18 @@ fn apply_gaps(s: Series, _slack: i64) -> Result<Option<polars::prelude::Series>,
     // get the start and end series
     let start_series = &ca.fields()[0];
     let end_series = &ca.fields()[1];
+
+    // if we have only one feature, we return an empty list
+    if start_series.len() == 1 {
+        // return an empty list
+        return Result::<Option<polars::prelude::Series>, PolarsError>::Ok(Some(
+            Series::new_empty("pos", &DataType::List((DataType::Int64).into())),
+        ));
+
+        // return Result::<Option<polars::prelude::Series>, PolarsError>::Ok(Some(
+        //     Series::new_empty("pos", &DataType::List((DataType::Int64).into())),
+        // ));
+    }
 
     // downcast the `Series` to their known type and turn them into iterators
     let mut start_iter = start_series.i64()?.into_iter();
@@ -1003,21 +1125,22 @@ fn apply_gaps(s: Series, _slack: i64) -> Result<Option<polars::prelude::Series>,
             (prev_feat_end + 1, next_feat_start - 1)
         } else {
             // rust will always use anyhow result by default
-            return Result::<Option<polars::prelude::Series>, polars::prelude::PolarsError>::Ok(
-                Some(Series::new_empty(
-                    "pos",
-                    &DataType::List((DataType::Int64).into()),
-                )),
+            return Result::<Option<polars::prelude::Series>, polars::prelude::PolarsError>::Err(
+                polars::prelude::PolarsError::ComputeError(
+                    "Found missing value in the start or end column. This should not happen."
+                        .into(),
+                ),
             );
         };
 
         out_list.push(Series::new(id.to_string().as_str(), [gap_start, gap_end]));
     }
 
-    let ls = Series::new("pos", out_list);
+    let ls = Series::new("pos", out_list).cast(&DataType::List((DataType::Int64).into()))?;
     Result::<Option<polars::prelude::Series>, PolarsError>::Ok(Some(ls))
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ExtendOption {
     /// Extend the feature to the start
     Start,
@@ -1027,32 +1150,30 @@ pub enum ExtendOption {
     Both,
 }
 
-
 #[derive(Clone, Copy)]
 /// This enum is used for specifying the interval type of the input ranges.\
 /// Each variant takes a `i64` to represent the coordinate system.\
 /// For example, `Inclusive(1)` means 1-based [start,end]. This is also the format used in Grangers.\
 pub enum IntervalType {
-    /// Inclusive interval, e.g. [start, end]. GTF and GFF use this. 
+    /// Inclusive interval, e.g. [start, end]. GTF and GFF use this.
     Inclusive(i64),
     /// Exclusive interval, e.g. (start, end). VCF uses this.
     Exclusive(i64),
-    /// Left inclusive, right exclusive, e.g. [start, end). 
+    /// Left inclusive, right exclusive, e.g. [start, end).
     LeftInclusive(i64),
     /// Left exclusive, right inclusive, e.g. (start, end]. BED uses this.
     RightInclusive(i64),
 }
 
-
-impl IntervalType {
-    /// Get the default interval type, which is 1-based inclusive.
-    pub fn default() -> Self {
+impl Default for IntervalType {
+    fn default() -> Self {
         IntervalType::Inclusive(1)
     }
+}
 
+impl IntervalType {
     pub fn from<T: ToString>(file_type: T) -> Self {
         match file_type.to_string().to_lowercase().as_str() {
-
             "gtf" | "gff" | "bam" | "sam" => IntervalType::Inclusive(1),
             "bed" => IntervalType::RightInclusive(0),
             _ => panic!("The file type is not supported"),
@@ -1085,7 +1206,7 @@ mod tests {
     // use polars::prelude::*;
 
     use super::*;
-    use crate::gtf::{AttributeMode, Attributes, GStruct};
+    use crate::grangers::reader::gtf::{AttributeMode, Attributes, GStruct};
 
     use crate::grangers::grangers_utils::FileFormat;
     #[test]
@@ -1190,7 +1311,7 @@ mod tests {
                 vec![Some(String::from("1")); 9],
             );
         }
-        let _gr = Grangers::from_gstruct(gs, None).unwrap();
+        let _gr = Grangers::from_gstruct(gs, IntervalType::Inclusive(1)).unwrap();
 
         // test builder
         // assert_eq!(gr.df(), &df);
@@ -1637,12 +1758,356 @@ mod tests {
             );
         }
 
-        let gr = Grangers::from_gstruct(gs, None)?;
+        let gr = Grangers::from_gstruct(gs, IntervalType::Inclusive(1))?;
         Ok(gr)
     }
 
     #[test]
     fn test_merge() {
+        let df = df!(
+            "seqnames" => ["chr1", "chr1", "chr1", "chr1", "chr1", "chr2", "chr2"],
+            "start" => [1i64, 5, 1, 11, 22, 1, 5],
+            "end" => [10i64, 10, 10, 20, 30, 10, 30],
+            "strand"=> ["+", "+", "-", "-", "-", "+", "-"],
+            "gene_id" => ["g1", "g1", "g2", "g2", "g2", "g3", "g4"],
+        )
+        .unwrap();
 
+        let gr = Grangers::new(df, None, None, None, IntervalType::Inclusive(1)).unwrap();
+        // println!("gr: {:?}", gr.df());
+        let mo = MergeOptions::new(vec!["seqnames", "gene_id"], false, 1).unwrap();
+
+        // default setting
+        let merged_gr: Grangers = gr.merge(&mo).unwrap();
+        // println!("merged_gr: {:?}", merged_gr.df());
+        let start: Vec<i64> = vec![1i64, 1, 22, 1, 5];
+        let end: Vec<i64> = vec![10i64, 20, 30, 10, 30];
+        assert_eq!(
+            merged_gr
+                .start()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            start
+        );
+        assert_eq!(
+            merged_gr
+                .end()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            end
+        );
+
+        // test ignore strand
+        let mo = MergeOptions::new(vec!["seqnames"], true, 1).unwrap();
+
+        let merged_gr = gr.merge(&mo).unwrap();
+        // println!("merged_gr: {:?}", merged_gr.df());
+        let start: Vec<i64> = vec![1i64, 22, 1];
+        let end: Vec<i64> = vec![20i64, 30, 30];
+        assert_eq!(
+            merged_gr
+                .start()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            start
+        );
+        assert_eq!(
+            merged_gr
+                .end()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            end
+        );
+
+        // slack=0
+        // test ignore strand
+        let mo = MergeOptions::new(vec!["seqnames", "gene_id"], false, 0).unwrap();
+
+        let merged_gr: Grangers = gr.merge(&mo).unwrap();
+        // println!("merged_gr: {:?}", merged_gr.df());
+        let start: Vec<i64> = vec![1i64, 1, 11, 22, 1, 5];
+        let end: Vec<i64> = vec![10i64, 10, 20, 30, 10, 30];
+        assert_eq!(
+            merged_gr
+                .start()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            start
+        );
+        assert_eq!(
+            merged_gr
+                .end()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            end
+        );
+
+        // slack=2
+
+        // test ignore strand
+        let mo = MergeOptions::new(vec!["seqnames", "gene_id"], false, 2).unwrap();
+
+        let merged_gr: Grangers = gr.merge(&mo).unwrap();
+        // println!("merged_gr: {:?}", merged_gr.df());
+        let start: Vec<i64> = vec![1i64, 1, 1, 5];
+        let end: Vec<i64> = vec![10i64, 30, 10, 30];
+        assert_eq!(
+            merged_gr
+                .start()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            start
+        );
+        assert_eq!(
+            merged_gr
+                .end()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            end
+        );
+    }
+
+    #[test]
+    fn test_gaps() {
+        let df = df!(
+            "seqnames" => ["chr1", "chr1", "chr1", "chr1", "chr1", "chr2", "chr2"],
+            "start" => [1i64, 12, 1, 5, 22, 1, 5],
+            "end" => [10i64, 20, 10, 20, 30, 10, 30],
+            "strand"=> ["+", "+", "+", "+", "+", "+", "-"],
+            "gene_id" => ["g1", "g1", "g2", "g2", "g2", "g3", "g4"],
+        )
+        .unwrap();
+
+        let gr = Grangers::new(df, None, None, None, IntervalType::Inclusive(1)).unwrap();
+        // println!("gr: {:?}", gr.df());
+        let mo = MergeOptions::new(vec!["seqnames", "gene_id"], false, 1).unwrap();
+
+        // default setting
+        let gr1: Grangers = gr.gaps(&mo).unwrap();
+        // println!("gr1: {:?}", gr1.df());
+        let start: Vec<i64> = vec![11i64, 21];
+        let end: Vec<i64> = vec![11i64, 21];
+        assert_eq!(
+            gr1.start()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            start
+        );
+        assert_eq!(
+            gr1.end()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            end
+        );
+    }
+
+    #[test]
+    fn test_extend() {
+        let df = df!(
+            "seqnames" => ["chr1", "chr1"],
+            "start" => [1i64, 50],
+            "end" => [10i64, 60],
+            "strand"=> ["+", "-"],
+            "gene_id" => ["g1", "g2"],
+        )
+        .unwrap();
+
+        let gr = Grangers::new(df, None, None, None, IntervalType::Inclusive(1)).unwrap();
+        println!("gr: {:?}", gr.df());
+
+        // extend from start stranded
+        let mut gr1 = gr.clone();
+        gr1.extend(5, &ExtendOption::Start, false).unwrap();
+        println!("gr1: {:?}", gr1.df());
+        let start: Vec<i64> = vec![-4i64, 50];
+        let end: Vec<i64> = vec![10i64, 65];
+        assert_eq!(
+            gr1.start()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            start
+        );
+        assert_eq!(
+            gr1.end()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            end
+        );
+
+        // extend from start unstranded
+        let mut gr1 = gr.clone();
+        gr1.extend(5, &ExtendOption::Start, true).unwrap();
+        println!("gr1: {:?}", gr1.df());
+        let start: Vec<i64> = vec![-4i64, 45];
+        let end: Vec<i64> = vec![10i64, 60];
+        assert_eq!(
+            gr1.start()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            start
+        );
+        assert_eq!(
+            gr1.end()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            end
+        );
+
+        // extend from end stranded
+        let mut gr1 = gr.clone();
+        gr1.extend(5, &ExtendOption::End, false).unwrap();
+        println!("gr1: {:?}", gr1.df());
+        let start: Vec<i64> = vec![1i64, 45];
+        let end: Vec<i64> = vec![15i64, 60];
+        assert_eq!(
+            gr1.start()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            start
+        );
+        assert_eq!(
+            gr1.end()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            end
+        );
+
+        // extend from start unstranded
+        let mut gr1 = gr.clone();
+        gr1.extend(5, &ExtendOption::End, true).unwrap();
+        println!("gr1: {:?}", gr1.df());
+        let start: Vec<i64> = vec![1i64, 50];
+        let end: Vec<i64> = vec![15i64, 65];
+        assert_eq!(
+            gr1.start()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            start
+        );
+        assert_eq!(
+            gr1.end()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            end
+        );
+
+        // extend from both
+        let mut gr1 = gr.clone();
+        gr1.extend(5, &ExtendOption::Both, true).unwrap();
+        println!("gr1: {:?}", gr1.df());
+        let start: Vec<i64> = vec![-4i64, 45];
+        let end: Vec<i64> = vec![15i64, 65];
+        assert_eq!(
+            gr1.start()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            start
+        );
+        assert_eq!(
+            gr1.end()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            end
+        );
     }
 }

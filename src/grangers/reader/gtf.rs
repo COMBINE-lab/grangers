@@ -1,8 +1,8 @@
+use crate::grangers::grangers_utils::FileFormat;
 use anyhow;
 use noodles::{gff, gtf};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use crate::grangers::grangers_utils::FileFormat;
 use std::{collections::HashMap, path::Path};
 use tracing::info;
 
@@ -177,21 +177,10 @@ impl GStruct {
                     GStruct::push(&mut self.score, r.score());
                     GStruct::push(
                         &mut self.strand,
-                        if let Some(st) = r.strand() {
-                            Some(st.as_ref().to_owned())
-                        } else {
-                            None
-                        },
+                        r.strand().map(|st| st.as_ref().to_owned()),
                     );
 
-                    GStruct::push(
-                        &mut self.phase,
-                        if let Some(ph) = r.frame() {
-                            Some(ph.to_string())
-                        } else {
-                            None
-                        },
-                    );
+                    GStruct::push(&mut self.phase, r.frame().map(|ph| ph.to_string()));
 
                     // parse attributes
                     rec_attr_hm.clear();
@@ -256,14 +245,7 @@ impl GStruct {
                             _ => None,
                         },
                     );
-                    GStruct::push(
-                        &mut self.phase,
-                        if let Some(ph) = r.phase() {
-                            Some(ph.to_string())
-                        } else {
-                            None
-                        },
-                    );
+                    GStruct::push(&mut self.phase, r.phase().map(|ph| ph.to_string()));
 
                     // parse attributes
                     rec_attr_hm.clear();

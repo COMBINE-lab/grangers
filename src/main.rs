@@ -1,23 +1,17 @@
-use crate::grangers::reader::*;
-use anyhow;
-use polars;
-use polars::prelude::*;
-use std::ops::Sub;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 // use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, EnvFilter};
 pub mod grangers;
-use crate::grangers::grangers::{Grangers, MergeOptions};
-use peak_alloc::PeakAlloc;
-
 use crate::grangers::FileFormat;
+use crate::grangers::{Grangers, IntervalType, MergeOptions};
+use peak_alloc::PeakAlloc;
 
 #[global_allocator]
 static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 
 fn main() -> anyhow::Result<()> {
     let gtf_file = PathBuf::from(
-        "/mnt/scratch4/dongze/af_example_best_practices_book/af_xmpl_run/data/refdata-gex-GRCh38-2020-A/genes/genes.gtf.toy",
+        "/mnt/scratch4/dongze/af_example_best_practices_book/af_xmpl_run/data/refdata-gex-GRCh38-2020-A/genes/genes.gtf",
     );
 
     // let _fasta_file = PathBuf::from(
@@ -27,31 +21,15 @@ fn main() -> anyhow::Result<()> {
     // println!("Start parsing GTF");
     // let start = Instant::now();
 
-    let gs = gtf::GStruct::from_gtf(gtf_file.as_path(), gtf::AttributeMode::Full)?;
-
     // let duration: Duration = start.elapsed();
     // println!("Parsed GTF in {:?}", duration);
 
     let start = Instant::now();
-
-    let gr = Grangers::from_gstruct(gs, None)?;
-    let df = gr.df().clone();
-    let df: DataFrame = df
-        .lazy()
-        .select([all().exclude(["start"]), col("start").sub(lit(1000000))])
-        .collect()?;
-    let mut gr = Grangers::new(df, None, None, None, None)?;
-
-    println!(
-        "{:?}",
-        gr.df()
-            .select(["seqnames", "start", "gene_id", "transcript_id"])?
-            .tail(Some(3))
-    );
+    let mut gr = Grangers::from_gtf(gtf_file.as_path(), true)?;
     let duration: Duration = start.elapsed();
     println!("build grangers in {:?}", duration);
 
-    let mo = MergeOptions::new(vec!["seqnames", "gene_id", "transcript_id"], false, 0)?;
+    let mo = MergeOptions::new(vec!["seqnames", "gene_id", "transcript_id"], false, 1)?;
     let start = Instant::now();
 
     gr.build_lapper(&mo.by)?;
@@ -60,17 +38,20 @@ fn main() -> anyhow::Result<()> {
     println!("build lapper in {:?}", duration);
 
     let start = Instant::now();
+
+    let introns = gr.introns("gene_id")?;
+
+    let duration: Duration = start.elapsed();
+    println!("find introns in {:?}", duration);
+    println!("introns: \n{:?}", introns.df().head(Some(5)));
+
+    let start = Instant::now();
     gr = gr.flank(10, None)?;
     let duration: Duration = start.elapsed();
     println!("flank in {:?}", duration);
     println!("flanked gr {:?}", gr.df().head(Some(5)));
 
-    // let duration = start.elapsed();
-    // println!("Convert GStruct to Polars using {:?}", duration);
-
-    // println!("{:?}",gr.df().head(Some(5)));
-    // println!("{:?}",gr.strand()?.equal("+")?);
-    let mut gs = grangers::reader::GStruct {
+    let mut gs = grangers::GStruct {
         seqid: vec![String::from("chr1"); 9],
         source: vec![String::from("HAVANA"); 9],
         feature_type: vec![
@@ -99,10 +80,11 @@ fn main() -> anyhow::Result<()> {
             Some(String::from("-")),
         ],
         phase: vec![Some(String::from("0")); 9],
-        attributes: grangers::reader::gtf::Attributes::new(AttributeMode::Full, FileFormat::GTF)?,
+        attributes: grangers::reader::gtf::Attributes::new(
+            grangers::reader::AttributeMode::Full,
+            FileFormat::GTF,
+        )?,
         misc: None,
-        // comments: vec!["comment1".to_sring(), "comment2".to_string()],
-        // directives: Some(vec!["directive1".to_string(), "directive2".to_string()]),
     };
 
     let gsr = &mut gs;
@@ -140,7 +122,7 @@ fn main() -> anyhow::Result<()> {
         vec![
             None,
             Some(String::from("t1")),
-            Some(String::from(String::from("t1"))),
+            Some(String::from("t1")),
             Some(String::from("t1")),
             None,
             Some(String::from("t2")),
@@ -157,18 +139,27 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    let gr = Grangers::from_gstruct(gs, None)?;
+    let mut gr = Grangers::from_gstruct(gs, IntervalType::Inclusive(1))?;
 
     println!(
         "{:?}",
-        gr.df()
-            .select(["seqnames", "start", "end", "gene_id", "transcript_id"])?
+        gr.df().select([
+            "seqnames",
+            "start",
+            "end",
+            "strand",
+            "gene_id",
+            "transcript_id"
+        ])?
     );
+
+    gr.drop_nulls(None)?;
+    println!("drop_nulls: \n{:?}", gr.df().head(Some(5)));
 
     let mut merged_gr = gr.merge(&MergeOptions::new(
         vec!["seqnames", "gene_id", "transcript_id"],
-        false,
-        0,
+        true,
+        1,
     )?)?;
 
     println!("merged_gr: \n{:?}", merged_gr.df().head(Some(5)));
@@ -179,8 +170,9 @@ fn main() -> anyhow::Result<()> {
     let mut flanked_gr = gr.flank(10, None)?;
     println!("flanked_gr: \n{:?}", flanked_gr.df().head(Some(5)));
 
-    flanked_gr.extend(10, grangers::grangers::ExtendOption::Both)?;
+    flanked_gr.extend(10, &grangers::ExtendOption::Both, false)?;
     println!("added_gr: \n{:?}", flanked_gr.df().head(Some(5)));
+
     // library(GenomicRanges)
     // gr <- GRanges(
     //     seqnames = Rle(rep("chr1", 9)),
