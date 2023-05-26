@@ -1,4 +1,6 @@
 # grangers
 
 ## TODO:
-- Ability to detect if a file streaming is gzipped 
+- Extract intervals
+- Allow / simplify parsing of GTF vs GFF3
+- Allow gzipped fasta input
