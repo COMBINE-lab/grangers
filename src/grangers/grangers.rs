@@ -304,6 +304,7 @@ impl Grangers {
         if !self.is_column(by) {
             anyhow::bail!("The column {} does not exist in the Grangers struct.", by);
         }
+
         // we requires that the "feature_type" column exists, which
         // defines the type of each genomic feature, i.e., gene, transcript, exon, UTR etc
         if !self.is_column("feature_type") {
@@ -318,18 +319,15 @@ impl Grangers {
 
         gr.df = gr.df.filter(
             &gr.df
-                .column("feature_name")?
-                .iter()
-                .map(|f| f == AnyValue::Utf8("exon"))
-                .collect(),
-        )?;
-        gr.df = gr.df.filter(
-            &gr.df
                 .column("feature_type")?
                 .iter()
                 .map(|f| f.eq(&anyvalue_exon))
                 .collect(),
         )?;
+
+        if gr.column(by)?.null_count() > 0 {
+            anyhow::bail!("The column {} contains null values in the by features. Cannot use it to find introns. Please fill up null values and try again.", by);
+        }
 
         gr.gaps(&mo)
     }
@@ -453,7 +451,7 @@ impl Grangers {
     /// Args:
     ///     gr: A `Grangers` object.
     ///     width (int): width to flank by.
-    ///     flank_option (FlankOption, optional):
+    ///     flank_option (FlankOptions, optional):
     ///     start (bool, optional): only flank starts?. Defaults to True.
     ///     both (bool, optional): both starts and ends?. Defaults to False.
     ///     ignoreStrand (bool, optional): ignore strand?. Defaults to False.
@@ -461,7 +459,7 @@ impl Grangers {
     /// Returns:
     ///     Grangers: a new `Grangers` object with the flanked ranges.
     // flank doesn't not related to interval thing
-    pub fn flank(&self, width: i64, options: Option<FlankOption>) -> anyhow::Result<Grangers> {
+    pub fn flank(&self, width: i64, options: Option<FlankOptions>) -> anyhow::Result<Grangers> {
         let start;
         let both;
         let ignore_strand;
@@ -526,6 +524,13 @@ impl Grangers {
                     )
                     .alias("end"),
             ])
+            .select(
+                self.df()
+                    .get_column_names()
+                    .iter()
+                    .map(|x| col(x))
+                    .collect::<Vec<Expr>>(),
+            )
             .collect()?;
         Ok(Grangers {
             df,
@@ -617,9 +622,15 @@ impl Grangers {
                 );
             }
         }
+        let mut by = options.by.to_owned();
+        if !options.ignore_strand & !options.by.contains(&"strand".to_string()) {
+            warn!("ignore_strand is set to false. Added `strand` to the `by` vector");
+            by.push(String::from("strand"));
+        }
+
         let df = Grangers::apply(
             self.df(),
-            &options.by,
+            &by,
             options.slack,
             options.ignore_strand,
             apply_merge,
@@ -664,6 +675,7 @@ impl Grangers {
             sorted_by_exprs_essential.push(col("strand"));
             sorted_by_desc_essential.push(false);
         }
+
         let mut sorted_by_exprs: Vec<Expr> = by
             .iter()
             .filter(|&n| !sorted_by_exprs_essential.contains(&col(n.as_str())))
@@ -914,15 +926,15 @@ impl LapperVecs {
 }
 
 #[derive(Copy, Clone)]
-pub struct FlankOption {
+pub struct FlankOptions {
     start: bool,
     both: bool,
     ignore_strand: bool,
 }
 
-impl Default for FlankOption {
-    fn default() -> FlankOption {
-        FlankOption {
+impl Default for FlankOptions {
+    fn default() -> FlankOptions {
+        FlankOptions {
             start: true,
             both: false,
             ignore_strand: false,
@@ -930,9 +942,9 @@ impl Default for FlankOption {
     }
 }
 
-impl FlankOption {
-    pub fn new(start: bool, both: bool, ignore_strand: bool) -> FlankOption {
-        FlankOption {
+impl FlankOptions {
+    pub fn new(start: bool, both: bool, ignore_strand: bool) -> FlankOptions {
+        FlankOptions {
             start,
             both,
             ignore_strand,
@@ -1094,9 +1106,7 @@ fn apply_gaps(s: Series, _slack: i64) -> Result<Option<polars::prelude::Series>,
     // if we have only one feature, we return an empty list
     if start_series.len() == 1 {
         // return an empty list
-        return Result::<Option<polars::prelude::Series>, PolarsError>::Ok(Some(
-            Series::new_empty("pos", &DataType::List((DataType::Int64).into())),
-        ));
+        return Result::<Option<polars::prelude::Series>, PolarsError>::Ok(None);
 
         // return Result::<Option<polars::prelude::Series>, PolarsError>::Ok(Some(
         //     Series::new_empty("pos", &DataType::List((DataType::Int64).into())),
@@ -1204,6 +1214,8 @@ impl IntervalType {
 #[cfg(test)]
 mod tests {
     // use polars::prelude::*;
+
+    use polars::export::rayon::vec;
 
     use super::*;
     use crate::grangers::reader::gtf::{AttributeMode, Attributes, GStruct};
@@ -1325,7 +1337,7 @@ mod tests {
         let gr = get_toy_gr().unwrap();
 
         // test flank with default parameters
-        let fo = FlankOption {
+        let fo = FlankOptions {
             start: true,
             both: false,
             ignore_strand: false,
@@ -1383,7 +1395,7 @@ mod tests {
         );
 
         // test flank with default parameters and both=true
-        let fo = FlankOption {
+        let fo = FlankOptions {
             start: true,
             both: true,
             ignore_strand: false,
@@ -1441,7 +1453,7 @@ mod tests {
         );
 
         // test flank with start = false
-        let fo = FlankOption {
+        let fo = FlankOptions {
             start: false,
             both: false,
             ignore_strand: false,
@@ -1499,7 +1511,7 @@ mod tests {
         );
 
         // test flank with start = false and both=true
-        let fo = FlankOption {
+        let fo = FlankOptions {
             start: false,
             both: true,
             ignore_strand: false,
@@ -1557,7 +1569,7 @@ mod tests {
         );
 
         // test flank with ignore_strand: true
-        let fo = FlankOption {
+        let fo = FlankOptions {
             start: true,
             both: false,
             ignore_strand: true,
@@ -1615,7 +1627,7 @@ mod tests {
         );
 
         // test flank with ignore_strand: true and both=true
-        let fo = FlankOption {
+        let fo = FlankOptions {
             start: true,
             both: true,
             ignore_strand: true,
@@ -1953,6 +1965,8 @@ mod tests {
 
     #[test]
     fn test_extend() {
+        let say = false;
+
         let df = df!(
             "seqnames" => ["chr1", "chr1"],
             "start" => [1i64, 50],
@@ -1963,12 +1977,18 @@ mod tests {
         .unwrap();
 
         let gr = Grangers::new(df, None, None, None, IntervalType::Inclusive(1)).unwrap();
-        println!("gr: {:?}", gr.df());
+
+        if say {
+            println!("gr: {:?}", gr.df());
+        }
 
         // extend from start stranded
         let mut gr1 = gr.clone();
         gr1.extend(5, &ExtendOption::Start, false).unwrap();
-        println!("gr1: {:?}", gr1.df());
+
+        if say {
+            println!("gr1: {:?}", gr1.df());
+        }
         let start: Vec<i64> = vec![-4i64, 50];
         let end: Vec<i64> = vec![10i64, 65];
         assert_eq!(
@@ -1997,7 +2017,10 @@ mod tests {
         // extend from start unstranded
         let mut gr1 = gr.clone();
         gr1.extend(5, &ExtendOption::Start, true).unwrap();
-        println!("gr1: {:?}", gr1.df());
+
+        if say {
+            println!("gr1: {:?}", gr.df());
+        }
         let start: Vec<i64> = vec![-4i64, 45];
         let end: Vec<i64> = vec![10i64, 60];
         assert_eq!(
@@ -2026,7 +2049,10 @@ mod tests {
         // extend from end stranded
         let mut gr1 = gr.clone();
         gr1.extend(5, &ExtendOption::End, false).unwrap();
-        println!("gr1: {:?}", gr1.df());
+
+        if say {
+            println!("gr1: {:?}", gr.df());
+        }
         let start: Vec<i64> = vec![1i64, 45];
         let end: Vec<i64> = vec![15i64, 60];
         assert_eq!(
@@ -2055,7 +2081,10 @@ mod tests {
         // extend from start unstranded
         let mut gr1 = gr.clone();
         gr1.extend(5, &ExtendOption::End, true).unwrap();
-        println!("gr1: {:?}", gr1.df());
+
+        if say {
+            println!("gr1: {:?}", gr.df());
+        }
         let start: Vec<i64> = vec![1i64, 50];
         let end: Vec<i64> = vec![15i64, 65];
         assert_eq!(
@@ -2084,7 +2113,10 @@ mod tests {
         // extend from both
         let mut gr1 = gr.clone();
         gr1.extend(5, &ExtendOption::Both, true).unwrap();
-        println!("gr1: {:?}", gr1.df());
+
+        if say {
+            println!("gr1: {:?}", gr.df());
+        }
         let start: Vec<i64> = vec![-4i64, 45];
         let end: Vec<i64> = vec![15i64, 65];
         assert_eq!(
@@ -2108,6 +2140,99 @@ mod tests {
                 .map(|x| x.unwrap())
                 .collect::<Vec<i64>>(),
             end
+        );
+    }
+
+    #[test]
+    fn test_intorons() {
+        let say = true;
+
+        let df = df!(
+            "seqnames" => ["chr1", "chr1", "chr1", "chr1", "chr1", "chr1", "chr1"],
+            "feature_type" => ["gene", "transcript", "exon", "exon", "transcript", "exon", "exon"],
+            "start" => [1i64, 1, 1, 71, 71, 71, 101],
+            "end" => [200i64, 80, 20, 80, 150, 80, 150],
+            "strand"=> ["+", "+", "+", "+", "+", "+", "+"],
+            "gene_id" => ["g1", "g1", "g1", "g1", "g1", "g1", "g1"],
+            "transcript_id" => [None, Some("t1"), Some("t1"), Some("t1"), Some("t2"), Some("t2"), Some("t2")],
+        )
+        .unwrap();
+
+        let gr = Grangers::new(df, None, None, None, IntervalType::Inclusive(1)).unwrap();
+        if say {
+            println!("gr: {:?}", gr.df());
+        }
+
+        // extend from both
+        let gr1 = gr.introns("gene_id").unwrap();
+        if say {
+            println!("gr1: {:?}", gr1.df());
+        }
+        let start: Vec<i64> = vec![21i64, 81];
+        let end: Vec<i64> = vec![70i64, 100];
+        assert_eq!(
+            gr1.start()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            start
+        );
+        assert_eq!(
+            gr1.end()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            end
+        );
+
+        // extend from both
+        let gr1 = gr.introns("transcript_id").unwrap();
+        if say {
+            println!("gr1: {:?}", gr1.df());
+        }
+        let start: Vec<i64> = vec![21i64, 81];
+        let end: Vec<i64> = vec![70i64, 100];
+        let tid = vec![String::from("t1"), String::from("t2")];
+        assert_eq!(
+            gr1.start()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            start
+        );
+        assert_eq!(
+            gr1.end()
+                .unwrap()
+                .i64()
+                .unwrap()
+                .to_vec()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<i64>>(),
+            end
+        );
+
+        assert_eq!(
+            gr1.column("transcript_id")
+                .unwrap()
+                .utf8()
+                .unwrap()
+                .into_iter()
+                .map(|x| x.unwrap().to_string())
+                .collect::<Vec<String>>(),
+            tid
         );
     }
 }

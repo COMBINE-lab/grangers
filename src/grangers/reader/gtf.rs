@@ -44,12 +44,12 @@ impl Attributes {
             file_type
                 .get_essential()
                 .iter()
-                .map(|s| (s.to_string(), Vec::new())),
+                .map(|s| (s.to_string(), Vec::with_capacity(1_0000))),
         );
 
         // if in full mode, create extra
         let extra = if mode.is_full() {
-            Some(HashMap::new())
+            Some(HashMap::with_capacity(100))
         } else {
             None
         };
@@ -223,7 +223,6 @@ impl GStruct {
         let mut rec_attr_hm: HashMap<String, String> = HashMap::with_capacity(100);
         let mut n_comments = 0usize;
         let mut n_records = 0usize;
-
         // parse the file
         for l in rdr.lines() {
             let line = l?;
@@ -288,14 +287,14 @@ impl GStruct {
 impl GStruct {
     pub fn new(attribute_mode: AttributeMode, file_type: FileFormat) -> anyhow::Result<GStruct> {
         let gr = GStruct {
-            seqid: Vec::new(),
-            source: Vec::new(),
-            feature_type: Vec::new(),
-            start: Vec::new(),
-            end: Vec::new(),
-            score: Vec::new(),
-            strand: Vec::new(),
-            phase: Vec::new(),
+            seqid: Vec::with_capacity(1_0000),
+            source: Vec::with_capacity(1_0000),
+            feature_type: Vec::with_capacity(1_0000),
+            start: Vec::with_capacity(1_0000),
+            end: Vec::with_capacity(1_0000),
+            score: Vec::with_capacity(1_0000),
+            strand: Vec::with_capacity(1_0000),
+            phase: Vec::with_capacity(1_0000),
             attributes: Attributes::new(attribute_mode, file_type)?,
             misc: Some(HashMap::new()),
         };
@@ -306,6 +305,10 @@ impl GStruct {
     // TODO: might need a better generic type
     fn push<T: std::fmt::Debug + Clone>(vec: &mut Vec<T>, val: T) {
         vec.push(val);
+    }
+
+    pub fn append<T: ToString + Clone>(vec: &mut Vec<T>, patch: &mut Vec<T>) {
+        vec.append(patch);
     }
 }
 
