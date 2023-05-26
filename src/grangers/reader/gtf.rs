@@ -1,5 +1,6 @@
-use crate::grangers::grangers_utils::FileFormat;
+use crate::grangers::grangers_utils::{is_gzipped, FileFormat};
 use anyhow;
+use flate2::bufread::GzDecoder;
 use noodles::{gff, gtf};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -143,15 +144,23 @@ pub struct GStruct {
 // implement GTF reader
 impl GStruct {
     pub fn from_gtf<T: AsRef<Path>>(file_path: T, am: AttributeMode) -> anyhow::Result<GStruct> {
-        // instantiate the struct
-        let mut rdr: gtf::Reader<BufReader<File>> =
-            gtf::Reader::new(BufReader::new(File::open(file_path)?));
-
         let mut gr = GStruct::new(am, FileFormat::GTF)?;
         if let Some(misc) = gr.misc.as_mut() {
             misc.insert(String::from("file_type"), vec![String::from("GTF")]);
         }
-        gr._from_gtf(&mut rdr)?;
+
+        let file = File::open(file_path)?;
+        let mut inner_rdr = BufReader::new(file);
+        // instantiate the struct
+        if is_gzipped(&mut inner_rdr)? {
+            info!("auto-detected gzipped file - reading via decompression");
+            let mut rdr = gtf::Reader::new(BufReader::new(GzDecoder::new(inner_rdr)));
+            gr._from_gtf(&mut rdr)?;
+        } else {
+            let mut rdr = gtf::Reader::new(inner_rdr);
+            gr._from_gtf(&mut rdr)?;
+        }
+
         Ok(gr)
     }
 
@@ -211,13 +220,22 @@ impl GStruct {
 // implement GFF reader
 impl GStruct {
     pub fn from_gff<T: AsRef<Path>>(file_path: T, am: AttributeMode) -> anyhow::Result<GStruct> {
-        // instantiate the struct
-        let mut rdr = gff::Reader::new(BufReader::new(File::open(file_path)?));
-
         let mut gr = GStruct::new(am, FileFormat::GFF)?;
-        gr._from_gff(&mut rdr)?;
+
+        let file = File::open(file_path)?;
+        let mut inner_rdr = BufReader::new(file);
+        // instantiate the struct
+        if is_gzipped(&mut inner_rdr)? {
+            info!("auto-detected gzipped file - reading via decompression");
+            let mut rdr = gff::Reader::new(BufReader::new(GzDecoder::new(inner_rdr)));
+            gr._from_gff(&mut rdr)?;
+        } else {
+            let mut rdr = gff::Reader::new(inner_rdr);
+            gr._from_gff(&mut rdr)?;
+        }
         Ok(gr)
     }
+
     fn _from_gff<T: BufRead>(&mut self, rdr: &mut gff::Reader<T>) -> anyhow::Result<()> {
         // initiate a reusable hashmap to take the attributes of each record
         let mut rec_attr_hm: HashMap<String, String> = HashMap::with_capacity(100);
