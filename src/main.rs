@@ -12,7 +12,7 @@ static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 
 fn main() -> anyhow::Result<()> {
     let gtf_file = PathBuf::from(
-        "/mnt/scratch4/dongze/af_example_best_practices_book/af_xmpl_run/data/refdata-gex-GRCh38-2020-A/genes/genes.gtf",
+        "/mnt/scratch4/dongze/af_example_best_practices_book/af_xmpl_run/data/refdata-gex-GRCh38-2020-A/genes/genes.gtf.gz",
     );
 
     // let _fasta_file = PathBuf::from(

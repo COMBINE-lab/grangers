@@ -1,6 +1,8 @@
 use crate::grangers::reader;
 use crate::grangers::reader::fasta::SeqInfo;
 use anyhow::{bail, Context};
+use noodles::fasta;
+use noodles::fasta::record::Sequence;
 use polars::lazy::dsl::col;
 use polars::{lazy::prelude::*, prelude::*, series::Series};
 use rust_lapper::{Interval, Lapper};
@@ -13,6 +15,8 @@ use std::{
     ops::{Add, Mul, Sub},
 };
 use tracing::{info, warn};
+
+use super::FileFormat;
 
 const ESSENTIAL_FIELDS: [&str; 4] = ["seqnames", "start", "end", "strand"];
 
@@ -875,6 +879,44 @@ impl Grangers {
         Ok(())
     }
 }
+
+// implement get sequence functions for Grangers
+// impl Grangers {
+//     /// Get the sequences of the intervals in the Grangers object according to a file to the reference.
+//     pub fn get_sequences<T: AsRef<Path>>(&self, file_path: T, file_format: &FileFormat) -> 
+//     anyhow::Result<()>
+//     // anyhow::Result<Vec<fasta::record::Sequence>> 
+//     {
+//         match file_format {
+//             FileFormat::FASTA => {
+//                 if !fai_path.exists() {
+//                     fasta::index(file_path)?;
+//                 }
+//                 self.get_sequences_fasta(file_path, fai_path)
+//             },
+//             _ => {
+//                 bail!("{} is not supported for this function for now.", file_format)
+//             }
+//         }
+//         let mut fasta = fasta::IndexedReader::from_file(file_path)?;
+//         let mut seqs = Vec::with_capacity(self.df.height());
+//         for iv in self.lapper.iter() {
+//             let seq = fasta.fetch(iv.start as u64, iv.stop as u64)?;
+//             seqs.push(seq);
+//         }
+//         Ok(())
+//     }
+//     fn get_sequences_fasta<T: AsRef<Path>>(&self, file_path: T) -> anyhow::Result<Vec<Sequence>> {
+//         let mut fasta = noodles::fasta::IndexedReader::from_file(file_path)?;
+//         let mut seqs = Vec::with_capacity(self.df.height());
+//         for iv in self.lapper.iter() {
+//             let seq = fasta.fetch(iv.start as u64, iv.stop as u64)?;
+//             seqs.push(seq);
+//         }
+//         Ok(())
+//     }
+    
+// }
 
 struct LapperVecs {
     start: Vec<i64>,

@@ -9,6 +9,8 @@ pub enum FileFormat {
     BED,
     SAM,
     BAM,
+    FASTA,
+    FASTQ
 }
 
 impl FileFormat {
@@ -35,6 +37,8 @@ impl std::str::FromStr for FileFormat {
             "bed" => FileFormat::BED,
             "sam" => FileFormat::SAM,
             "bam" => FileFormat::BAM,
+            "fasta" => FileFormat::FASTA,
+            "fastq" => FileFormat::FASTQ,
             _ => anyhow::bail!("Cannot parse the file type."),
         };
         Ok(ft)
@@ -49,9 +53,12 @@ impl std::fmt::Display for FileFormat {
             FileFormat::BED => write!(f, "BED"),
             FileFormat::SAM => write!(f, "SAM"),
             FileFormat::BAM => write!(f, "BAM"),
+            FileFormat::FASTA => write!(f, "FASTA"),
+            FileFormat::FASTQ => write!(f, "FASTQ"),
         }
     }
 }
+
 pub const GTFESSENTIALATTRIBUTES: [&str; 3] = ["gene_id", "gene_name", "transcript_id"];
 pub const GFFESSENTIALATTRIBUTES: [&str; 4] = ["ID", "gene_id", "gene_name", "transcript_id"];
 // pub const FIELDS: [&str; 8] = [
