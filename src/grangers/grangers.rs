@@ -1204,8 +1204,8 @@ impl IntervalType {
         // -1 is for exclusive
         match self {
             IntervalType::Inclusive(c) => 1 - c,
-            IntervalType::LeftInclusive(c) => 1 - c,
-            IntervalType::RightInclusive(c) => -1 + 1 - c,
+            IntervalType::LeftInclusive(c) => -1 + 1 - c,
+            IntervalType::RightInclusive(c) => 1 - c,
             IntervalType::Exclusive(c) => -1 + 1 - c,
         }
     }
@@ -1214,9 +1214,6 @@ impl IntervalType {
 #[cfg(test)]
 mod tests {
     // use polars::prelude::*;
-
-    use polars::export::rayon::vec;
-
     use super::*;
     use crate::grangers::reader::gtf::{AttributeMode, Attributes, GStruct};
 
