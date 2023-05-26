@@ -1,10 +1,10 @@
 use crate::grangers::grangers_utils::FileFormat;
 use anyhow;
+use flate2::read::GzDecoder;
 use noodles::{gff, gtf};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::{collections::HashMap, path::Path};
-use flate2::read::GzDecoder;
 use tracing::info;
 
 #[derive(Copy, Clone)]
@@ -148,7 +148,7 @@ impl GStruct {
         let is_gzipped = if let Some(ext) = file_path.as_ref().extension() {
             match ext.to_str() {
                 Some("gz") | Some("GZ") => true,
-                _ => false
+                _ => false,
             }
         } else {
             false
@@ -163,10 +163,10 @@ impl GStruct {
         // instantiate the struct
         if is_gzipped {
             info!("auto-detected gzipped file - reading via decompression");
-            let mut rdr = gtf::Reader::new( BufReader::new(GzDecoder::new(file)) );
+            let mut rdr = gtf::Reader::new(BufReader::new(GzDecoder::new(file)));
             gr._from_gtf(&mut rdr)?;
         } else {
-            let mut rdr = gtf::Reader::new( BufReader::new(file) );
+            let mut rdr = gtf::Reader::new(BufReader::new(file));
             gr._from_gtf(&mut rdr)?;
         }
 
@@ -233,7 +233,7 @@ impl GStruct {
         let is_gzipped = if let Some(ext) = file_path.as_ref().extension() {
             match ext.to_str() {
                 Some("gz") | Some("GZ") => true,
-                _ => false
+                _ => false,
             }
         } else {
             false
@@ -245,10 +245,10 @@ impl GStruct {
         // instantiate the struct
         if is_gzipped {
             info!("auto-detected gzipped file - reading via decompression");
-            let mut rdr = gff::Reader::new( BufReader::new(GzDecoder::new(file)) );
+            let mut rdr = gff::Reader::new(BufReader::new(GzDecoder::new(file)));
             gr._from_gff(&mut rdr)?;
         } else {
-            let mut rdr = gff::Reader::new( BufReader::new(file) );
+            let mut rdr = gff::Reader::new(BufReader::new(file));
             gr._from_gff(&mut rdr)?;
         }
         Ok(gr)

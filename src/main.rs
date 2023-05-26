@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use std::env;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tracing_subscriber::prelude::*;
 pub mod grangers;
@@ -12,16 +12,12 @@ use polars::prelude::*;
 static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 
 fn main() -> anyhow::Result<()> {
-    let stdout_log = tracing_subscriber::fmt::layer()
-        .pretty();
-    let subscriber = tracing_subscriber::Registry::default()
-    .with(stdout_log);
+    let stdout_log = tracing_subscriber::fmt::layer().pretty();
+    let subscriber = tracing_subscriber::Registry::default().with(stdout_log);
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     let args: Vec<String> = env::args().collect();
-    let gtf_file = PathBuf::from(
-        args.get(1).unwrap()
-    );
+    let gtf_file = PathBuf::from(args.get(1).unwrap());
 
     // let _fasta_file = PathBuf::from(
     //     "/mnt/scratch3/alevin_fry_submission/refs/refdata-gex-GRCh38-2020-A/fasta/genome.fa",
