@@ -1,6 +1,6 @@
-use crate::grangers::grangers_utils::FileFormat;
+use crate::grangers::grangers_utils::{is_gzipped, FileFormat};
 use anyhow;
-use flate2::read::GzDecoder;
+use flate2::bufread::GzDecoder;
 use noodles::{gff, gtf};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -144,29 +144,20 @@ pub struct GStruct {
 // implement GTF reader
 impl GStruct {
     pub fn from_gtf<T: AsRef<Path>>(file_path: T, am: AttributeMode) -> anyhow::Result<GStruct> {
-        // first, see if the input file path is a gzipped file or not
-        let is_gzipped = if let Some(ext) = file_path.as_ref().extension() {
-            match ext.to_str() {
-                Some("gz") | Some("GZ") => true,
-                _ => false,
-            }
-        } else {
-            false
-        };
-
         let mut gr = GStruct::new(am, FileFormat::GTF)?;
         if let Some(misc) = gr.misc.as_mut() {
             misc.insert(String::from("file_type"), vec![String::from("GTF")]);
         }
 
         let file = File::open(file_path)?;
+        let mut inner_rdr = BufReader::new(file);
         // instantiate the struct
-        if is_gzipped {
+        if is_gzipped(&mut inner_rdr)? {
             info!("auto-detected gzipped file - reading via decompression");
-            let mut rdr = gtf::Reader::new(BufReader::new(GzDecoder::new(file)));
+            let mut rdr = gtf::Reader::new(BufReader::new(GzDecoder::new(inner_rdr)));
             gr._from_gtf(&mut rdr)?;
         } else {
-            let mut rdr = gtf::Reader::new(BufReader::new(file));
+            let mut rdr = gtf::Reader::new(inner_rdr);
             gr._from_gtf(&mut rdr)?;
         }
 
@@ -229,26 +220,17 @@ impl GStruct {
 // implement GFF reader
 impl GStruct {
     pub fn from_gff<T: AsRef<Path>>(file_path: T, am: AttributeMode) -> anyhow::Result<GStruct> {
-        // first, see if the input file path is a gzipped file or not
-        let is_gzipped = if let Some(ext) = file_path.as_ref().extension() {
-            match ext.to_str() {
-                Some("gz") | Some("GZ") => true,
-                _ => false,
-            }
-        } else {
-            false
-        };
-
         let mut gr = GStruct::new(am, FileFormat::GFF)?;
 
         let file = File::open(file_path)?;
+        let mut inner_rdr = BufReader::new(file);
         // instantiate the struct
-        if is_gzipped {
+        if is_gzipped(&mut inner_rdr)? {
             info!("auto-detected gzipped file - reading via decompression");
-            let mut rdr = gff::Reader::new(BufReader::new(GzDecoder::new(file)));
+            let mut rdr = gff::Reader::new(BufReader::new(GzDecoder::new(inner_rdr)));
             gr._from_gff(&mut rdr)?;
         } else {
-            let mut rdr = gff::Reader::new(BufReader::new(file));
+            let mut rdr = gff::Reader::new(inner_rdr);
             gr._from_gff(&mut rdr)?;
         }
         Ok(gr)

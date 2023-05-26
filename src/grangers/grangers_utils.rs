@@ -90,3 +90,29 @@ pub fn _setdiff<T: Eq + Clone>(vec1: &[T], vec2: &[T]) -> Vec<T> {
     }
     diff
 }
+
+/// Tests if the stream underlying the BufReader `reader` is gzipped or not by examining the
+/// first 2 bytes for the magic header.  This function *requires*, but does not check, that
+/// none of the stream has yet been consumed (i.e. that no read calls have yet been issued
+/// to `reader`). It will fill the buffer to examine the first two bytes, but will not consume
+/// them.
+///
+/// If the first 2 bytes could be succesfully read, this returns
+/// Ok(true) if the file is a gzipped file
+/// Ok(false) if it is not a gzipped file
+///
+/// If the first 2 bytes could not be succesfully read, then this
+/// returns the relevant std::io::Error.
+///
+/// Notes: implementation taken from
+/// https://github.com/zaeleus/noodles/blob/ba1b34ce22e72c2df277b20ce4c5c7b75d75a199/noodles-util/src/variant/reader/builder.rs#L131
+pub fn is_gzipped<T: BufRead>(reader: &mut T) -> std::io::Result<bool> {
+    const GZIP_MAGIC_NUMBER: [u8; 2] = [0x1f, 0x8b];
+
+    let src = reader.fill_buf()?;
+    if src.get(..2) == Some(&GZIP_MAGIC_NUMBER) {
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}

@@ -1,7 +1,8 @@
 use std::env;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use tracing_subscriber::prelude::*;
+use tracing::info;
+use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, EnvFilter};
 pub mod grangers;
 // use crate::grangers::{FileFormat, FlankOptions};
 use crate::grangers::{Grangers, IntervalType, MergeOptions};
@@ -12,9 +13,18 @@ use polars::prelude::*;
 static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 
 fn main() -> anyhow::Result<()> {
-    let stdout_log = tracing_subscriber::fmt::layer().pretty();
-    let subscriber = tracing_subscriber::Registry::default().with(stdout_log);
-    tracing::subscriber::set_global_default(subscriber).unwrap();
+    // Check the `RUST_LOG` variable for the logger level and
+    // respect the value found there. If this environment
+    // variable is not set then set the logging level to
+    // INFO.
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .init();
 
     let args: Vec<String> = env::args().collect();
     let gtf_file = PathBuf::from(args.get(1).unwrap());
@@ -32,34 +42,34 @@ fn main() -> anyhow::Result<()> {
     let start = Instant::now();
     let mut gr = Grangers::from_gtf(gtf_file.as_path(), false)?;
     let duration: Duration = start.elapsed();
-    println!("Built Grangers in {:?}", duration);
-    println!("Grangers shape {:?}", gr.df().shape());
+    info!("Built Grangers in {:?}", duration);
+    info!("Grangers shape {:?}", gr.df().shape());
 
     let mo = MergeOptions::new(vec!["seqnames", "gene_id", "transcript_id"], false, 1)?;
     let start = Instant::now();
     gr.merge(&mo)?;
     let duration: Duration = start.elapsed();
-    println!("Merged overlapping ranges in {:?}", duration);
+    info!("Merged overlapping ranges in {:?}", duration);
 
     let start = Instant::now();
     gr.flank(10, None)?;
     let duration: Duration = start.elapsed();
-    println!("Flanked ranges in {:?}", duration);
+    info!("Flanked ranges in {:?}", duration);
 
     let start = Instant::now();
     gr.introns("gene_id")?;
     let duration: Duration = start.elapsed();
-    println!("Built intron's Grangers in {:?}", duration);
+    info!("Built intron's Grangers in {:?}", duration);
 
     let start = Instant::now();
     gr.extend(10, &grangers::ExtendOption::Both, false)?;
     let duration: Duration = start.elapsed();
-    println!("Extended ranges in {:?}", duration);
+    info!("Extended ranges in {:?}", duration);
 
     let start = Instant::now();
     gr.build_lapper(&mo.by)?;
     let duration: Duration = start.elapsed();
-    println!("Built interval tree in {:?}", duration);
+    info!("Built interval tree in {:?}", duration);
 
     let df = df!(
         "seqnames" => ["chr1", "chr1", "chr1", "chr1", "chr1", "chr2", "chr2", "chr3"],
@@ -71,7 +81,7 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     let mut gr = Grangers::new(df, None, None, None, IntervalType::Inclusive(1)).unwrap();
-    println!("gr: {:?}", gr.df());
+    info!("gr: {:?}", gr.df());
     let mo = MergeOptions {
         by: vec![
             "seqnames".to_string(),
@@ -83,17 +93,17 @@ fn main() -> anyhow::Result<()> {
     };
 
     gr.drop_nulls(None)?;
-    println!("drop_nulls' gr: \n{:?}", gr.df());
+    info!("drop_nulls' gr: \n{:?}", gr.df());
 
     let merged_gr = gr.merge(&mo)?;
 
-    println!("merged gr: \n{:?}", merged_gr.df());
+    info!("merged gr: \n{:?}", merged_gr.df());
 
     let mut flanked_gr = gr.flank(10, None)?;
-    println!("flanked gr: \n{:?}", flanked_gr.df());
+    info!("flanked gr: \n{:?}", flanked_gr.df());
 
     flanked_gr.extend(10, &grangers::ExtendOption::Both, false)?;
-    println!("extended and flanked gr: \n{:?}", flanked_gr.df());
+    info!("extended and flanked gr: \n{:?}", flanked_gr.df());
 
     // library(GenomicRanges)
     // gr <- GRanges(
@@ -116,6 +126,6 @@ fn main() -> anyhow::Result<()> {
 
     // get stats
     let peak_mem = PEAK_ALLOC.peak_usage_as_gb();
-    println!("Peak Memory usage was {} GB", peak_mem);
+    info!("Peak Memory usage was {} GB", peak_mem);
     Ok(())
 }
