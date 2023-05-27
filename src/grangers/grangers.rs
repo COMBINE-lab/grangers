@@ -10,11 +10,11 @@ use std::collections::HashMap;
 use std::default::Default;
 use std::fs;
 use std::path::Path;
-use std::{
-    collections::HashSet,
-    ops::{Add, Mul, Sub},
-};
+use std::ops::{Add, Mul, Sub};
 use tracing::{info, warn};
+use std::io::{BufReader};
+use crate::grangers::options::*;
+use crate::grangers::grangers_utils::*;
 
 use super::FileFormat;
 
@@ -302,34 +302,33 @@ impl Grangers {
 impl Grangers {
     /// get the intronic sequences of each gene or transcript according to the given column name.
     /// The `by` parameter should specify the column name of the gene or transcript ID.
-    pub fn introns<T: ToString>(&self, by: T) -> anyhow::Result<Grangers> {
-        let by_string = by.to_string();
-        let by = by_string.as_str();
-        if !self.is_column(by) {
+    pub fn introns<T: ToString>(&self, by: T, introns_options: IntronsOptions) -> anyhow::Result<Grangers> {
+        let by = by.to_string();
+        if !self.is_column(by.as_str()) {
             anyhow::bail!("The column {} does not exist in the Grangers struct.", by);
         }
 
         // we requires that the "feature_type" column exists, which
         // defines the type of each genomic feature, i.e., gene, transcript, exon, UTR etc
-        if !self.is_column("feature_type") {
-            anyhow::bail!("The column feature_type does not exist in the Grangers struct. This is required for identifying exon records. Cannot proceed");
+        if !self.is_column(&introns_options.type_col) {
+            anyhow::bail!("The column {} does not exist in the Grangers struct. This is required for identifying exon records. Cannot proceed", &introns_options.type_col);
         }
 
-        let mo = MergeOptions::new(vec![by], false, 1)?;
+        let mo = MergeOptions::new(vec![&by], false, 1)?;
         let mut gr = self.clone();
 
         // polars way to subset
-        let anyvalue_exon = AnyValue::Utf8("exon");
+        let anyvalue_exon = AnyValue::Utf8(&introns_options.exon_name);
 
         gr.df = gr.df.filter(
             &gr.df
-                .column("feature_type")?
+                .column(&introns_options.type_col)?
                 .iter()
                 .map(|f| f.eq(&anyvalue_exon))
                 .collect(),
         )?;
 
-        if gr.column(by)?.null_count() > 0 {
+        if gr.column(&by)?.null_count() > 0 {
             anyhow::bail!("The column {} contains null values in the by features. Cannot use it to find introns. Please fill up null values and try again.", by);
         }
 
@@ -463,32 +462,21 @@ impl Grangers {
     /// Returns:
     ///     Grangers: a new `Grangers` object with the flanked ranges.
     // flank doesn't not related to interval thing
-    pub fn flank(&self, width: i64, options: Option<FlankOptions>) -> anyhow::Result<Grangers> {
-        let start;
-        let both;
-        let ignore_strand;
-        if let Some(options) = options {
-            start = options.start;
-            both = options.both;
-            ignore_strand = options.ignore_strand;
-        } else {
-            start = true;
-            both = false;
-            ignore_strand = false;
-        }
+    pub fn flank(&self, width: i64, options: FlankOptions) -> anyhow::Result<Grangers> {
+        
         let df = self
             .df()
             .clone()
             .lazy()
             .with_column(
-                when(ignore_strand)
+                when(options.ignore_strand)
                     .then(lit(true))
-                    .otherwise(col("strand").eq(lit("-")).neq(lit(start)))
+                    .otherwise(col("strand").eq(lit("-")).neq(lit(options.start)))
                     .alias("start_flags"),
             )
             .with_column(
                 // when both is true
-                when(both)
+                when(options.both)
                     .then(
                         // when start_flag is true
                         when(col("start_flags").eq(lit(true)))
@@ -523,7 +511,7 @@ impl Grangers {
                     .add(
                         (lit(width)
                             .abs()
-                            .mul(when(lit(both)).then(lit(2)).otherwise(lit(1))))
+                            .mul(when(lit(options.both)).then(lit(2)).otherwise(lit(1))))
                         .sub(lit(1)),
                     )
                     .alias("end"),
@@ -881,42 +869,92 @@ impl Grangers {
 }
 
 // implement get sequence functions for Grangers
-// impl Grangers {
-//     /// Get the sequences of the intervals in the Grangers object according to a file to the reference.
-//     pub fn get_sequences<T: AsRef<Path>>(&self, file_path: T, file_format: &FileFormat) -> 
-//     anyhow::Result<()>
-//     // anyhow::Result<Vec<fasta::record::Sequence>> 
-//     {
-//         match file_format {
-//             FileFormat::FASTA => {
-//                 if !fai_path.exists() {
-//                     fasta::index(file_path)?;
-//                 }
-//                 self.get_sequences_fasta(file_path, fai_path)
-//             },
-//             _ => {
-//                 bail!("{} is not supported for this function for now.", file_format)
-//             }
-//         }
-//         let mut fasta = fasta::IndexedReader::from_file(file_path)?;
-//         let mut seqs = Vec::with_capacity(self.df.height());
-//         for iv in self.lapper.iter() {
-//             let seq = fasta.fetch(iv.start as u64, iv.stop as u64)?;
-//             seqs.push(seq);
-//         }
-//         Ok(())
-//     }
-//     fn get_sequences_fasta<T: AsRef<Path>>(&self, file_path: T) -> anyhow::Result<Vec<Sequence>> {
-//         let mut fasta = noodles::fasta::IndexedReader::from_file(file_path)?;
-//         let mut seqs = Vec::with_capacity(self.df.height());
-//         for iv in self.lapper.iter() {
-//             let seq = fasta.fetch(iv.start as u64, iv.stop as u64)?;
-//             seqs.push(seq);
-//         }
-//         Ok(())
-//     }
-    
-// }
+impl Grangers {
+    /// Get the sequences of the intervals in the Grangers object according to a file to the reference.
+    // TODO: 
+    pub fn get_sequences<T: AsRef<Path>>(&self, file_path: T, file_format: &FileFormat, oob_option: &OOBOption) -> 
+    anyhow::Result<()>
+    // anyhow::Result<Vec<fasta::record::Sequence>> 
+    {
+        // we need to map the sequence back to the original row order of the dataframe
+        // So, we need to have a minimum copy of the dataset, which contains only the essential fields,
+        // and add one more column representing the row order of the original dataframe
+        let mut df = self.df.select(["seqnames", "start", "end", "strand"])?;
+        df.with_column(Series::new("col_order", (0..df.height() as u32).collect::<Vec<u32>>()))?;
+        let mut chr_df: DataFrame;
+        
+        match file_format {
+            FileFormat::FASTA => {
+                let reader = std::fs::File::open(file_path).map(BufReader::new)?;
+                let mut reader = noodles::fasta::Reader::new(reader);
+                let mut seq_vec: Vec<Option<Sequence>> = vec![None; df.height()];
+                // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do 
+                // 1. subset the dataframe by the chromosome name
+                // 2. get the sequence of the features in the dataframe on that fasta record
+                // 3. insert the sequence into the sequence vector according to the row order
+                for result in reader.records() {
+                    let record = result?;
+
+                    // filter the dataframe by the chromosome name
+                    let anyvalue_name = AnyValue::Utf8(record.name().strip_suffix(' ').unwrap_or(record.name()));
+
+                    chr_df = 
+                        df.filter(
+                            &self.df()
+                            .column("seqnames")?
+                            .iter()
+                            .map(|f| f.eq(&anyvalue_name))
+                            .collect(),
+                        )?;
+                    
+                    // we get the sequence of a chromosome at a time
+                    let chr_seq_vec = Grangers::get_sequences_fasta_record(&chr_df, record, oob_option)?;
+                    
+                    // 
+                    for (idx,seq) in chr_df.column("col_order")?.u32()?.into_iter().zip(chr_seq_vec.into_iter()) {
+                        seq_vec[idx.unwrap() as usize] = seq;
+                    }
+                }
+            },
+            _ => {
+                bail!("{} is not supported for this function for now.", file_format)
+            }
+        }
+        Ok(())
+    }
+
+    /// Get the sequences of the intervals in the Grangers object according to a fasta reader. 
+    /// This function uses the fasta module from noodles.
+    /// The fasta sequence struct is 1-based and inclusive, same as Grangers.
+    /// To get [1,2,3,4,5] in rust, use 1..=5
+    /// If the position less than 1 or exceeds the length of the sequence, it will return None.
+    fn get_sequences_fasta_record(df: &DataFrame, record: fasta::record::Record, oob_option: &OOBOption) -> anyhow::Result<Vec<Option<Sequence>>> {
+        // initialize seq vector
+        let mut seq_vec = Vec::with_capacity(df.height());
+        let ses = df.columns(["start", "end", "strand"])?;
+        for ((start, end), strand) in ses[0].i64()?.into_iter().zip(ses[1].i64()?.into_iter()).zip(ses[2].utf8()?.into_iter()) {
+            if let (Some(start), Some(end)) = (start, end) {
+                let (start, end) = if oob_option == &OOBOption::Truncate {
+                    (noodles::core::Position::try_from(std::cmp::max(1,start as usize))?,
+                    noodles::core::Position::try_from(std::cmp::min(record.sequence().len(),end as usize))?) 
+                } else {
+                        (noodles::core::Position::try_from(start as usize)?,
+                        noodles::core::Position::try_from(end as usize)?) 
+                };
+                let seq = record.sequence().slice( start..=end);
+                
+                if strand == Some("-") {
+                    if let Some(seq) = seq {
+                        seq_vec.push(Some(seq.complement().rev().collect::<Result<_, _>>()?))
+                    }
+                } else {
+                    seq_vec.push(seq);
+                };
+            }
+        }
+        Ok(seq_vec)
+    }
+}
 
 struct LapperVecs {
     start: Vec<i64>,
@@ -964,93 +1002,6 @@ impl LapperVecs {
 
         let df = DataFrame::new(df_vec)?;
         Ok(df)
-    }
-}
-
-#[derive(Copy, Clone)]
-pub struct FlankOptions {
-    start: bool,
-    both: bool,
-    ignore_strand: bool,
-}
-
-impl Default for FlankOptions {
-    fn default() -> FlankOptions {
-        FlankOptions {
-            start: true,
-            both: false,
-            ignore_strand: false,
-        }
-    }
-}
-
-impl FlankOptions {
-    pub fn new(start: bool, both: bool, ignore_strand: bool) -> FlankOptions {
-        FlankOptions {
-            start,
-            both,
-            ignore_strand,
-        }
-    }
-}
-
-/// Options used for the merge function
-/// - by: a vector of string representing which column(s) to merge by. Each string should be a valid column name.
-/// - slack: the minimum gap between two features to be merged. It should be a positive integer.
-/// - output_count: whether to output the count of ranges of the merged features.
-pub struct MergeOptions {
-    pub by: Vec<String>,
-    pub slack: i64,
-    pub ignore_strand: bool,
-}
-
-impl Default for MergeOptions {
-    fn default() -> MergeOptions {
-        MergeOptions {
-            by: vec![String::from("seqnames"), String::from("strand")],
-            slack: 1,
-            ignore_strand: false,
-        }
-    }
-}
-
-impl MergeOptions {
-    pub fn new<T: ToString>(
-        by: Vec<T>,
-        ignore_strand: bool,
-        slack: i64,
-    ) -> anyhow::Result<MergeOptions> {
-        // avoid duplicated columns
-        let mut by_hash: HashSet<String> = by.into_iter().map(|n| n.to_string()).collect();
-
-        if slack < 1 {
-            warn!("It usually doen't make sense to set a non-positive slack.")
-        }
-
-        if by_hash.take(&String::from("start")).is_some()
-            | by_hash.take(&String::from("end")).is_some()
-        {
-            bail!("The provided `by` vector cannot contain the start or end column")
-        };
-
-        if ignore_strand {
-            if by_hash.take(&String::from("strand")).is_some() {
-                warn!("Remove `strand` from the provided `by` vector as the ignored_strand flag is set.")
-            }
-        } else {
-            by_hash.insert(String::from("strand"));
-        }
-
-        // add chromosome name and strand if needed
-        if by_hash.insert(String::from("seqnames")) {
-            warn!("Added `seqnames` to the `by` vector as it is required.")
-        };
-
-        Ok(MergeOptions {
-            by: by_hash.into_iter().collect(),
-            slack,
-            ignore_strand,
-        })
     }
 }
 
@@ -1192,71 +1143,12 @@ fn apply_gaps(s: Series, _slack: i64) -> Result<Option<polars::prelude::Series>,
     Result::<Option<polars::prelude::Series>, PolarsError>::Ok(Some(ls))
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ExtendOption {
-    /// Extend the feature to the start
-    Start,
-    /// Extend the feature to the end
-    End,
-    /// Extend the feature to both sides
-    Both,
-}
-
-#[derive(Clone, Copy)]
-/// This enum is used for specifying the interval type of the input ranges.\
-/// Each variant takes a `i64` to represent the coordinate system.\
-/// For example, `Inclusive(1)` means 1-based [start,end]. This is also the format used in Grangers.\
-pub enum IntervalType {
-    /// Inclusive interval, e.g. [start, end]. GTF and GFF use this.
-    Inclusive(i64),
-    /// Exclusive interval, e.g. (start, end). VCF uses this.
-    Exclusive(i64),
-    /// Left inclusive, right exclusive, e.g. [start, end).
-    LeftInclusive(i64),
-    /// Left exclusive, right inclusive, e.g. (start, end]. BED uses this.
-    RightInclusive(i64),
-}
-
-impl Default for IntervalType {
-    fn default() -> Self {
-        IntervalType::Inclusive(1)
-    }
-}
-
-impl IntervalType {
-    pub fn from<T: ToString>(file_type: T) -> Self {
-        match file_type.to_string().to_lowercase().as_str() {
-            "gtf" | "gff" | "bam" | "sam" => IntervalType::Inclusive(1),
-            "bed" => IntervalType::RightInclusive(0),
-            _ => panic!("The file type is not supported"),
-        }
-    }
-    pub fn start_offset(&self) -> i64 {
-        // 1 - c is for coordinate
-        // the other 1 is for exclusive
-        match self {
-            IntervalType::Inclusive(c) => 1 - c,
-            IntervalType::LeftInclusive(c) => 1 - c,
-            IntervalType::RightInclusive(c) => 1 + 1 - c,
-            IntervalType::Exclusive(c) => 1 + 1 - c,
-        }
-    }
-    pub fn end_offset(&self) -> i64 {
-        // 1 - c is for coordinate
-        // -1 is for exclusive
-        match self {
-            IntervalType::Inclusive(c) => 1 - c,
-            IntervalType::LeftInclusive(c) => -1 + 1 - c,
-            IntervalType::RightInclusive(c) => 1 - c,
-            IntervalType::Exclusive(c) => -1 + 1 - c,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     // use polars::prelude::*;
     use super::*;
+    use crate::grangers::options::*;
+    use crate::grangers::grangers_utils::*;
     use crate::grangers::reader::gtf::{AttributeMode, Attributes, GStruct};
 
     use crate::grangers::grangers_utils::FileFormat;
@@ -1381,7 +1273,7 @@ mod tests {
             both: false,
             ignore_strand: false,
         };
-        let gr1 = gr.flank(10, Some(fo)).unwrap();
+        let gr1 = gr.flank(10, fo).unwrap();
         let start: Vec<i64> = vec![91, 91, 91, 111, 131, 251, 251, 211, 251];
         let end: Vec<i64> = vec![100, 100, 100, 120, 140, 260, 260, 220, 260];
         assert_eq!(
@@ -1407,7 +1299,7 @@ mod tests {
             end
         );
 
-        let gr1 = gr.flank(-10, Some(fo)).unwrap();
+        let gr1 = gr.flank(-10, fo).unwrap();
         let start: Vec<i64> = vec![101, 101, 101, 121, 141, 241, 241, 201, 241];
         let end: Vec<i64> = vec![110, 110, 110, 130, 150, 250, 250, 210, 250];
         assert_eq!(
@@ -1439,7 +1331,7 @@ mod tests {
             both: true,
             ignore_strand: false,
         };
-        let gr1 = gr.flank(10, Some(fo)).unwrap();
+        let gr1 = gr.flank(10, fo).unwrap();
         let start: Vec<i64> = vec![91, 91, 91, 111, 131, 241, 241, 201, 241];
         let end: Vec<i64> = vec![110, 110, 110, 130, 150, 260, 260, 220, 260];
         assert_eq!(
@@ -1465,7 +1357,7 @@ mod tests {
             end
         );
 
-        let gr1 = gr.flank(-10, Some(fo)).unwrap();
+        let gr1 = gr.flank(-10, fo).unwrap();
         let start: Vec<i64> = vec![91, 91, 91, 111, 131, 241, 241, 201, 241];
         let end: Vec<i64> = vec![110, 110, 110, 130, 150, 260, 260, 220, 260];
         assert_eq!(
@@ -1497,7 +1389,7 @@ mod tests {
             both: false,
             ignore_strand: false,
         };
-        let gr1 = gr.flank(10, Some(fo)).unwrap();
+        let gr1 = gr.flank(10, fo).unwrap();
         let start: Vec<i64> = vec![151, 151, 111, 131, 151, 191, 191, 191, 211];
         let end: Vec<i64> = vec![160, 160, 120, 140, 160, 200, 200, 200, 220];
         assert_eq!(
@@ -1523,7 +1415,7 @@ mod tests {
             end
         );
 
-        let gr1 = gr.flank(-10, Some(fo)).unwrap();
+        let gr1 = gr.flank(-10, fo).unwrap();
         let start: Vec<i64> = vec![141, 141, 101, 121, 141, 201, 201, 201, 221];
         let end: Vec<i64> = vec![150, 150, 110, 130, 150, 210, 210, 210, 230];
         assert_eq!(
@@ -1555,7 +1447,7 @@ mod tests {
             both: true,
             ignore_strand: false,
         };
-        let gr1 = gr.flank(10, Some(fo)).unwrap();
+        let gr1 = gr.flank(10, fo).unwrap();
         let start: Vec<i64> = vec![141, 141, 101, 121, 141, 191, 191, 191, 211];
         let end: Vec<i64> = vec![160, 160, 120, 140, 160, 210, 210, 210, 230];
         assert_eq!(
@@ -1581,7 +1473,7 @@ mod tests {
             end
         );
 
-        let gr1 = gr.flank(-10, Some(fo)).unwrap();
+        let gr1 = gr.flank(-10, fo).unwrap();
         let start: Vec<i64> = vec![141, 141, 101, 121, 141, 191, 191, 191, 211];
         let end: Vec<i64> = vec![160, 160, 120, 140, 160, 210, 210, 210, 230];
         assert_eq!(
@@ -1613,7 +1505,7 @@ mod tests {
             both: false,
             ignore_strand: true,
         };
-        let gr1 = gr.flank(10, Some(fo)).unwrap();
+        let gr1 = gr.flank(10, fo).unwrap();
         let start: Vec<i64> = vec![91, 91, 91, 111, 131, 191, 191, 191, 211];
         let end: Vec<i64> = vec![100, 100, 100, 120, 140, 200, 200, 200, 220];
         assert_eq!(
@@ -1639,7 +1531,7 @@ mod tests {
             end
         );
 
-        let gr1 = gr.flank(-10, Some(fo)).unwrap();
+        let gr1 = gr.flank(-10, fo).unwrap();
         let start: Vec<i64> = vec![101, 101, 101, 121, 141, 201, 201, 201, 221];
         let end: Vec<i64> = vec![110, 110, 110, 130, 150, 210, 210, 210, 230];
         assert_eq!(
@@ -1671,7 +1563,7 @@ mod tests {
             both: true,
             ignore_strand: true,
         };
-        let gr1 = gr.flank(10, Some(fo)).unwrap();
+        let gr1 = gr.flank(10, fo).unwrap();
         let start: Vec<i64> = vec![91, 91, 91, 111, 131, 191, 191, 191, 211];
         let end: Vec<i64> = vec![110, 110, 110, 130, 150, 210, 210, 210, 230];
         assert_eq!(
@@ -1697,7 +1589,7 @@ mod tests {
             end
         );
 
-        let gr1 = gr.flank(-10, Some(fo)).unwrap();
+        let gr1 = gr.flank(-10, fo).unwrap();
         let start: Vec<i64> = vec![91, 91, 91, 111, 131, 191, 191, 191, 211];
         let end: Vec<i64> = vec![110, 110, 110, 130, 150, 210, 210, 210, 230];
         assert_eq!(
@@ -2203,7 +2095,7 @@ mod tests {
         }
 
         // extend from both
-        let gr1 = gr.introns("gene_id").unwrap();
+        let gr1 = gr.introns("gene_id", IntronsOptions::new("exon", "feature_type")).unwrap();
         if say {
             println!("gr1: {:?}", gr1.df());
         }
@@ -2233,7 +2125,7 @@ mod tests {
         );
 
         // extend from both
-        let gr1 = gr.introns("transcript_id").unwrap();
+        let gr1 = gr.introns("transcript_id", IntronsOptions::new( "exon", "feature_type")).unwrap();
         if say {
             println!("gr1: {:?}", gr1.df());
         }

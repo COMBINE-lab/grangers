@@ -97,6 +97,14 @@ impl SeqInfo {
         si
     }
 }
+/// traverses the given fasta file returns a tuple of seqnames and seqlengths
+pub fn build_fasta_reader<T: AsRef<Path>, R: BufRead>(file_path: T) -> anyhow::Result<fasta::Reader<BufReader<File>>> {
+    // create reader
+    let reader: fasta::Reader<BufReader<File>> = File::open(file_path)
+        .map(BufReader::new)
+        .map(fasta::Reader::new)?;
+    Ok(reader)
+}
 
 /// traverses the given fasta file returns a tuple of seqnames and seqlengths
 pub fn get_chromsize<T: AsRef<Path>>(file_path: T) -> anyhow::Result<(Vec<String>, Vec<usize>)> {

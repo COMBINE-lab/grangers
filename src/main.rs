@@ -5,7 +5,7 @@ use tracing::info;
 use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, EnvFilter};
 pub mod grangers;
 // use crate::grangers::{FileFormat, FlankOptions};
-use crate::grangers::{Grangers, IntervalType, MergeOptions};
+use crate::grangers::{Grangers, options, IntervalType};
 use peak_alloc::PeakAlloc;
 use polars::prelude::*;
 
@@ -45,24 +45,24 @@ fn main() -> anyhow::Result<()> {
     info!("Built Grangers in {:?}", duration);
     info!("Grangers shape {:?}", gr.df().shape());
 
-    let mo = MergeOptions::new(vec!["seqnames", "gene_id", "transcript_id"], false, 1)?;
+    let mo = options::MergeOptions::new(vec!["seqnames", "gene_id", "transcript_id"], false, 1)?;
     let start = Instant::now();
     gr.merge(&mo)?;
     let duration: Duration = start.elapsed();
     info!("Merged overlapping ranges in {:?}", duration);
 
     let start = Instant::now();
-    gr.flank(10, None)?;
+    gr.flank(10, options::FlankOptions::default())?;
     let duration: Duration = start.elapsed();
     info!("Flanked ranges in {:?}", duration);
 
     let start = Instant::now();
-    gr.introns("gene_id")?;
+    gr.introns("gene_id", options::IntronsOptions::default())?;
     let duration: Duration = start.elapsed();
     info!("Built intron's Grangers in {:?}", duration);
 
     let start = Instant::now();
-    gr.extend(10, &grangers::ExtendOption::Both, false)?;
+    gr.extend(10, &options::ExtendOption::Both, false)?;
     let duration: Duration = start.elapsed();
     info!("Extended ranges in {:?}", duration);
 
@@ -82,7 +82,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut gr = Grangers::new(df, None, None, None, IntervalType::Inclusive(1)).unwrap();
     info!("gr: {:?}", gr.df());
-    let mo = MergeOptions {
+    let mo = options::MergeOptions {
         by: vec![
             "seqnames".to_string(),
             "gene_id".to_string(),
@@ -99,12 +99,27 @@ fn main() -> anyhow::Result<()> {
 
     info!("merged gr: \n{:?}", merged_gr.df());
 
-    let mut flanked_gr = gr.flank(10, None)?;
+    let mut flanked_gr = gr.flank(10, options::FlankOptions::default())?;
     info!("flanked gr: \n{:?}", flanked_gr.df());
 
-    flanked_gr.extend(10, &grangers::ExtendOption::Both, false)?;
+    flanked_gr.extend(10, &options::ExtendOption::Both, false)?;
     info!("extended and flanked gr: \n{:?}", flanked_gr.df());
 
+    use noodles::fasta::record::Sequence;
+    use noodles::core::position::Position;
+    let sequence = Sequence::from(b"ACGT".to_vec());
+
+    let start = Position::try_from(1)?;
+    let end = Position::try_from(4)?;
+    let actual = sequence.slice(start..=end).unwrap();
+    
+    let expected = Sequence::from(b"CG".to_vec());
+    
+    println!("{:?}", actual);
+    println!("{:?}", expected);
+    println!("{:?}", noodles::core::region::Interval::from(start..=end));
+    println!("{:?}", (1..=5).collect::<Vec<usize>>());
+    
     // library(GenomicRanges)
     // gr <- GRanges(
     //     seqnames = Rle(rep("chr1", 9)),
