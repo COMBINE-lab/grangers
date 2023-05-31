@@ -33,7 +33,7 @@ impl FlankOptions {
 /// Options used for the merge function
 /// - by: a vector of string representing which column(s) to merge by. Each string should be a valid column name.
 /// - slack: the minimum gap between two features to be merged. It should be a positive integer.
-/// - output_count: whether to output the count of ranges of the merged features.
+/// - ignore_strand: whether to ignore the strand information when merging.
 pub struct MergeOptions {
     pub by: Vec<String>,
     pub slack: i64,
@@ -57,7 +57,7 @@ impl MergeOptions {
         slack: i64,
     ) -> anyhow::Result<MergeOptions> {
         // avoid duplicated columns
-        let mut by_hash: HashSet<String> = by.into_iter().map(|n| n.as_ref().to_string()).collect();
+        let mut by_hash: HashSet<String> = by.iter().map(|n| n.as_ref().to_string()).collect();
 
         if slack < 1 {
             warn!("It usually doen't make sense to set a non-positive slack.")
@@ -229,37 +229,39 @@ impl Default for FieldColumns {
     }
 }
 
-impl FieldColumns {
-    /// create a new TxColumns struct.
-    pub fn new<T: Into<String>>(
-        seqname: T,
-        source: Option<T>,
-        feature_type: Option<T>,
-        start: T,
-        end: T,
-        score: Option<T>,
-        strand: T,
-        phase: Option<T>,
-        gene_id: Option<T>,
-        transcript_id: Option<T>,
-        exon_id: Option<T>,
-        exon_number: Option<T>,
-    ) -> Self {
-        Self {
-            seqname: seqname.into(),
-            source: source.map(|v| v.into()),
-            feature_type: feature_type.map(|v| v.into()),
-            start: start.into(),
-            end: end.into(),
-            score: score.map(|v| v.into()),
-            strand: strand.into(),
-            phase: phase.map(|v| v.into()),
-            gene_id: gene_id.map(|v| v.into()),
-            transcript_id: transcript_id.map(|v| v.into()),
-            exon_id: exon_id.map(|v| v.into()),
-            exon_number: exon_number.map(|v| v.into()),
-        }
-    }
+impl FieldColumns { 
+    // TODO: this function causes too many parameters warning.
+    // we should either remove it or find a way to solve it
+    // /// create a new TxColumns struct.
+    // pub fn new<T: Into<String>>(
+    //     seqname: T,
+    //     source: Option<T>,
+    //     feature_type: Option<T>,
+    //     start: T,
+    //     end: T,
+    //     score: Option<T>,
+    //     strand: T,
+    //     phase: Option<T>,
+    //     gene_id: Option<T>,
+    //     transcript_id: Option<T>,
+    //     exon_id: Option<T>,
+    //     exon_number: Option<T>,
+    // ) -> Self {
+    //     Self {
+    //         seqname: seqname.into(),
+    //         source: source.map(|v| v.into()),
+    //         feature_type: feature_type.map(|v| v.into()),
+    //         start: start.into(),
+    //         end: end.into(),
+    //         score: score.map(|v| v.into()),
+    //         strand: strand.into(),
+    //         phase: phase.map(|v| v.into()),
+    //         gene_id: gene_id.map(|v| v.into()),
+    //         transcript_id: transcript_id.map(|v| v.into()),
+    //         exon_id: exon_id.map(|v| v.into()),
+    //         exon_number: exon_number.map(|v| v.into()),
+    //     }
+    // }
 
     /// validate the provided dataframe.
     /// If everything is Ok, return Ok(None)

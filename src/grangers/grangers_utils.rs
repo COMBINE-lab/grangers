@@ -174,3 +174,21 @@ impl IntervalType {
         }
     }
 }
+
+pub fn check_col(df: & polars::prelude::DataFrame, col: Option<&str>) -> anyhow::Result<String> {
+    let col_name = if let Some(col) = col {
+        if df.column(col)?.null_count() > 0 {
+            anyhow::bail!(
+                "The gene ID column {} contains null values. Cannot proceed.",
+                col
+            );
+        } else {
+            col
+        }
+    } else {
+        anyhow::bail!("The gene ID column is not defined in the Grangers struct. Cannot extract transcript sequences.")
+    };
+    Ok(col_name.to_string())
+
+}
+
