@@ -7,7 +7,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 #[derive(Clone)]
 pub struct SeqInfo {
-    seqnames: Vec<String>,
+    seqname: Vec<String>,
     seqlengths: Option<Vec<usize>>,
     is_circular: Option<Vec<bool>>,
     genome: Option<String>,
@@ -15,9 +15,9 @@ pub struct SeqInfo {
 }
 
 impl SeqInfo {
-    /// get the seqnames of the genome/reference set
-    pub fn seqnames(&self) -> &Vec<String> {
-        &self.seqnames
+    /// get the seqname of the genome/reference set
+    pub fn seqname(&self) -> &Vec<String> {
+        &self.seqname
     }
 
     /// get the seqlengths of the genome/reference set
@@ -40,33 +40,33 @@ impl SeqInfo {
         &self.extra
     }
 
-    /// set the seqnames of the genome/reference set
-    pub fn set_seqnames(&mut self, seqnames: Vec<String>) {
-        self.seqnames = seqnames;
+    /// set the seqname of the genome/reference set
+    pub fn set_seqnames(&mut self, seqname: Vec<String>) {
+        self.seqname = seqname;
     }
 
     pub fn new(
-        seqnames: Vec<String>,
+        seqname: Vec<String>,
         seqlengths: Option<Vec<usize>>,
         is_circular: Option<Vec<bool>>,
         genome: Option<String>,
         extra: Option<HashMap<String, Vec<String>>>,
     ) -> anyhow::Result<SeqInfo> {
         if let Some(v) = &seqlengths {
-            if equal_length(&seqnames, v) {
-                bail!("seqnames and seqlengths have different length; Could not create SeqInfo")
+            if equal_length(&seqname, v) {
+                bail!("seqname and seqlengths have different length; Could not create SeqInfo")
             }
         }
         if let Some(v) = &is_circular {
-            if equal_length(&seqnames, v) {
-                bail!("seqnames and is_circular have different length; Could not create SeqInfo")
+            if equal_length(&seqname, v) {
+                bail!("seqname and is_circular have different length; Could not create SeqInfo")
             }
         }
         if let Some(hm) = &extra {
             for (k, v) in hm.iter() {
-                if equal_length(&seqnames, v) {
+                if equal_length(&seqname, v) {
                     bail!(
-                        "seqnames and {} have different length; Could not create SeqInfo",
+                        "seqname and {} have different length; Could not create SeqInfo",
                         k
                     )
                 }
@@ -74,7 +74,7 @@ impl SeqInfo {
         }
 
         Ok(SeqInfo {
-            seqnames,
+            seqname,
             seqlengths,
             is_circular,
             genome,
@@ -83,12 +83,12 @@ impl SeqInfo {
     }
 
     /// This function parse a fasta file to get the seqinfo of the genome/reference set.
-    /// seqinfo can contain "seqnames", "seqlengths", "isCircular", "genome", and other extra string info
+    /// seqinfo can contain "seqname", "seqlengths", "isCircular", "genome", and other extra string info
     pub fn from_fasta<T: AsRef<Path>>(file_path: T) -> anyhow::Result<SeqInfo> {
         // get chromsize
-        let (seqnames, seqlengths) = get_chromsize(&file_path)?;
+        let (seqname, seqlengths) = get_chromsize(&file_path)?;
         let si = SeqInfo::new(
-            seqnames,
+            seqname,
             Some(seqlengths),
             None,
             Some(file_path.as_ref().to_string_lossy().to_string()),
@@ -97,8 +97,10 @@ impl SeqInfo {
         si
     }
 }
-/// traverses the given fasta file returns a tuple of seqnames and seqlengths
-pub fn build_fasta_reader<T: AsRef<Path>, R: BufRead>(file_path: T) -> anyhow::Result<fasta::Reader<BufReader<File>>> {
+/// traverses the given fasta file returns a tuple of seqname and seqlengths
+pub fn build_fasta_reader<T: AsRef<Path>, R: BufRead>(
+    file_path: T,
+) -> anyhow::Result<fasta::Reader<BufReader<File>>> {
     // create reader
     let reader: fasta::Reader<BufReader<File>> = File::open(file_path)
         .map(BufReader::new)
@@ -106,7 +108,7 @@ pub fn build_fasta_reader<T: AsRef<Path>, R: BufRead>(file_path: T) -> anyhow::R
     Ok(reader)
 }
 
-/// traverses the given fasta file returns a tuple of seqnames and seqlengths
+/// traverses the given fasta file returns a tuple of seqname and seqlengths
 pub fn get_chromsize<T: AsRef<Path>>(file_path: T) -> anyhow::Result<(Vec<String>, Vec<usize>)> {
     // create reader
     let mut reader = File::open(file_path)
@@ -121,12 +123,12 @@ fn _get_chromsize<T: BufRead>(
     rdr: &mut fasta::Reader<T>,
 ) -> anyhow::Result<(Vec<String>, Vec<usize>)> {
     // get chromsize
-    let mut seqnames: Vec<String> = Vec::new();
+    let mut seqname: Vec<String> = Vec::new();
     let mut seqlengths: Vec<usize> = Vec::new();
 
     for result in rdr.records() {
         let record = result?;
-        seqnames.push(
+        seqname.push(
             record
                 .name()
                 .split_once(' ')
@@ -137,7 +139,7 @@ fn _get_chromsize<T: BufRead>(
         seqlengths.push(record.sequence().len());
     }
 
-    Ok((seqnames, seqlengths))
+    Ok((seqname, seqlengths))
 }
 
 #[cfg(test)]

@@ -1,24 +1,21 @@
+use crate::grangers::grangers_utils::*;
+use crate::grangers::options::*;
 use crate::grangers::reader;
 use crate::grangers::reader::fasta::SeqInfo;
 use anyhow::{bail, Context};
 use noodles::fasta;
-use noodles::fasta::record::Sequence;
+pub use noodles::fasta::record::Sequence;
 use polars::lazy::dsl::col;
 use polars::{lazy::prelude::*, prelude::*, series::Series};
 use rust_lapper::{Interval, Lapper};
 use std::collections::HashMap;
-use std::default::Default;
 use std::fs;
-use std::path::Path;
+use std::io::BufReader;
 use std::ops::{Add, Mul, Sub};
+use std::path::Path;
 use tracing::{info, warn};
-use std::io::{BufReader};
-use crate::grangers::options::*;
-use crate::grangers::grangers_utils::*;
 
-use super::FileFormat;
-
-const ESSENTIAL_FIELDS: [&str; 4] = ["seqnames", "start", "end", "strand"];
+const ESSENTIAL_FIELDS: [&str; 4] = ["seqname", "start", "end", "strand"];
 
 // GTF files are 1-based with closed intervals.
 /// The Grangers struct contains the following fields:
@@ -43,6 +40,8 @@ pub struct Grangers {
     lapper: Option<Lapper<u64, Vec<String>>>,
     /// The interval type
     interval_type: IntervalType,
+    /// The name of the columns that are used to identify the genomic features
+    field_columns: FieldColumns,
 }
 
 // IO
@@ -51,28 +50,43 @@ impl Grangers {
     // TODO: use this in the unstranded case
     pub fn add_column<T: SeriesTrait>(&mut self, series: Series) -> anyhow::Result<()> {
         self.df.with_column(series)?;
-
         Ok(())
     }
-    fn validate(df: &mut DataFrame) -> anyhow::Result<()> {
-        // check essential fields
-        for ef in ESSENTIAL_FIELDS {
-            if df.column(ef).is_err() {
+
+    /// check if the essential fields contain null values
+    /// Each value in fields should either be a column name or a field of the FieldColumns struct
+    fn any_nulls<T: AsRef<str>>(&self, fields: &[T], complain: bool) -> anyhow::Result<bool> {
+        let mut valid = true;
+        let df = self.df();
+        let fc = self.field_columns();
+
+        for col in fields {
+            // get the name
+            let col = if let Some(col) = fc.get_colname(col, false) {
+                col
+            } else if df.column(col.as_ref()).is_ok() {
+                col.as_ref()
+            } else {
                 bail!(
-                    "The dataframe does not contain the required column {}; Cannot proceed",
-                    ef
-                );
+                    "The column {} does not exist in the Grangers struct. Cannot check null values",
+                    col.as_ref()
+                )
+            };
+
+            if df.column(col)?.null_count() > 0 {
+                valid = false;
+                if complain {
+                    warn!("The column {} contains null values. This will cause problems for most Grangers functions.", col);
+                }
             }
         }
-
-        // check strand
-        if df.column("strand").is_err() {
-            warn!("The dataframe does not contain the strand column; adding a null strand column.");
-            df.with_column(Series::new_null("strand", df.height()))?;
+        if (!valid) & complain {
+            warn!("You can drop null values by using the Grangers::drop_nulls() method.")
         }
 
-        Ok(())
+        Ok(valid)
     }
+
     /// Instantiate a new Grangers struct according to
     /// - a range dataframe that contain the ranges of the genomic features
     /// - an optional SeqInfo struct contains the reference information (usually chromosome)
@@ -86,10 +100,15 @@ impl Grangers {
         misc: Option<HashMap<String, Vec<String>>>,
         lapper: Option<Lapper<u64, Vec<String>>>,
         interval_type: IntervalType,
+        field_columns: FieldColumns,
     ) -> anyhow::Result<Grangers> {
-        // validate the dataframe
-        Grangers::validate(&mut df)?;
+        let field_columns = if let Some(validated) = field_columns.validate(&df, true)? {
+            validated
+        } else {
+            field_columns
+        };
 
+        // if the interval type is not inclusive, we need to convert it to inclusive
         if interval_type.start_offset() != 0 {
             df.with_column(df.column("start").unwrap() - interval_type.start_offset())?;
         }
@@ -98,13 +117,20 @@ impl Grangers {
             df.with_column(df.column("end").unwrap() - interval_type.end_offset())?;
         }
 
-        Ok(Grangers {
+        // instantiate a new Grangers struct
+        let gr = Grangers {
             df,
             misc,
             seqinfo,
             lapper,
             interval_type,
-        })
+            field_columns,
+        };
+
+        // validate
+        gr.any_nulls(&gr.df().get_column_names(), true)?;
+
+        Ok(gr)
     }
 
     pub fn from_gstruct(
@@ -115,7 +141,7 @@ impl Grangers {
         // we want to make some columns categorical because of this https://docs.rs/polars/latest/polars/docs/performance/index.html
         // fields
         let mut df_vec = vec![
-            Series::new("seqnames", gstruct.seqid),
+            Series::new("seqname", gstruct.seqid),
             // .cast(&DataType::Categorical(None)).unwrap(),
             Series::new("source", gstruct.source),
             // .cast(&DataType::Categorical(None)).unwrap(),
@@ -144,7 +170,14 @@ impl Grangers {
             }
         }
         let df = DataFrame::new(df_vec)?;
-        let gr = Grangers::new(df, None, gstruct.misc, None, interval_type)?;
+        let gr = Grangers::new(
+            df,
+            None,
+            gstruct.misc,
+            None,
+            interval_type,
+            FieldColumns::default(),
+        )?;
         Ok(gr)
     }
 
@@ -201,6 +234,11 @@ impl Grangers {
 
 // get struct fields
 impl Grangers {
+    /// get the reference of the field_columns
+    pub fn field_columns(&self) -> &FieldColumns {
+        &self.field_columns
+    }
+
     /// get the reference of the underlying dataframe
     pub fn df(&self) -> &DataFrame {
         &self.df
@@ -241,9 +279,9 @@ impl Grangers {
             .with_context(|| format!("Could not get the column {} from the dataframe.", col_name))
     }
 
-    /// get the reference to the seqnames column
+    /// get the reference to the seqname column
     pub fn seqid(&self) -> anyhow::Result<&Series> {
-        self.column("seqnames")
+        self.column("seqname")
     }
 
     /// get the reference to the source column
@@ -300,39 +338,257 @@ impl Grangers {
 
 // implement GenomicFeatures for Grangers
 impl Grangers {
-    /// get the intronic sequences of each gene or transcript according to the given column name.
-    /// The `by` parameter should specify the column name of the gene or transcript ID.
-    pub fn introns<T: ToString>(&self, by: T, introns_options: IntronsOptions) -> anyhow::Result<Grangers> {
-        let by = by.to_string();
-        if !self.is_column(by.as_str()) {
-            anyhow::bail!("The column {} does not exist in the Grangers struct.", by);
-        }
+    /// get the intronic sequences of each gene or transcript or other custom groups.
+    /// The `by` parameter should specify group used for identifying introns. The exons within each group will be merged before computing the introns.\
+    /// The `exon_name` parameter is used for idenfitying exon records from the `feature_type` field column. If set as None, "exon" will be used.
+    /// - This function requires that there is a valid feature_type field column for identifying exon records,
+    /// and all exon records have a valid value for all fields defined in the grangers.field_columns.
+    /// If succeed, it will return a Grangers struct with intronic ranges.
+    pub fn introns(
+        &self,
+        by: IntronsBy,
+        exon_name: Option<&str>,
+        multithreaded: bool,
+    ) -> anyhow::Result<Grangers> {
+        // get exon records only
+        let exon_gr = self.exons(exon_name, multithreaded)?;
+        let fc = exon_gr.field_columns();
 
-        // we requires that the "feature_type" column exists, which
-        // defines the type of each genomic feature, i.e., gene, transcript, exon, UTR etc
-        if !self.is_column(&introns_options.type_col) {
-            anyhow::bail!("The column {} does not exist in the Grangers struct. This is required for identifying exon records. Cannot proceed", &introns_options.type_col);
-        }
+        // parse `by`
+        // we need to make sure `by` points to a valid column
+        let by = if let Some(by) = fc.get_colname(by.as_ref(), false) {
+            by
+        } else if self.is_column(by.as_ref()) {
+            by.as_ref()
+        } else {
+            bail!("The column {} neither exists in the dataframe nor represents a field of FieldColumns. Cannot use it to group exons", by.as_ref())
+        };
 
-        let mo = MergeOptions::new(vec![&by], false, 1)?;
-        let mut gr = self.clone();
+        let mo = MergeOptions::new(&[by], false, 1)?;
+        exon_gr.gaps(&mo)
+    }
+
+    /// filter exon records and deduplicate if needed according to the by parameter.\
+    /// This function takes an optional `feature_name` value to identify exon records. If set as None, "exon" will be used. It is used for identifying exon records. This value should match exons' `feature_type` in the dataframe. \
+    /// This function will not work if there are invalid exon records. The criteria are that all records marked as the defined `exon_name` in the defined `feature_type` column must have:
+    /// - a valid seqname
+    /// - a valid start
+    /// - a valid end
+    /// - a valid strand ("+" or "-")
+    /// - a valid transcript_id
+    /// - a valid gene_id
+    /// - a valid exon_id
+    pub fn exons<T: AsRef<str>>(
+        &self,
+        feature_name: Option<T>,
+        multithreaded: bool,
+    ) -> anyhow::Result<Grangers> {
+        // validate the field_columns
+        let mut fc = if let Some(fc) = self.field_columns().validate(self.df(), false)? {
+            fc
+        } else {
+            self.field_columns().to_owned()
+        };
+
+        // parse exon_name
+        let feature_name = if let Some(en) = feature_name {
+            en.as_ref().to_string()
+        } else {
+            "exon".to_string()
+        };
+
+        // feature_type can have null values, they will be ignored
+        let feature_type = if let Some(ft) = &fc.feature_type {
+            ft.as_str()
+        } else {
+            bail!("The feature_type column does not exist in the Grangers struct. This is required for identifying exon records. Cannot proceed");
+        };
+
+        if self.column(feature_type)?.null_count() > 0 {
+            warn!("Found rows with a null `{}` value. These rows will be ignored when selecting exon records.", feature_type)
+        }
 
         // polars way to subset
-        let anyvalue_exon = AnyValue::Utf8(&introns_options.exon_name);
-
-        gr.df = gr.df.filter(
-            &gr.df
-                .column(&introns_options.type_col)?
+        let anyvalue_exon = AnyValue::Utf8(feature_name.as_str());
+        let mut exon_df = self.df().filter(
+            &self
+                .df()
+                .column(feature_type)?
                 .iter()
                 .map(|f| f.eq(&anyvalue_exon))
                 .collect(),
         )?;
 
-        if gr.column(&by)?.null_count() > 0 {
-            anyhow::bail!("The column {} contains null values in the by features. Cannot use it to find introns. Please fill up null values and try again.", by);
+        // then we need to check if the exon records are valid
+        let _gene_id = if let Some(gene_id) = &fc.gene_id {
+            if exon_df.column(&gene_id)?.null_count() > 0 {
+                bail!(
+                    "The gene ID column {} contains null values. Cannot proceed.",
+                    gene_id
+                );
+            } else {
+                gene_id.to_owned()
+            }
+        } else {
+            bail!("The gene ID column is not defined in the Grangers struct. Cannot extract transcript sequences.")
+        };
+
+        let transcript_id = if let Some(transcript_id) = &fc.transcript_id {
+            if exon_df.column(&transcript_id)?.null_count() > 0 {
+                bail!(
+                    "The transcript ID column {} contains null values. Cannot proceed.",
+                    transcript_id
+                );
+            } else {
+                transcript_id.to_owned()
+            }
+        } else {
+            bail!("The transcript ID column is not defined in the Grangers struct. Cannot extract transcript sequences.")
+        };
+
+        let _exon_id = if let Some(exon_id) = &fc.exon_id {
+            if exon_df.column(&exon_id)?.null_count() > 0 {
+                bail!(
+                    "The exon ID column {} contains null values. Cannot proceed.",
+                    exon_id
+                );
+            } else {
+                exon_id.to_owned()
+            }
+        } else {
+            bail!("The exon ID column is not defined in the Grangers struct. Cannot extract transcript sequences.")
+        };
+
+        if exon_df.column(fc.seqname())?.null_count() > 0 {
+            bail!(
+                "The {} column contains null values. Cannot proceed.",
+                fc.seqname()
+            )
         }
 
-        gr.gaps(&mo)
+        if exon_df.column(fc.start())?.null_count() > 0 {
+            bail!(
+                "The {} column contains null values. Cannot proceed.",
+                fc.start()
+            )
+        }
+
+        if let Some(start_min) = exon_df.column(fc.start())?.i64()?.min() {
+            if start_min < 1 {
+                bail!(
+                    "The {} column contains values less than 1. Cannot proceed.",
+                    fc.start()
+                )
+            }
+        } else {
+            bail!(
+                "The Cannot get min value in the {} column. Cannot proceed.",
+                fc.start()
+            )
+        }
+
+        if exon_df.column(fc.end())?.null_count() > 0 {
+            bail!(
+                "The {} column contains null values. Cannot proceed.",
+                fc.end()
+            )
+        }
+
+        if let Some(end_min) = exon_df.column(fc.end())?.i64()?.min() {
+            if end_min < 1 {
+                bail!(
+                    "The {} column contains values less than 1. Cannot proceed.",
+                    fc.end()
+                )
+            }
+        } else {
+            bail!(
+                "The Cannot get min value in the {} column. Cannot proceed.",
+                fc.end()
+            )
+        }
+
+        // for strand, we need to make sure that there is no null,
+        // as well as invalid strand (not "+" or "-")
+        if exon_df.column(fc.strand())?.null_count() > 0 {
+            bail!("The strand column contains null values. Cannot proceed.")
+        }
+
+        if !exon_df
+            .column(fc.strand())?
+            .unique()?
+            .is_in(&Series::new("valid strands", ["+", "-"]))?
+            .all()
+        {
+            bail!("The strand column contains values that are not \"+\" or \"-\". Cannot proceed.")
+        }
+
+        // if there is an exon number field, it should be valid
+        // if there is no exon number field, we will add one
+        if let Some(exon_number) = fc.exon_number.clone() {
+            if exon_df.column(exon_number.as_str())?.null_count() > 0 {
+                bail!("The exon number column {} contains null values. Cannot proceed. You can delete this column so that the exons() method will compute the number according to the start and strand fields.", exon_number);
+            }
+        } else {
+            // update exon number in fc
+            fc.exon_number = Some("exon_number".to_string());
+            // TODO: add an exon_number column if it doesn't exist
+            exon_df = exon_df
+                .lazy()
+                .groupby([transcript_id.as_str()])
+                .agg([
+                    all(),
+                    when(col(fc.strand()).eq(lit("+")))
+                        .then(
+                            col(fc.start())
+                                .arg_sort(SortOptions {
+                                    descending: false,
+                                    nulls_last: false,
+                                    multithreaded,
+                                })
+                                .over([col(fc.transcript_id().unwrap())]),
+                        )
+                        .otherwise(
+                            col(fc.start())
+                                .arg_sort(SortOptions {
+                                    descending: true,
+                                    nulls_last: false,
+                                    multithreaded,
+                                })
+                                .over([col(fc.transcript_id().unwrap())]),
+                        )
+                        .alias(fc.exon_number().unwrap()),
+                    // as_struct(&[col(transcript_id.as_str()), col(fc.start()), col(fc.strand())])
+                    //     .apply(
+                    //         |s| apply_exons(s),
+                    //         GetOutput::from_type(DataType::Utf8.into()),
+                    //     )
+                    //     .alias("exon_number"),
+                ])
+                .collect()?;
+        };
+
+        // sort at the end according to exon_number
+        exon_df = exon_df
+            .lazy()
+            .select([all()
+                .sort_by(
+                    [col(fc.exon_number().unwrap()).cast(DataType::UInt64)],
+                    [false],
+                )
+                .over([col(fc.transcript_id().unwrap())])])
+            .collect()?;
+
+        let gr = Grangers::new(
+            exon_df,
+            self.seqinfo.clone(),
+            self.misc.clone(),
+            None,
+            self.interval_type,
+            fc,
+        )?;
+
+        Ok(gr)
     }
 
     /// extend each genomic feature by a given length from the start, end, or both sides.
@@ -348,7 +604,7 @@ impl Grangers {
                 | self
                     .column("strand")?
                     .unique()?
-                    .is_in(&Series::new("missing strand", ["*"]))?
+                    .is_in(&Series::new("missing strand", ["."]))?
                     .any()
         {
             bail!("The strand column contains null values. Please remove them first or set ignore_strand to true.")
@@ -463,7 +719,6 @@ impl Grangers {
     ///     Grangers: a new `Grangers` object with the flanked ranges.
     // flank doesn't not related to interval thing
     pub fn flank(&self, width: i64, options: FlankOptions) -> anyhow::Result<Grangers> {
-        
         let df = self
             .df()
             .clone()
@@ -530,6 +785,7 @@ impl Grangers {
             misc: self.misc.clone(),
             lapper: self.lapper.clone(),
             interval_type: self.interval_type,
+            field_columns: self.field_columns.clone(),
         })
     }
 
@@ -634,6 +890,7 @@ impl Grangers {
             misc: self.misc.clone(),
             lapper: self.lapper.clone(),
             interval_type: self.interval_type,
+            field_columns: self.field_columns.clone(),
         })
     }
 
@@ -661,7 +918,7 @@ impl Grangers {
         //     .collect::<Vec<Expr>>();
 
         // we want to sort the dataframe by first essential columns, then the rest columns in `by`
-        let mut sorted_by_exprs_essential = vec![col("seqnames"), col("start"), col("end")];
+        let mut sorted_by_exprs_essential = vec![col("seqname"), col("start"), col("end")];
         let mut sorted_by_desc_essential = vec![false, false, true];
         if !ignore_strand {
             sorted_by_exprs_essential.push(col("strand"));
@@ -732,11 +989,11 @@ impl Grangers {
             .select([all().exclude(["pos", "ignore_strand"])])
             // rearrange the columns
             .select([
-                col("seqnames"),
+                col("seqname"),
                 col("start"),
                 col("end"),
                 col("strand"),
-                all().exclude(["seqnames", "start", "end", "strand"]),
+                all().exclude(["seqname", "start", "end", "strand"]),
             ])
             // groupby is multithreaded, so the order do not preserve
             .sort_by_exprs(sorted_by_exprs, sorted_by_desc, false)
@@ -774,6 +1031,7 @@ impl Grangers {
             misc: self.misc.clone(),
             lapper: Some(lapper),
             interval_type: self.interval_type,
+            field_columns: self.field_columns.clone(),
         })
     }
 
@@ -870,79 +1128,251 @@ impl Grangers {
 
 // implement get sequence functions for Grangers
 impl Grangers {
-    /// Get the sequences of the intervals in the Grangers object according to a file to the reference.
-    // TODO: 
-    pub fn get_sequences<T: AsRef<Path>>(&self, file_path: T, file_format: &FileFormat, oob_option: &OOBOption) -> 
-    anyhow::Result<()>
-    // anyhow::Result<Vec<fasta::record::Sequence>> 
+    /// Extract the transcript sequences in the Grangers object from the provided reference file.
+    /// This function works only if the features are well defined:
+    /// - Exon features cannot have a null "transcript_id".
+    /// - The exons of a transcript should have the same "seqname" and "strand".
+    /// - The exons of a transcript should not overlap with each other.
+    /// - Each value in the "seqname" column should represent a sequence in the reference file.
+
+    pub fn get_transcript_sequences<T: AsRef<Path>, R: AsRef<str>>(
+        &self,
+        fasta_path: T,
+        exon_name: Option<R>,
+        multithreaded: bool,
+    ) -> anyhow::Result<Vec<Sequence>> {
+        // get exon_gr
+        // exons() ensures that all exon records are valid,
+        // and they have a valid exon number
+        let exon_gr = self.exons(exon_name, multithreaded)?;
+        let fc = exon_gr.field_columns();
+
+        // all these fields are valid after exon()
+        let selection = [
+            fc.seqname(),
+            fc.start(),
+            fc.end(),
+            fc.strand(),
+            fc.gene_id().unwrap(),
+            fc.transcript_id().unwrap(),
+            fc.exon_id().unwrap(),
+            fc.exon_number().unwrap(),
+        ];
+
+        // Now, we read the fasta file and process each reference sequence at a time
+        let reader = std::fs::File::open(fasta_path).map(BufReader::new)?;
+        let mut reader = noodles::fasta::Reader::new(reader);
+        // let mut seq_vec: Vec<Option<Sequence>> = vec![None; exon_gr.df().height()];
+        let mut transcript_seq_vec: Vec<Sequence> = Vec::with_capacity(
+            self.df()
+                .column(fc.transcript_id().unwrap())?
+                .unique()?
+                .len(),
+        );
+
+        let mut chr_df: DataFrame;
+
+        // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
+        // 1. subset the dataframe by the seqname (chromosome name)
+        // 2. for each gene, we get the sequence of all its exons
+        // 3. for each transcript, we join the transcripts' exon sequences to get the sequence of the transcript
+        for result in reader.records() {
+            let record = result?;
+
+            // filter the dataframe by the chromosome name
+            // it is possible that the chromosome name
+            let anyvalue_name =
+                AnyValue::Utf8(record.name().strip_suffix(' ').unwrap_or(record.name()));
+
+            // TODO: we can directly filter the gene name here.
+            chr_df = exon_gr.df().filter(
+                &self
+                    .df()
+                    .column(fc.seqname())?
+                    .iter()
+                    .map(|f| f.eq(&anyvalue_name))
+                    .collect(),
+            )?;
+
+            // check if exons are in the range of the reference sequence
+            if let Some(end_max) = chr_df.column("end")?.i64()?.max() {
+                if end_max > record.sequence().len() as i64 {
+                    bail!("Found exons that exceed the length of the reference sequence. Cannot proceed")
+                }
+            } else {
+                bail!("Could not get the maximum end value of the exons. Cannot proceed")
+            }
+
+            // we get the sequence of a chromosome at a time
+            let seq_vec = Grangers::get_sequences_fasta_record(&chr_df, &record, &OOBOption::Skip)?;
+            if seq_vec
+                .iter()
+                .map(|f| f.is_none())
+                .fold(0, |acc, x| acc + x as usize)
+                > 0
+            {
+                bail!("Found invalid exons that exceed the chromosome length; Cannot proceed")
+            }
+
+            // we assemble the transcript sequences
+            // exons() will sort the exons by the exon number
+            // get_sequences_fasta_record() will take care of the strands
+            // so here we just need to join the exon sequences
+            // let mut transcript_seq_vec = vec![None; chr_df.height()];
+            let mut tx_id_iter = chr_df
+                .column("transcript_id")?
+                .utf8()?
+                .into_iter()
+                .peekable();
+            let mut curr_tx = if let Some(id) = tx_id_iter
+                .peek()
+                .with_context(|| format!("Could not get the first transcript id"))?
+            {
+                id.to_string()
+            } else {
+                bail!("Could not get the first transcript id")
+            };
+            // This is the vector that stores the exon sequences of the current transcript
+            // each element is a base, represented by its u8 value
+
+            let mut exon_u8_vec: Vec<u8> = Vec::new();
+
+            for (tx_id, seq) in tx_id_iter.zip(seq_vec.into_iter()) {
+                if let (Some(tx_id), Some(seq)) = (tx_id, seq) {
+                    // first we want to check if the transcript id is the same as the previous one
+                    if tx_id == curr_tx {
+                        // if it is the same, we extend the exon_vec with the current sequence
+                        exon_u8_vec.extend(seq.as_ref().iter());
+                    } else {
+                        // // if it is not the same, we create a Sequence and push it to seq_vec
+                        transcript_seq_vec.push(Sequence::from_iter(exon_u8_vec.clone()));
+                        exon_u8_vec.clear();
+                        // update the current transcript id
+                        curr_tx = tx_id.to_string();
+                    }
+                } else {
+                    bail!("Found null transcript id or empty exon sequence. This should not happen, please report this bug.")
+                }
+            }
+        }
+        Ok(transcript_seq_vec)
+    }
+
+    /// Extract the sequence of the features in the Grangers object from the provided reference file.
+    /// Currently only fasta file is supported. This function four field columns: seqname, start, end, and strand.
+    /// Arguments:
+    /// - `genome_path`: the path to the reference genome file.
+    /// - `file_format`: the format of the reference genome file. Currently only fasta is supported.
+    /// - `oob_option`: the option for out-of-boundary positions. It can be either `Truncate` or `Skip`. If `Truncate`, the out-of-boundary positions will be truncated to the start or end of the sequence. If `Skip`, a None will be returned for features with OOB positions
+    /// The function outputs the extracted sequence as a vector of `Option<Sequence>`. If the feature has OOB positions and the oob_option is set as `Skip`, the corresponding element in the vector will be None. The order of the vector follows the row order of the dataframe of the Grangers object.
+    pub fn get_sequences_fasta<T: AsRef<Path>>(
+        &self,
+        fasta_path: T,
+        ignore_strand: bool,
+        oob_option: &OOBOption,
+    ) -> anyhow::Result<Vec<Option<Sequence>>>
+// anyhow::Result<Vec<fasta::record::Sequence>>
     {
+        let fc = self.field_columns();
         // we need to map the sequence back to the original row order of the dataframe
         // So, we need to have a minimum copy of the dataset, which contains only the essential fields,
         // and add one more column representing the row order of the original dataframe
-        let mut df = self.df.select(["seqnames", "start", "end", "strand"])?;
-        df.with_column(Series::new("col_order", (0..df.height() as u32).collect::<Vec<u32>>()))?;
+        let mut df = self
+            .df
+            .select([fc.seqname(), fc.start(), fc.end(), fc.strand()])?;
+        df.with_column(Series::new(
+            "col_order",
+            (0..df.height() as u32).collect::<Vec<u32>>(),
+        ))?;
+
+        // if ignore strand, set the strand to +
+        if ignore_strand {
+            df.with_column(Series::new(fc.strand(), vec!["+"; df.height()]))?;
+        }
         let mut chr_df: DataFrame;
-        
-        match file_format {
-            FileFormat::FASTA => {
-                let reader = std::fs::File::open(file_path).map(BufReader::new)?;
-                let mut reader = noodles::fasta::Reader::new(reader);
-                let mut seq_vec: Vec<Option<Sequence>> = vec![None; df.height()];
-                // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do 
-                // 1. subset the dataframe by the chromosome name
-                // 2. get the sequence of the features in the dataframe on that fasta record
-                // 3. insert the sequence into the sequence vector according to the row order
-                for result in reader.records() {
-                    let record = result?;
 
-                    // filter the dataframe by the chromosome name
-                    let anyvalue_name = AnyValue::Utf8(record.name().strip_suffix(' ').unwrap_or(record.name()));
+        let reader = std::fs::File::open(fasta_path).map(BufReader::new)?;
+        let mut reader = noodles::fasta::Reader::new(reader);
+        let mut seq_vec: Vec<Option<Sequence>> = vec![None; df.height()];
+        // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
+        // 1. subset the dataframe by the chromosome name
+        // 2. get the sequence of the features in the dataframe on that fasta record
+        // 3. insert the sequence into the sequence vector according to the row order
+        for result in reader.records() {
+            let record = result?;
 
-                    chr_df = 
-                        df.filter(
-                            &self.df()
-                            .column("seqnames")?
-                            .iter()
-                            .map(|f| f.eq(&anyvalue_name))
-                            .collect(),
-                        )?;
-                    
-                    // we get the sequence of a chromosome at a time
-                    let chr_seq_vec = Grangers::get_sequences_fasta_record(&chr_df, record, oob_option)?;
-                    
-                    // 
-                    for (idx,seq) in chr_df.column("col_order")?.u32()?.into_iter().zip(chr_seq_vec.into_iter()) {
-                        seq_vec[idx.unwrap() as usize] = seq;
-                    }
-                }
-            },
-            _ => {
-                bail!("{} is not supported for this function for now.", file_format)
+            // filter the dataframe by the chromosome name
+            let anyvalue_name =
+                AnyValue::Utf8(record.name().strip_suffix(' ').unwrap_or(record.name()));
+
+            chr_df = df.filter(
+                &self
+                    .df()
+                    .column(fc.seqname())?
+                    .iter()
+                    .map(|f| f.eq(&anyvalue_name))
+                    .collect(),
+            )?;
+
+            // we get the sequence of a chromosome at a time
+            let chr_seq_vec = Grangers::get_sequences_fasta_record(&chr_df, &record, oob_option)?;
+
+            //
+            for (idx, seq) in chr_df
+                .column("col_order")?
+                .u32()?
+                .into_iter()
+                .zip(chr_seq_vec.into_iter())
+            {
+                seq_vec[idx.unwrap() as usize] = seq;
             }
         }
-        Ok(())
+
+        Ok(seq_vec)
     }
 
-    /// Get the sequences of the intervals in the Grangers object according to a fasta reader. 
+    /// Get the sequences of the intervals from one fasta record.
+    /// The provided dataframe should be filtered by the reference name.
+    ///  
     /// This function uses the fasta module from noodles.
     /// The fasta sequence struct is 1-based and inclusive, same as Grangers.
     /// To get [1,2,3,4,5] in rust, use 1..=5
     /// If the position less than 1 or exceeds the length of the sequence, it will return None.
-    fn get_sequences_fasta_record(df: &DataFrame, record: fasta::record::Record, oob_option: &OOBOption) -> anyhow::Result<Vec<Option<Sequence>>> {
+    fn get_sequences_fasta_record(
+        df: &DataFrame,
+        record: &fasta::record::Record,
+        oob_option: &OOBOption,
+    ) -> anyhow::Result<Vec<Option<Sequence>>> {
         // initialize seq vector
+        if df.column("seqname")?.unique()?.len() > 1 {
+            bail!("The dataframe contains more than one reference name. Please filter the dataframe by the reference name first.")
+        }
+
         let mut seq_vec = Vec::with_capacity(df.height());
         let ses = df.columns(["start", "end", "strand"])?;
-        for ((start, end), strand) in ses[0].i64()?.into_iter().zip(ses[1].i64()?.into_iter()).zip(ses[2].utf8()?.into_iter()) {
+        for ((start, end), strand) in ses[0]
+            .i64()?
+            .into_iter()
+            .zip(ses[1].i64()?.into_iter())
+            .zip(ses[2].utf8()?.into_iter())
+        {
             if let (Some(start), Some(end)) = (start, end) {
                 let (start, end) = if oob_option == &OOBOption::Truncate {
-                    (noodles::core::Position::try_from(std::cmp::max(1,start as usize))?,
-                    noodles::core::Position::try_from(std::cmp::min(record.sequence().len(),end as usize))?) 
+                    (
+                        noodles::core::Position::try_from(std::cmp::max(1, start as usize))?,
+                        noodles::core::Position::try_from(std::cmp::min(
+                            record.sequence().len(),
+                            end as usize,
+                        ))?,
+                    )
                 } else {
-                        (noodles::core::Position::try_from(start as usize)?,
-                        noodles::core::Position::try_from(end as usize)?) 
+                    (
+                        noodles::core::Position::try_from(start as usize)?,
+                        noodles::core::Position::try_from(end as usize)?,
+                    )
                 };
-                let seq = record.sequence().slice( start..=end);
-                
+                let seq = record.sequence().slice(start..=end);
+
                 if strand == Some("-") {
                     if let Some(seq) = seq {
                         seq_vec.push(Some(seq.complement().rev().collect::<Result<_, _>>()?))
@@ -954,6 +1384,15 @@ impl Grangers {
         }
         Ok(seq_vec)
     }
+}
+
+pub fn argsort1based<T: Ord>(data: &[T], descending: bool) -> Vec<usize> {
+    let mut indices = (1..=data.len()).collect::<Vec<_>>();
+    indices.sort_by_key(|&i| &data[i - 1]);
+    if descending {
+        indices.reverse();
+    }
+    indices
 }
 
 struct LapperVecs {
@@ -1143,12 +1582,68 @@ fn apply_gaps(s: Series, _slack: i64) -> Result<Option<polars::prelude::Series>,
     Result::<Option<polars::prelude::Series>, PolarsError>::Ok(Some(ls))
 }
 
+fn apply_exons(s: Series) -> Result<Option<polars::prelude::Series>, PolarsError> {
+    // get the two columns from the struct
+    let ca: StructChunked = s.struct_()?.clone();
+    // get the start and end series
+    let start_series = &ca.fields()[1];
+
+    // if there is only one exon, the order is 1
+    if start_series.len() == 1 {
+        return Result::<Option<polars::prelude::Series>, PolarsError>::Ok(Some(Series::new(
+            "exon_number",
+            ["1"],
+        )));
+    }
+
+    // now we need to compare the start of the exons
+    let strand_series = &ca.fields()[2];
+    if strand_series.unique()?.len() != 1 {
+        return Err(
+                polars::prelude::PolarsError::ComputeError(
+                    format!(
+                    "The strand column contains more than one unique value for group {:?}. This should not happen.", &ca.fields()[0].utf8()?.get(0))
+                        .into(),
+                ),
+            );
+    }
+
+    // strand will either be + or -
+    let strand = strand_series.unique()?.utf8()?.get(0).unwrap().to_owned();
+
+    let start_vec = start_series
+        .i64()?
+        .into_iter()
+        .map(|s| if let Some(s) = s { s } else { i64::MIN })
+        .collect::<Vec<i64>>();
+
+    // check if any invalid
+    if start_vec.iter().any(|s| *s == i64::MIN) {
+        return Err(polars::prelude::PolarsError::ComputeError(
+            format!(
+                "The start column contains null values for group {:?}. This should not happen.",
+                &ca.fields()[0].utf8()?.get(0)
+            )
+            .into(),
+        ));
+    }
+
+    // Then we define the exon number
+    let exon_number: Vec<String> = argsort1based(&start_vec, strand.as_str() == "-")
+        .into_iter()
+        .map(|i| i.to_string())
+        .collect();
+
+    let ls = Series::new("exon_number", exon_number).cast(&DataType::Utf8)?;
+    Result::<Option<polars::prelude::Series>, PolarsError>::Ok(Some(ls))
+}
+
 #[cfg(test)]
 mod tests {
     // use polars::prelude::*;
     use super::*;
-    use crate::grangers::options::*;
     use crate::grangers::grangers_utils::*;
+    use crate::grangers::options::*;
     use crate::grangers::reader::gtf::{AttributeMode, Attributes, GStruct};
 
     use crate::grangers::grangers_utils::FileFormat;
@@ -1265,7 +1760,12 @@ mod tests {
 
     #[test]
     fn test_flank() {
+        let say = false;
         let gr = get_toy_gr().unwrap();
+
+        if say {
+            println!("gr: {:?}", gr.df());
+        }
 
         // test flank with default parameters
         let fo = FlankOptions {
@@ -1707,8 +2207,9 @@ mod tests {
 
     #[test]
     fn test_merge() {
+        let say = false;
         let df = df!(
-            "seqnames" => ["chr1", "chr1", "chr1", "chr1", "chr1", "chr2", "chr2"],
+            "seqname" => ["chr1", "chr1", "chr1", "chr1", "chr1", "chr2", "chr2"],
             "start" => [1i64, 5, 1, 11, 22, 1, 5],
             "end" => [10i64, 10, 10, 20, 30, 10, 30],
             "strand"=> ["+", "+", "-", "-", "-", "+", "-"],
@@ -1716,18 +2217,31 @@ mod tests {
         )
         .unwrap();
 
-        let gr = Grangers::new(df, None, None, None, IntervalType::Inclusive(1)).unwrap();
-        // println!("gr: {:?}", gr.df());
-        let mo = MergeOptions::new(vec!["seqnames", "gene_id"], false, 1).unwrap();
+        let gr = Grangers::new(
+            df,
+            None,
+            None,
+            None,
+            IntervalType::Inclusive(1),
+            FieldColumns::default(),
+        )
+        .unwrap();
+
+        if say {
+            println!("gr: {:?}", gr.df());
+        }
+        let mo = MergeOptions::new(&vec!["seqname", "gene_id"], false, 1).unwrap();
 
         // default setting
-        let merged_gr: Grangers = gr.merge(&mo).unwrap();
-        // println!("merged_gr: {:?}", merged_gr.df());
+        let gr1: Grangers = gr.merge(&mo).unwrap();
+
+        if say {
+            println!("gr1: {:?}", gr1.df());
+        }
         let start: Vec<i64> = vec![1i64, 1, 22, 1, 5];
         let end: Vec<i64> = vec![10i64, 20, 30, 10, 30];
         assert_eq!(
-            merged_gr
-                .start()
+            gr1.start()
                 .unwrap()
                 .i64()
                 .unwrap()
@@ -1738,8 +2252,7 @@ mod tests {
             start
         );
         assert_eq!(
-            merged_gr
-                .end()
+            gr1.end()
                 .unwrap()
                 .i64()
                 .unwrap()
@@ -1751,15 +2264,17 @@ mod tests {
         );
 
         // test ignore strand
-        let mo = MergeOptions::new(vec!["seqnames"], true, 1).unwrap();
+        let mo = MergeOptions::new(&vec!["seqname"], true, 1).unwrap();
 
-        let merged_gr = gr.merge(&mo).unwrap();
-        // println!("merged_gr: {:?}", merged_gr.df());
+        let gr1 = gr.merge(&mo).unwrap();
+
+        if say {
+            println!("gr1: {:?}", gr1.df());
+        }
         let start: Vec<i64> = vec![1i64, 22, 1];
         let end: Vec<i64> = vec![20i64, 30, 30];
         assert_eq!(
-            merged_gr
-                .start()
+            gr1.start()
                 .unwrap()
                 .i64()
                 .unwrap()
@@ -1770,8 +2285,7 @@ mod tests {
             start
         );
         assert_eq!(
-            merged_gr
-                .end()
+            gr1.end()
                 .unwrap()
                 .i64()
                 .unwrap()
@@ -1784,15 +2298,17 @@ mod tests {
 
         // slack=0
         // test ignore strand
-        let mo = MergeOptions::new(vec!["seqnames", "gene_id"], false, 0).unwrap();
+        let mo = MergeOptions::new(&vec!["seqname", "gene_id"], false, 0).unwrap();
 
-        let merged_gr: Grangers = gr.merge(&mo).unwrap();
-        // println!("merged_gr: {:?}", merged_gr.df());
+        let gr1: Grangers = gr.merge(&mo).unwrap();
+
+        if say {
+            println!("gr1: {:?}", gr1.df());
+        }
         let start: Vec<i64> = vec![1i64, 1, 11, 22, 1, 5];
         let end: Vec<i64> = vec![10i64, 10, 20, 30, 10, 30];
         assert_eq!(
-            merged_gr
-                .start()
+            gr1.start()
                 .unwrap()
                 .i64()
                 .unwrap()
@@ -1803,8 +2319,7 @@ mod tests {
             start
         );
         assert_eq!(
-            merged_gr
-                .end()
+            gr1.end()
                 .unwrap()
                 .i64()
                 .unwrap()
@@ -1818,15 +2333,17 @@ mod tests {
         // slack=2
 
         // test ignore strand
-        let mo = MergeOptions::new(vec!["seqnames", "gene_id"], false, 2).unwrap();
+        let mo = MergeOptions::new(&vec!["seqname", "gene_id"], false, 2).unwrap();
 
-        let merged_gr: Grangers = gr.merge(&mo).unwrap();
-        // println!("merged_gr: {:?}", merged_gr.df());
+        let gr1: Grangers = gr.merge(&mo).unwrap();
+
+        if say {
+            println!("gr1: {:?}", gr1.df());
+        }
         let start: Vec<i64> = vec![1i64, 1, 1, 5];
         let end: Vec<i64> = vec![10i64, 30, 10, 30];
         assert_eq!(
-            merged_gr
-                .start()
+            gr1.start()
                 .unwrap()
                 .i64()
                 .unwrap()
@@ -1837,8 +2354,7 @@ mod tests {
             start
         );
         assert_eq!(
-            merged_gr
-                .end()
+            gr1.end()
                 .unwrap()
                 .i64()
                 .unwrap()
@@ -1852,8 +2368,9 @@ mod tests {
 
     #[test]
     fn test_gaps() {
+        let say = false;
         let df = df!(
-            "seqnames" => ["chr1", "chr1", "chr1", "chr1", "chr1", "chr2", "chr2"],
+            "seqname" => ["chr1", "chr1", "chr1", "chr1", "chr1", "chr2", "chr2"],
             "start" => [1i64, 12, 1, 5, 22, 1, 5],
             "end" => [10i64, 20, 10, 20, 30, 10, 30],
             "strand"=> ["+", "+", "+", "+", "+", "+", "-"],
@@ -1861,13 +2378,28 @@ mod tests {
         )
         .unwrap();
 
-        let gr = Grangers::new(df, None, None, None, IntervalType::Inclusive(1)).unwrap();
-        // println!("gr: {:?}", gr.df());
-        let mo = MergeOptions::new(vec!["seqnames", "gene_id"], false, 1).unwrap();
+        let gr = Grangers::new(
+            df,
+            None,
+            None,
+            None,
+            IntervalType::Inclusive(1),
+            FieldColumns::default(),
+        )
+        .unwrap();
+        if say {
+            println!("gr: {:?}", gr.df());
+        }
+
+        let mo = MergeOptions::new(&vec!["seqname", "gene_id"], false, 1).unwrap();
 
         // default setting
         let gr1: Grangers = gr.gaps(&mo).unwrap();
-        // println!("gr1: {:?}", gr1.df());
+
+        if say {
+            println!("gr1: {:?}", gr1.df());
+        }
+
         let start: Vec<i64> = vec![11i64, 21];
         let end: Vec<i64> = vec![11i64, 21];
         assert_eq!(
@@ -1899,7 +2431,7 @@ mod tests {
         let say = false;
 
         let df = df!(
-            "seqnames" => ["chr1", "chr1"],
+            "seqname" => ["chr1", "chr1"],
             "start" => [1i64, 50],
             "end" => [10i64, 60],
             "strand"=> ["+", "-"],
@@ -1907,7 +2439,15 @@ mod tests {
         )
         .unwrap();
 
-        let gr = Grangers::new(df, None, None, None, IntervalType::Inclusive(1)).unwrap();
+        let gr = Grangers::new(
+            df,
+            None,
+            None,
+            None,
+            IntervalType::Inclusive(1),
+            FieldColumns::default(),
+        )
+        .unwrap();
 
         if say {
             println!("gr: {:?}", gr.df());
@@ -1950,7 +2490,7 @@ mod tests {
         gr1.extend(5, &ExtendOption::Start, true).unwrap();
 
         if say {
-            println!("gr1: {:?}", gr.df());
+            println!("gr1: {:?}", gr1.df());
         }
         let start: Vec<i64> = vec![-4i64, 45];
         let end: Vec<i64> = vec![10i64, 60];
@@ -1982,7 +2522,7 @@ mod tests {
         gr1.extend(5, &ExtendOption::End, false).unwrap();
 
         if say {
-            println!("gr1: {:?}", gr.df());
+            println!("gr1: {:?}", gr1.df());
         }
         let start: Vec<i64> = vec![1i64, 45];
         let end: Vec<i64> = vec![15i64, 60];
@@ -2014,7 +2554,7 @@ mod tests {
         gr1.extend(5, &ExtendOption::End, true).unwrap();
 
         if say {
-            println!("gr1: {:?}", gr.df());
+            println!("gr1: {:?}", gr1.df());
         }
         let start: Vec<i64> = vec![1i64, 50];
         let end: Vec<i64> = vec![15i64, 65];
@@ -2043,10 +2583,11 @@ mod tests {
 
         // extend from both
         let mut gr1 = gr.clone();
+
         gr1.extend(5, &ExtendOption::Both, true).unwrap();
 
         if say {
-            println!("gr1: {:?}", gr.df());
+            println!("gr1: {:?}", gr1.df());
         }
         let start: Vec<i64> = vec![-4i64, 45];
         let end: Vec<i64> = vec![15i64, 65];
@@ -2076,26 +2617,35 @@ mod tests {
 
     #[test]
     fn test_intorons() {
-        let say = true;
+        let say = false;
 
         let df = df!(
-            "seqnames" => ["chr1", "chr1", "chr1", "chr1", "chr1", "chr1", "chr1"],
+            "seqname" => ["chr1", "chr1", "chr1", "chr1", "chr1", "chr1", "chr1"],
             "feature_type" => ["gene", "transcript", "exon", "exon", "transcript", "exon", "exon"],
             "start" => [1i64, 1, 1, 71, 71, 71, 101],
             "end" => [200i64, 80, 20, 80, 150, 80, 150],
             "strand"=> ["+", "+", "+", "+", "+", "+", "+"],
             "gene_id" => ["g1", "g1", "g1", "g1", "g1", "g1", "g1"],
             "transcript_id" => [None, Some("t1"), Some("t1"), Some("t1"), Some("t2"), Some("t2"), Some("t2")],
+            "exon_id" => [None, None, Some("e1"), Some("e2"), None, Some("e3"), Some("e4")],
         )
         .unwrap();
 
-        let gr = Grangers::new(df, None, None, None, IntervalType::Inclusive(1)).unwrap();
+        let gr = Grangers::new(
+            df,
+            None,
+            None,
+            None,
+            IntervalType::Inclusive(1),
+            FieldColumns::default(),
+        )
+        .unwrap();
         if say {
             println!("gr: {:?}", gr.df());
         }
 
         // extend from both
-        let gr1 = gr.introns("gene_id", IntronsOptions::new("exon", "feature_type")).unwrap();
+        let gr1 = gr.introns(IntronsBy::Gene, None, true).unwrap();
         if say {
             println!("gr1: {:?}", gr1.df());
         }
@@ -2125,7 +2675,7 @@ mod tests {
         );
 
         // extend from both
-        let gr1 = gr.introns("transcript_id", IntronsOptions::new( "exon", "feature_type")).unwrap();
+        let gr1 = gr.introns(IntronsBy::Transcript, None, true).unwrap();
         if say {
             println!("gr1: {:?}", gr1.df());
         }

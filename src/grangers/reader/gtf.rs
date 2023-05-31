@@ -136,9 +136,7 @@ pub struct GStruct {
     pub strand: Vec<Option<String>>,
     pub phase: Vec<Option<String>>,
     pub attributes: Attributes,
-    pub misc: Option<
-        HashMap<String, Vec<String>>, // , polars::export::ahash::RandomState
-    >,
+    pub misc: Option<HashMap<String, Vec<String>>>,
 }
 
 // implement GTF reader
@@ -316,7 +314,6 @@ impl GStruct {
             attributes: Attributes::new(attribute_mode, file_type)?,
             misc: Some(HashMap::new()),
         };
-
         Ok(gr)
     }
 

@@ -4,8 +4,9 @@ use std::time::{Duration, Instant};
 use tracing::info;
 use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, EnvFilter};
 pub mod grangers;
+use crate::grangers::options::FieldColumns;
 // use crate::grangers::{FileFormat, FlankOptions};
-use crate::grangers::{Grangers, options, IntervalType};
+use crate::grangers::{options, Grangers, IntervalType};
 use peak_alloc::PeakAlloc;
 use polars::prelude::*;
 
@@ -13,116 +14,117 @@ use polars::prelude::*;
 static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 
 fn main() -> anyhow::Result<()> {
-    // Check the `RUST_LOG` variable for the logger level and
-    // respect the value found there. If this environment
-    // variable is not set then set the logging level to
-    // INFO.
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::INFO.into())
-                .from_env_lossy(),
-        )
-        .init();
+    // // Check the `RUST_LOG` variable for the logger level and
+    // // respect the value found there. If this environment
+    // // variable is not set then set the logging level to
+    // // INFO.
+    // tracing_subscriber::registry()
+    //     .with(fmt::layer())
+    //     .with(
+    //         EnvFilter::builder()
+    //             .with_default_directive(LevelFilter::INFO.into())
+    //             .from_env_lossy(),
+    //     )
+    //     .init();
 
-    let args: Vec<String> = env::args().collect();
-    let gtf_file = PathBuf::from(args.get(1).unwrap());
+    // let args: Vec<String> = env::args().collect();
+    // let gtf_file = PathBuf::from(args.get(1).unwrap());
 
-    // let _fasta_file = PathBuf::from(
-    //     "/mnt/scratch3/alevin_fry_submission/refs/refdata-gex-GRCh38-2020-A/fasta/genome.fa",
-    // );
+    // // let _fasta_file = PathBuf::from(
+    // //     "/mnt/scratch3/alevin_fry_submission/refs/refdata-gex-GRCh38-2020-A/fasta/genome.fa",
+    // // );
 
-    // println!("Start parsing GTF");
+    // // println!("Start parsing GTF");
+    // // let start = Instant::now();
+
+    // // let duration: Duration = start.elapsed();
+    // // println!("Parsed GTF in {:?}", duration);
+
     // let start = Instant::now();
-
+    // let mut gr = Grangers::from_gtf(gtf_file.as_path(), false)?;
     // let duration: Duration = start.elapsed();
-    // println!("Parsed GTF in {:?}", duration);
+    // info!("Built Grangers in {:?}", duration);
+    // info!("Grangers shape {:?}", gr.df().shape());
 
-    let start = Instant::now();
-    let mut gr = Grangers::from_gtf(gtf_file.as_path(), false)?;
-    let duration: Duration = start.elapsed();
-    info!("Built Grangers in {:?}", duration);
-    info!("Grangers shape {:?}", gr.df().shape());
+    // let mo = options::MergeOptions::new(&vec!["seqname", "gene_id", "transcript_id"], false, 1)?;
+    // let start = Instant::now();
+    // gr.merge(&mo)?;
+    // let duration: Duration = start.elapsed();
+    // info!("Merged overlapping ranges in {:?}", duration);
 
-    let mo = options::MergeOptions::new(vec!["seqnames", "gene_id", "transcript_id"], false, 1)?;
-    let start = Instant::now();
-    gr.merge(&mo)?;
-    let duration: Duration = start.elapsed();
-    info!("Merged overlapping ranges in {:?}", duration);
+    // let start = Instant::now();
+    // gr.flank(10, options::FlankOptions::default())?;
+    // let duration: Duration = start.elapsed();
+    // info!("Flanked ranges in {:?}", duration);
 
-    let start = Instant::now();
-    gr.flank(10, options::FlankOptions::default())?;
-    let duration: Duration = start.elapsed();
-    info!("Flanked ranges in {:?}", duration);
+    // let start = Instant::now();
+    // gr.introns(options::IntronsBy::Gene, None, true)?;
+    // let duration: Duration = start.elapsed();
+    // info!("Built intron's Grangers in {:?}", duration);
 
-    let start = Instant::now();
-    gr.introns("gene_id", options::IntronsOptions::default())?;
-    let duration: Duration = start.elapsed();
-    info!("Built intron's Grangers in {:?}", duration);
+    // let start = Instant::now();
+    // gr.extend(10, &options::ExtendOption::Both, false)?;
+    // let duration: Duration = start.elapsed();
+    // info!("Extended ranges in {:?}", duration);
 
-    let start = Instant::now();
-    gr.extend(10, &options::ExtendOption::Both, false)?;
-    let duration: Duration = start.elapsed();
-    info!("Extended ranges in {:?}", duration);
+    // let start = Instant::now();
+    // gr.build_lapper(&mo.by)?;
+    // let duration: Duration = start.elapsed();
+    // info!("Built interval tree in {:?}", duration);
 
-    let start = Instant::now();
-    gr.build_lapper(&mo.by)?;
-    let duration: Duration = start.elapsed();
-    info!("Built interval tree in {:?}", duration);
+    // let df = df!(
+    //     "seqname" => ["chr1", "chr1", "chr1", "chr1", "chr1", "chr2", "chr2", "chr3"],
+    //     "feature_type" => ["exon", "exon", "exon", "exon", "exon", "exon", "exon", "exon"],
+    //     "start" => [1i64, 12, 1, 5, 22, 1, 5, 111],
+    //     "end" => [10i64, 20, 10, 20, 30, 10, 30, 1111],
+    //     "strand"=> ["+", "+", "+", "+", "+", "+", "-", "."],
+    //     "gene_id" => [Some("g1"), Some("g1"), Some("g2"), Some("g2"), Some("g2"), Some("g3"), Some("g4"), None],
+    // )?;
 
-    let df = df!(
-        "seqnames" => ["chr1", "chr1", "chr1", "chr1", "chr1", "chr2", "chr2", "chr3"],
-        "feature_type" => ["exon", "exon", "exon", "exon", "exon", "exon", "exon", "exon"],
-        "start" => [1i64, 12, 1, 5, 22, 1, 5, 111],
-        "end" => [10i64, 20, 10, 20, 30, 10, 30, 1111],
-        "strand"=> ["+", "+", "+", "+", "+", "+", "-", "."],
-        "gene_id" => [Some("g1"), Some("g1"), Some("g2"), Some("g2"), Some("g2"), Some("g3"), Some("g4"), None],
-    )?;
+    // let mut gr = Grangers::new(df, None, None, None, IntervalType::Inclusive(1), FieldColumns::default()).unwrap();
 
-    let mut gr = Grangers::new(df, None, None, None, IntervalType::Inclusive(1)).unwrap();
-    info!("gr: {:?}", gr.df());
-    let mo = options::MergeOptions {
-        by: vec![
-            "seqnames".to_string(),
-            "gene_id".to_string(),
-            "strand".to_string(),
-        ],
-        ignore_strand: false,
-        slack: 1,
-    };
+    // // df.column("name")?.utf8()?.set(&df.column("name")?.is_null(), Some("."))?;
+    // // println!("df: {:?}", df);
 
-    gr.drop_nulls(None)?;
-    info!("drop_nulls' gr: \n{:?}", gr.df());
+    // info!("gr: {:?}", gr.df());
+    // let mo = options::MergeOptions {
+    //     by: vec![
+    //         "seqname".to_string(),
+    //         "gene_id".to_string(),
+    //         "strand".to_string(),
+    //     ],
+    //     ignore_strand: false,
+    //     slack: 1,
+    // };
 
-    let merged_gr = gr.merge(&mo)?;
+    // gr.drop_nulls(None)?;
+    // info!("drop_nulls' gr: \n{:?}", gr.df());
 
-    info!("merged gr: \n{:?}", merged_gr.df());
+    // let merged_gr = gr.merge(&mo)?;
 
-    let mut flanked_gr = gr.flank(10, options::FlankOptions::default())?;
-    info!("flanked gr: \n{:?}", flanked_gr.df());
+    // info!("merged gr: \n{:?}", merged_gr.df());
 
-    flanked_gr.extend(10, &options::ExtendOption::Both, false)?;
-    info!("extended and flanked gr: \n{:?}", flanked_gr.df());
+    // let mut flanked_gr = gr.flank(10, options::FlankOptions::default())?;
+    // info!("flanked gr: \n{:?}", flanked_gr.df());
 
-    use noodles::fasta::record::Sequence;
-    use noodles::core::position::Position;
-    let sequence = Sequence::from(b"ACGT".to_vec());
+    // flanked_gr.extend(10, &options::ExtendOption::Both, false)?;
+    // info!("extended and flanked gr: \n{:?}", flanked_gr.df());
 
-    let start = Position::try_from(1)?;
-    let end = Position::try_from(4)?;
-    let actual = sequence.slice(start..=end).unwrap();
-    
-    let expected = Sequence::from(b"CG".to_vec());
-    
-    println!("{:?}", actual);
-    println!("{:?}", expected);
-    println!("{:?}", noodles::core::region::Interval::from(start..=end));
-    println!("{:?}", (1..=5).collect::<Vec<usize>>());
-    
+    let sequence = noodles::fasta::record::Sequence::from(b"ACGT".to_vec());
+    let mut exon_vec: Vec<u8> = Vec::new();
+
+    exon_vec.extend(sequence.as_ref().iter());
+    exon_vec.extend(sequence.as_ref().iter());
+    let sequence1 = noodles::fasta::record::Sequence::from(exon_vec);
+
+    println!("{:?}", sequence);
+    println!("{:?}", sequence1);
+
+    // df.column("name")?.utf8()?.set(&df.column("name")?.is_null(), Some("."))?;
+
     // library(GenomicRanges)
     // gr <- GRanges(
-    //     seqnames = Rle(rep("chr1", 9)),
+    //     seqname = Rle(rep("chr1", 9)),
     //     ranges = IRanges(c(101, 101, 101, 121,141, 201, 201, 201, 221), end = c(150, 150, 110, 130, 150, 250, 250, 210,250), names = head(letters, 9)),
     //     strand = Rle(strand(c(rep("+",5), rep("-", 4)))),
     //     score = 1:9,

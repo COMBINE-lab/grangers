@@ -10,7 +10,7 @@ pub enum FileFormat {
     SAM,
     BAM,
     FASTA,
-    FASTQ
+    FASTQ,
 }
 
 impl FileFormat {
@@ -124,7 +124,6 @@ pub fn is_gzipped<T: BufRead>(reader: &mut T) -> std::io::Result<bool> {
     }
 }
 
-
 #[derive(Clone, Copy)]
 /// This enum is used for specifying the interval type of the input ranges.\
 /// Each variant takes a `i64` to represent the coordinate system.\
@@ -175,4 +174,3 @@ impl IntervalType {
         }
     }
 }
-
