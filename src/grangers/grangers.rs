@@ -1423,6 +1423,8 @@ impl Grangers {
     }
 }
 
+// strandness cannot be processed internally, so we return a tuple of (strand, sequence pointer)
+// so that ppl can process the strandness externally
 pub struct FeatSeqIter <'a> {
     iters: Vec<polars::series::SeriesIter::<'a>>,
     sequence: &'a noodles::fasta::record::Sequence,
