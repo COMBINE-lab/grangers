@@ -110,7 +110,6 @@ fn main() -> anyhow::Result<()> {
     // flanked_gr.extend(10, &options::ExtendOption::Both, false)?;
     // info!("extended and flanked gr: \n{:?}", flanked_gr.df());
 
-
     let mut df = df!(
         "seqname" => ["chr1", "chr1", "chr1", "chr1", "chr1", "chr2", "chr2"],
         "start" => [1i64, 5, 1, 11, 22, 1, 5],
@@ -132,24 +131,18 @@ fn main() -> anyhow::Result<()> {
         df.with_column(df.column(field_columns.end()).unwrap() - interval_type.end_offset())?;
     }
 
+    // instantiate a new Grangers struct
+    let gr = Grangers {
+        df,
+        misc: None,
+        seqinfo: None,
+        lapper: None,
+        interval_type,
+        field_columns,
+    };
 
-        // instantiate a new Grangers struct
-        let gr = Grangers {
-            df,
-            misc: None,
-            seqinfo: None,
-            lapper: None,
-            interval_type,
-            field_columns,
-        };
-
-        // validate
-        gr.any_nulls(&gr.df().get_column_names(), true, true)?;
-
-
-
-
-
+    // validate
+    gr.any_nulls(&gr.df().get_column_names(), true, true)?;
 
     // df.column("name")?.utf8()?.set(&df.column("name")?.is_null(), Some("."))?;
 

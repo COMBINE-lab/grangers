@@ -1,11 +1,7 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use tracing::warn;
-
-use crate::options::FieldColumns;
-
-pub(crate) const VALIDSTRANDS: [&str;2] = ["+", "-"];
+pub(crate) const VALIDSTRANDS: [&str; 2] = ["+", "-"];
 
 #[derive(Copy, Clone)]
 pub enum FileFormat {
@@ -179,4 +175,3 @@ impl IntervalType {
         }
     }
 }
-

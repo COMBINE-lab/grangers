@@ -50,8 +50,6 @@ impl Default for MergeOptions {
     }
 }
 
-
-
 impl MergeOptions {
     pub fn new<T: AsRef<str>>(
         by: &[T],
@@ -90,7 +88,6 @@ impl MergeOptions {
             ignore_strand,
         })
     }
-
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -233,7 +230,7 @@ impl Default for FieldColumns {
 }
 
 impl FieldColumns {
-    pub fn optional_fields(&self) -> [Option<&str>;8] {
+    pub fn optional_fields(&self) -> [Option<&str>; 8] {
         [
             self.source(),
             self.feature_type(),
@@ -245,13 +242,8 @@ impl FieldColumns {
             self.exon_number(),
         ]
     }
-    pub fn essential_fields(&self) -> [&str;4] {
-        [
-            self.seqname(),
-            self.start(),
-            self.end(),
-            self.strand(),
-        ]
+    pub fn essential_fields(&self) -> [&str; 4] {
+        [self.seqname(), self.start(), self.end(), self.strand()]
     }
     /// Validate itself according to a provided dataframe.
     /// If everything is Ok, return true, else, return false.
@@ -336,7 +328,7 @@ impl FieldColumns {
                 }
             }
         }
-        
+
         if let Some(s) = self.transcript_id() {
             if df.column(s).is_err() {
                 is_valid = false;
@@ -361,13 +353,17 @@ impl FieldColumns {
                 }
             }
         }
-        
+
         if !is_valid & is_bail {
-            bail!("The FieldColumns is not valid; Please try fix it by calling FieldColumns::fix().")
+            bail!(
+                "The FieldColumns is not valid; Please try fix it by calling FieldColumns::fix()."
+            )
         }
 
         if !is_valid & is_warn {
-            warn!("The FieldColumns is not valid; Please try fix it by calling FieldColumns::fix().")
+            warn!(
+                "The FieldColumns is not valid; Please try fix it by calling FieldColumns::fix()."
+            )
         }
 
         Ok(is_valid)
@@ -377,7 +373,10 @@ impl FieldColumns {
         // try fix required fields
         if df.column(self.seqname()).is_err() {
             if is_warn {
-                warn!("cannot find the specified seqname column {} in the dataframe; try to fix", self.seqname());
+                warn!(
+                    "cannot find the specified seqname column {} in the dataframe; try to fix",
+                    self.seqname()
+                );
             }
             if df.column("seqname").is_ok() {
                 self.seqname = "seqname".to_string();
@@ -387,7 +386,10 @@ impl FieldColumns {
         }
         if df.column(self.start()).is_err() {
             if is_warn {
-                warn!("cannot find the specified start column {} in the dataframe; try to fix", self.start());
+                warn!(
+                    "cannot find the specified start column {} in the dataframe; try to fix",
+                    self.start()
+                );
             }
             if df.column("start").is_ok() {
                 self.start = "start".to_string();
@@ -397,7 +399,10 @@ impl FieldColumns {
         }
         if df.column(self.end()).is_err() {
             if is_warn {
-                warn!("cannot find the specified end column {} in the dataframe; try to fix", self.end());
+                warn!(
+                    "cannot find the specified end column {} in the dataframe; try to fix",
+                    self.end()
+                );
             }
             if df.column("end").is_ok() {
                 self.end = "end".to_string();
@@ -407,7 +412,10 @@ impl FieldColumns {
         }
         if df.column(self.strand()).is_err() {
             if is_warn {
-                warn!("cannot find the specified strand column {} in the dataframe; try to fix", self.strand());
+                warn!(
+                    "cannot find the specified strand column {} in the dataframe; try to fix",
+                    self.strand()
+                );
             }
             if df.column("strand").is_ok() {
                 self.strand = "strand".to_string();
@@ -420,7 +428,10 @@ impl FieldColumns {
         if let Some(s) = self.source() {
             if df.column(s).is_err() {
                 if is_warn {
-                    warn!("cannot find the specified source column {} in the dataframe; try to fix", s);
+                    warn!(
+                        "cannot find the specified source column {} in the dataframe; try to fix",
+                        s
+                    );
                 }
                 self.source = if df.column("source").is_ok() {
                     Some("source".to_string())
@@ -444,7 +455,10 @@ impl FieldColumns {
         if let Some(s) = self.score() {
             if df.column(s).is_err() {
                 if is_warn {
-                    warn!("cannot find the specified score column {} in the dataframe; try to fix", s);
+                    warn!(
+                        "cannot find the specified score column {} in the dataframe; try to fix",
+                        s
+                    );
                 }
                 self.score = if df.column("score").is_ok() {
                     Some("score".to_string())
@@ -456,7 +470,10 @@ impl FieldColumns {
         if let Some(s) = self.phase() {
             if df.column(s).is_err() {
                 if is_warn {
-                    warn!("cannot find the specified phase column {} in the dataframe; try to fix", s);
+                    warn!(
+                        "cannot find the specified phase column {} in the dataframe; try to fix",
+                        s
+                    );
                 }
                 self.phase = if df.column("phase").is_ok() {
                     Some("phase".to_string())
@@ -468,7 +485,10 @@ impl FieldColumns {
         if let Some(s) = self.gene_id() {
             if df.column(s).is_err() {
                 if is_warn {
-                    warn!("cannot find the specified gene_id column {} in the dataframe; try to fix", s);
+                    warn!(
+                        "cannot find the specified gene_id column {} in the dataframe; try to fix",
+                        s
+                    );
                 }
                 self.gene_id = if df.column("gene_id").is_ok() {
                     Some("gene_id".to_string())
@@ -492,7 +512,10 @@ impl FieldColumns {
         if let Some(s) = self.exon_id() {
             if df.column(s).is_err() {
                 if is_warn {
-                    warn!("cannot find the specified exon_id column {} in the dataframe; try to fix", s);
+                    warn!(
+                        "cannot find the specified exon_id column {} in the dataframe; try to fix",
+                        s
+                    );
                 }
                 self.exon_id = if df.column("exon_id").is_ok() {
                     Some("exon_id".to_string())
@@ -513,7 +536,7 @@ impl FieldColumns {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -531,12 +554,14 @@ impl FieldColumns {
             "transcript_id" => self.transcript_id(),
             "exon_id" => self.exon_id(),
             "exon_number" => self.exon_number(),
-            _ => {
-                None
-            }
+            _ => None,
         }
     }
-    pub fn field_checked<T: AsRef<str>>(&self, field: T, is_bail: bool) -> anyhow::Result<Option<&str>> {
+    pub fn field_checked<T: AsRef<str>>(
+        &self,
+        field: T,
+        is_bail: bool,
+    ) -> anyhow::Result<Option<&str>> {
         match field.as_ref() {
             "seqname" => Ok(Some(self.seqname.as_str())),
             "source" => Ok(self.source()),
