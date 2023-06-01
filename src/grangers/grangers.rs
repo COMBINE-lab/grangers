@@ -1,7 +1,12 @@
+// TODO:
+// 1. gtf writer
+// 2. testing functions for get sequences functions
+// 3. test sequence functions using true datasets
 use crate::grangers::grangers_utils::*;
 use crate::grangers::options::*;
 use crate::grangers::reader;
 use crate::grangers::reader::fasta::SeqInfo;
+use anyhow::Ok;
 use anyhow::{bail, Context};
 use noodles::fasta;
 use noodles::core::Position;
@@ -9,7 +14,7 @@ pub use noodles::fasta::record::{Definition,Record,Sequence};
 use polars::lazy::dsl::col;
 use polars::{lazy::prelude::*, prelude::*, series::Series};
 use rust_lapper::{Interval, Lapper};
-use std::collections::HashMap;
+use std::collections::{HashMap,HashSet};
 use std::fs;
 use std::io::BufReader;
 use std::ops::{Add, Mul, Sub};
@@ -32,17 +37,17 @@ use tracing::{info, warn};
 #[derive(Clone)]
 pub struct Grangers {
     /// The underlying dataframe
-    df: DataFrame,
+    pub(crate) df: DataFrame,
     /// The additional information
-    misc: Option<HashMap<String, Vec<String>>>,
+    pub(crate) misc: Option<HashMap<String, Vec<String>>>,
     /// The reference information
-    seqinfo: Option<SeqInfo>,
+    pub(crate) seqinfo: Option<SeqInfo>,
     /// The lapper interval tree
-    lapper: Option<Lapper<u64, Vec<String>>>,
+    pub(crate) lapper: Option<Lapper<u64, Vec<String>>>,
     /// The interval type
-    interval_type: IntervalType,
+    pub(crate) interval_type: IntervalType,
     /// The name of the columns that are used to identify the genomic features
-    field_columns: FieldColumns,
+    pub(crate) field_columns: FieldColumns,
 }
 
 // IO
@@ -56,32 +61,25 @@ impl Grangers {
 
     /// check if the essential fields contain null values
     /// Each value in fields should either be a column name or a field of the FieldColumns struct
-    fn any_nulls<T: AsRef<str>>(&self, fields: &[T], complain: bool) -> anyhow::Result<bool> {
+    pub fn any_nulls<T: AsRef<str>>(&self, fields: &[T], is_warn: bool, is_bail: bool) -> anyhow::Result<bool> {
+        self.field_columns().is_valid(self.df(), true, true)?;
         let mut valid = true;
         let df = self.df();
-        let fc = self.field_columns();
 
         for col in fields {
-            // get the name
-            let col = if let Some(col) = fc.get_colname(col, false) {
-                col
-            } else if df.column(col.as_ref()).is_ok() {
-                col.as_ref()
-            } else {
-                bail!(
-                    "The column {} does not exist in the Grangers struct. Cannot check null values",
-                    col.as_ref()
-                )
-            };
-
-            if df.column(col)?.null_count() > 0 {
+            if df.column(self.get_column_name(col.as_ref(), false)?)?.null_count() > 0 {
                 valid = false;
-                if complain {
-                    warn!("The column {} contains null values. This will cause problems for most Grangers functions.", col);
+                if is_warn {
+                    warn!("The given field {} contains null values. This will cause problems for most Grangers functions.", col.as_ref());
                 }
             }
         }
-        if (!valid) & complain {
+
+        if (!valid) & is_bail {
+            bail!("The dataframe contains null values. You can drop null values by using the Grangers::drop_nulls() method.")
+        }
+
+        if (!valid) & is_warn {
             warn!("You can drop null values by using the Grangers::drop_nulls() method.")
         }
 
@@ -101,15 +99,13 @@ impl Grangers {
         misc: Option<HashMap<String, Vec<String>>>,
         lapper: Option<Lapper<u64, Vec<String>>>,
         interval_type: IntervalType,
-        field_columns: FieldColumns,
+        mut field_columns: FieldColumns,
+        // verbose: bool,
     ) -> anyhow::Result<Grangers> {
-        let field_columns = if let Some(validated) = field_columns.validate(&df, true)? {
-            validated
-        } else {
-            field_columns
-        };
-
-
+        // we reject if the field_column is not valid
+        if !field_columns.is_valid(&df, true, false)? {
+            field_columns.fix(&df, false)?;
+        }
         // if the interval type is not inclusive, we need to convert it to inclusive
         if interval_type.start_offset() != 0 {
             df.with_column(df.column(field_columns.start()).unwrap() - interval_type.start_offset())?;
@@ -130,7 +126,7 @@ impl Grangers {
         };
 
         // validate
-        gr.any_nulls(&gr.df().get_column_names(), true)?;
+        gr.any_nulls(&gr.field_columns().essential_fields(), true, true)?;
 
         Ok(gr)
     }
@@ -235,6 +231,16 @@ impl Grangers {
         &self.field_columns
     }
 
+    /// get the mutable reference of the field_columns
+    pub fn field_columns_mut(&mut self) -> &FieldColumns {
+        &mut self.field_columns
+    }
+
+    pub fn field_columns_checked(&self, is_warn: bool, is_bail: bool) -> anyhow::Result<&FieldColumns> {
+        self.field_columns().is_valid(self.df(), is_warn, is_bail)?;
+        Ok(self.field_columns())
+    }
+
     /// get the reference of the underlying dataframe
     pub fn df(&self) -> &DataFrame {
         &self.df
@@ -267,12 +273,51 @@ impl Grangers {
     }
 }
 
-// get record fields
 impl Grangers {
-    fn column(&self, col_name: &str) -> anyhow::Result<&Series> {
-        self.df
-            .column(col_name)
-            .with_context(|| format!("Could not get the column {} from the dataframe.", col_name))
+    /// get the column name of the given name. If it is a field of the FieldColumns struct, return the corresponding column name; If it is a column name, return itself\
+    pub fn get_column_name<T: AsRef<str>>(&self, name: T, bail_null: bool) -> anyhow::Result<&str> {
+        let name = name.as_ref();
+        // if it is a column name, return itself
+        let fc = self.field_columns_checked(false, true)?;
+
+        let name = if let Some(col) = fc.field(name) {
+            col
+        } else if self.df().get_column_names().contains(&name) {
+            self.df().column(name)?.name()
+        } else {
+            bail!("{} is neither a column in the dataframe nor a field of FieldColumns. Cannot proceed", name)
+        };
+
+        if bail_null {
+            if self.df().column(name)?.null_count() > 0 {
+                bail!("The column {} contains null values. Cannot proceed.", name)
+            }
+        }
+
+        Ok(name)
+    }
+
+    pub fn column<T: AsRef<str>>(&self, name: T) -> anyhow::Result<&Series> {
+        let direct = self.df().column(name.as_ref());
+        
+        // first check if it is a direct column
+        // if not, try to get the column from the field_columns
+        let col = if direct.is_ok() {            
+            direct?
+        } else {
+            // make sure that FieldColumns is valid
+            let col = self.get_column_name(name.as_ref(), false)?;
+            self.df().column(col)?
+        };
+        Ok(col)
+    }
+
+    pub fn columns<T: AsRef<str>>(&self, names: &[T]) -> anyhow::Result<Vec<&Series>> {
+        let mut cols = Vec::new();
+        for name in names {
+            cols.push(self.column(name)?);
+        }
+        Ok(cols)
     }
 
     /// get the reference to the seqname column
@@ -328,13 +373,47 @@ impl Grangers {
     }
 
     /// check if the GRanges object has a column of a given name
-    fn is_column(&self, col_name: &str) -> bool {
-        let df = self.df();
-        let mut valid = false;
-        if df.get_column_names().contains(&col_name) {
-            valid = true;
+    pub fn is_column<T: AsRef<str>>(&self, name: T) -> bool {
+        if self.column(name).is_ok() {
+            true
+        } else {
+            false
         }
-        valid
+    }
+}
+
+// validate Grangers
+impl Grangers {
+    /// 
+    pub fn validate(&self, is_warn: bool, is_bail: bool) -> anyhow::Result<bool> {
+        // field columns will check if the fields exist in the dataframe
+        let valid_fc = self.field_columns.is_valid(self.df(), false, true)?;
+
+        if is_warn & !valid_fc {
+            warn!("The field_columns is not valid. You can use Grangers::fix_field_columns() to fix it.");
+            return Ok(false)
+        }
+        
+        // Then we check null values in the essential fields
+        let essential_nulls = self.any_nulls(&self.field_columns().essential_fields(), false, is_bail)?;
+
+        if is_warn & essential_nulls {
+            warn!("The dataframe contains null values in the essential fields - seqname, start, end and strand. You can use Grangers::drop_nulls() to drop them.");
+            return Ok(false)
+        }
+
+        // then additional fields
+        if is_warn {
+            self.any_nulls(&self.df().get_column_names(), is_warn, false)?;
+        }
+        Ok(true)
+    }
+
+    pub fn fix_field_columns(&mut self, is_warn: bool) -> anyhow::Result<()> {
+        let mut field_columns = self.field_columns().clone();
+        field_columns.fix(self.df(), is_warn)?;
+        self.field_columns = field_columns;
+        Ok(())
     }
 }
 
@@ -355,36 +434,28 @@ impl Grangers {
         // get exon records only
         // if this call succeeds, we can make sure that the exon records are all valid
         let exon_gr = self.exons(exon_feature, multithreaded)?;
-        let fc = exon_gr.field_columns();
 
         // parse `by`
         // we need to make sure `by` points to a valid column
-        let by =  if self.is_column(by.as_ref()) {
-            by.as_ref()
-        }  else if let Some(by) = fc.get_colname(by.as_ref(), false) {
-            by
-        }else {
-            bail!("The column {} neither exists in the dataframe nor represents a field of FieldColumns. Cannot use it to group exons", by.as_ref())
-        };
-
-        let mo = MergeOptions::new(&[by], false, 1)?;
-        exon_gr.gaps(&mo)
+        let by = exon_gr.get_column_name(by.as_ref(), true)?;
+        exon_gr.gaps(&[by], false, None)
     }
 
     /// get the range of each gene. The range of each gene will be the union of the ranges of all exons of the gene.\
     /// Therefore, this function calls exons() internally to get the exon ranges.\ 
     /// To make this function work, the grangers must have well-defined exon records.\ 
     pub fn genes(&self, exon_feature: Option<&str>, multithreaded: bool) -> anyhow::Result<Grangers> {
-        let gene_id = check_col(&self.df(), self.field_columns().gene_id())?;
-        self.boundary(gene_id.as_str(), exon_feature, multithreaded)
+        self.validate(false, true)?;
+        let gene_id = self.get_column_name("gene_id", true)?;
+        self.boundary(gene_id, exon_feature, multithreaded)
     }
 
     /// get the range of each transcript. The range of each gene will be the union of the ranges of all exons of the gene.\
     /// Therefore, this function calls exons() internally to get the exon ranges.\ 
     /// To make this function work, the grangers must have well-defined exon records.\
     pub fn transcripts(&self, exon_feature: Option<&str>, multithreaded: bool) -> anyhow::Result<Grangers> {
-        let transcript_id = check_col(&self.df(), self.field_columns().transcript_id())?;
-        self.boundary(transcript_id.as_str(), exon_feature, multithreaded)
+        let transcript_id = self.get_column_name("transcript_id", true)?;
+        self.boundary(transcript_id, exon_feature, multithreaded)
     }
 
 
@@ -392,26 +463,27 @@ impl Grangers {
     /// To make sense, one should provide the ID column of genes or transcripts. The range of each group will be the union of the ranges of all exons of the gene.\
     /// Therefore, this function calls exons() internally to get the exon ranges.\ 
     /// To make this function work, the grangers must have well-defined exon records.\
-    pub fn boundary(&self, field_column: &str, exon_feature: Option<&str>, multithreaded: bool) -> anyhow::Result<Grangers> {
+    pub fn boundary(&self, by: &str, exon_feature: Option<&str>, multithreaded: bool) -> anyhow::Result<Grangers> {
+        self.validate(false, true)?;
         let mut exon_gr = self.exons(exon_feature, multithreaded)?;
-        let fc = exon_gr.field_columns();
-        let seqname = check_col(&exon_gr.df(), Some(fc.seqname()))?;
-        let start = check_col(&exon_gr.df(), Some(fc.start()))?;
-        let end = check_col(&exon_gr.df(), Some(fc.end()))?;
-        let strand = check_col(&exon_gr.df(), Some(fc.strand()))?;
-        let field_column = check_col(&exon_gr.df(), Some(field_column))?;
+        let fc = self.field_columns();
+        let seqname = fc.seqname();
+        let start = fc.start();
+        let end = fc.end();
+        let strand = fc.strand();
+        let by = self.get_column_name(by, true)?;
 
         // check if genes are well defined: all features of a gene should have a valid seqname, start, end, and strand
         let any_invalid = exon_gr.df().select([
-            seqname.as_str(),
-            strand.as_str(),
-            field_column.as_str()
+            seqname,
+            strand,
+            by
         ])?
         .lazy()
-        .groupby([field_column.as_str()])
+        .groupby([by])
         .agg([
-            col(seqname.as_str()).unique().count().eq(lit(1)),
-            col(strand.as_str()).unique().count().eq(lit(1))])
+            col(seqname).unique().count().eq(lit(1)),
+            col(strand).unique().count().eq(lit(1))])
         .select([
             all().any()
         ])
@@ -425,14 +497,13 @@ impl Grangers {
         };
         
         exon_gr.df = exon_gr.df.lazy()
-            .groupby([seqname.as_str(), field_column.as_str(), strand.as_str()])
+            .groupby([seqname, by, strand])
             .agg([
-                col(start.as_str()).min(),
-                col(end.as_str()).max(),
+                col(start).min(),
+                col(end).max(),
             ])
             .collect()?;
         Ok(self.clone())
-
     }
 
     /// filter exon records and deduplicate if needed according to the by parameter.\
@@ -450,26 +521,19 @@ impl Grangers {
         exon_feature: Option<&str>,
         multithreaded: bool,
     ) -> anyhow::Result<Grangers> {
-        // validate the field_columns
-        let mut fc = if let Some(fc) = self.field_columns().validate(self.df(), false)? {
-            fc
-        } else {
-            self.field_columns().to_owned()
-        };
+        // validate itself
+        // essential fields have no null values
+        // all fields correspond to a column in the dataframe
+        self.validate(false, true)?;
 
-        // parse exon_feature
-        let exon_feature = if let Some(en) = exon_feature {
-            en.to_string()
+        let exon_feature = if let Some(exon_feature) = exon_feature {
+            exon_feature
         } else {
-            "exon".to_string()
+            "exon"
         };
 
         // feature_type can have null values, they will be ignored
-        let feature_type = if let Some(ft) = &fc.feature_type {
-            ft.as_str()
-        } else {
-            bail!("The {:?} column does not exist in the Grangers struct. This is required for identifying exon records. Cannot proceed", fc.feature_type);
-        };
+        let feature_type = self.get_column_name("feature_type", false)?;
 
         if self.column(feature_type)?.null_count() > 0 {
             warn!("Found rows with a null `{}` value. These rows will be ignored when selecting exon records.", feature_type)
@@ -481,27 +545,39 @@ impl Grangers {
                 .df()
                 .column(feature_type)?
                 .iter()
-                .map(|f| f.eq(&AnyValue::Utf8(exon_feature.as_str())))
+                .map(|f| f.eq(&AnyValue::Utf8(exon_feature)))
                 .collect(),
         )?;
 
-        // then we need to check if the exon records are valid
-        check_col(&exon_df, Some(fc.seqname()))?;
-        let start = check_col(&exon_df, Some(fc.start()))?;
-        let end = check_col(&exon_df, Some(fc.end()))?;
-        let strand = check_col(&exon_df, Some(fc.strand()))?;
-        let transcript_id = check_col(&exon_df, fc.transcript_id())?;
-        let _gene_id = check_col(&exon_df, fc.gene_id())?;
-        let _exon_id = check_col(&exon_df, fc.exon_id())?;
+        // We know fields are valid, then we need to check nulls
+        let mut fc = self.field_columns().clone();
+        let start = fc.start();
+        let end = fc.end();
+        let strand = fc.strand();
+        let gene_id = self.get_column_name("gene_id", false)?;
+        if exon_df.column(gene_id)?.null_count() > 0 {
+            bail!("The gene_id column contains null values. Cannot proceed.")
+        }
+        let transcript_id = self.get_column_name("transcript_id", false)?;
+
+        if exon_df.column(gene_id)?.null_count() > 0 {
+            bail!("The gene_id column contains null values. Cannot proceed.")
+        }
+        let exon_id = self.get_column_name("exon_id", false)?;
+        if exon_df.column(exon_id)?.null_count() > 0 {
+            bail!("The exon_id column contains null values. Cannot proceed.")
+        }
+
+
 
         // make sure that stand is valid:
         // - the exons of each transcript are on the same strand
         // - the strand column does not contain other values than "+" or "-"
-        let tx_strand = exon_df.select([transcript_id.as_str(), strand.as_str()])?
+        let tx_strand = exon_df.select([transcript_id, strand])?
             .lazy()
-            .groupby([transcript_id.as_str()])
+            .groupby([transcript_id])
             .agg([
-                col(strand.as_str())
+                col(strand)
                     .unique()
                     .count()
                     .gt(lit(1)
@@ -512,7 +588,7 @@ impl Grangers {
         }
 
         if !exon_df
-            .column(strand.as_str())?
+            .column(strand)?
             .unique()?
             .is_in(&Series::new("valid strands", ["+", "-"]))?
             .all()
@@ -521,7 +597,7 @@ impl Grangers {
         }
 
         // make sure start and end are positive
-        if let Some(start_min) = exon_df.column(start.as_str())?.i64()?.min() {
+        if let Some(start_min) = exon_df.column(start)?.i64()?.min() {
             if start_min < 1 {
                 bail!(
                     "The {} column contains values less than 1. Cannot proceed.",
@@ -535,17 +611,17 @@ impl Grangers {
             )
         }
 
-        if let Some(end_min) = exon_df.column(end.as_str())?.i64()?.min() {
+        if let Some(end_min) = exon_df.column(end)?.i64()?.min() {
             if end_min < 1 {
                 bail!(
                     "The {} column contains values less than 1. Cannot proceed.",
-                    end.as_str()
+                    end
                 )
             }
         } else {
             bail!(
                 "The Cannot get min value in the {} column. Cannot proceed.",
-                end.as_str()
+                end
             )
         }
         
@@ -581,7 +657,7 @@ impl Grangers {
                                     multithreaded,
                                 }).add(lit(1))
                         )
-                        .over([transcript_id.as_str()])
+                        .over([transcript_id])
                         .cast(DataType::Utf8)
                         .alias(fc.exon_number().unwrap()),
                     
@@ -599,17 +675,18 @@ impl Grangers {
                     [col(exon_number.as_str()).cast(DataType::UInt64)],
                     [false],
                 )
-                .over([col(transcript_id.as_str())])])
+                .over([col(transcript_id)])])
             .collect()?;
 
         // well done!
+        fc.fix(&exon_df, false)?;
         let gr = Grangers::new(
             exon_df,
             self.seqinfo.clone(),
             self.misc.clone(),
             None,
             self.interval_type,
-            fc,
+            fc
         )?;
 
         Ok(gr)
@@ -622,23 +699,33 @@ impl Grangers {
         extend_option: &ExtendOption,
         ignore_strand: bool,
     ) -> anyhow::Result<()> {
+
+        self.validate(false, true)?;
+        let start_s = self.get_column_name("start", true)?.to_owned();
+        let start = start_s.as_str();
+        let end_s = self.get_column_name("end", true)?.to_owned();
+        let end = end_s.as_str();
+        let strand_s = self.get_column_name("strand", true)?.to_owned();
+        let strand = strand_s.as_str();
+
         // if contains null value in strand, we cannot do strand-specific extension
         if (!ignore_strand) & (extend_option != &ExtendOption::Both)
-            && self.column("strand")?.is_null().any()
-                | self
-                    .column("strand")?
+            && self.column(strand)?.is_null().any()
+                | (!self
+                    .column(strand)?
                     .unique()?
-                    .is_in(&Series::new("missing strand", ["."]))?
-                    .any()
+                    .is_in(&Series::new("valid stands", VALIDSTRANDS))?
+                    .all())
         {
-            bail!("The strand column contains null values. Please remove them first or set ignore_strand to true.")
+            bail!("The strand column contains values other than {:?}. Please remove them first or set ignore_strand to true.", VALIDSTRANDS)
         }
 
+        // if both, then we extend both sides
         if let ExtendOption::Both = extend_option {
             self.df
-                .with_column(self.df.column("start")?.clone() - length)?;
+                .with_column(self.df.column(start)?.clone() - length)?;
             self.df
-                .with_column(self.df.column("end")?.clone() + length)?;
+                .with_column(self.df.column(end)?.clone() + length)?;
             return Ok(());
         }
 
@@ -646,53 +733,53 @@ impl Grangers {
             match extend_option {
                 ExtendOption::Start => {
                     self.df
-                        .with_column(self.df.column("start")?.clone() - length)?;
+                        .with_column(self.df.column(start)?.clone() - length)?;
                     return Ok(());
                 }
                 ExtendOption::End => {
                     self.df
-                        .with_column(self.df.column("end")?.clone() + length)?;
+                        .with_column(self.df.column(end)?.clone() + length)?;
                     return Ok(());
                 }
                 _ => {}
             }
         } else {
-            let mut df = self.df().select(["start", "end", "strand"])?;
+            let mut df = self.df().select([start, end, strand])?;
             df = df
                 .lazy()
                 .with_columns([
                     // we first consider the start site
                     // when the strand is + and extend from start, or the strand is - and extend from end, we extend the start site
                     when(
-                        col("strand")
+                        col(strand)
                             .eq(lit("+"))
                             .eq(lit(extend_option == &ExtendOption::Start))
-                            .or(col("strand")
+                            .or(col(strand)
                                 .eq(lit("-"))
                                 .eq(lit(extend_option == &ExtendOption::End))),
                     )
-                    .then(col("start").sub(lit(length)))
-                    .otherwise(col("start"))
-                    .alias("start"),
+                    .then(col(start).sub(lit(length)))
+                    .otherwise(col(start))
+                    .alias(start),
                     // then the end site
                     // when the strand is - and extend from start, or the strand is + and extend from end, we extend the end site
                     when(
-                        col("strand")
+                        col(strand)
                             .eq(lit("-"))
                             .eq(lit(extend_option == &ExtendOption::Start))
-                            .or(col("strand")
+                            .or(col(strand)
                                 .eq(lit("+"))
                                 .eq(lit(extend_option == &ExtendOption::End))),
                     )
-                    .then(col("end").add(lit(length)))
-                    .otherwise(col("end"))
-                    .alias("end"),
+                    .then(col(end).add(lit(length)))
+                    .otherwise(col(end))
+                    .alias(end),
                 ])
                 .collect()?;
 
             // Then we update df
-            self.df.with_column(df.column("start")?.clone())?;
-            self.df.with_column(df.column("end")?.clone())?;
+            self.df.with_column(df.column(start)?.clone())?;
+            self.df.with_column(df.column(end)?.clone())?;
         }
         Ok(())
     }
@@ -743,6 +830,11 @@ impl Grangers {
     ///     Grangers: a new `Grangers` object with the flanked ranges.
     // flank doesn't not related to interval thing
     pub fn flank(&self, width: i64, options: FlankOptions) -> anyhow::Result<Grangers> {
+        self.validate(true, true)?;
+        let start = self.get_column_name("start", true)?;
+        let end = self.get_column_name("end", true)?;
+        let strand = self.get_column_name("strand", true)?;
+
         let df = self
             .df()
             .clone()
@@ -750,18 +842,18 @@ impl Grangers {
             .with_column(
                 when(options.ignore_strand)
                     .then(lit(true))
-                    .otherwise(col("strand").eq(lit("-")).neq(lit(options.start)))
-                    .alias("start_flags"),
+                    .otherwise(col(strand).eq(lit("-")).neq(lit(options.start)))
+                    .alias("start_flags_temp"),
             )
             .with_column(
                 // when both is true
                 when(options.both)
                     .then(
                         // when start_flag is true
-                        when(col("start_flags").eq(lit(true)))
-                            .then(col("start") - lit(width).abs())
+                        when(col("start_flags_temp").eq(lit(true)))
+                            .then(col(start) - lit(width).abs())
                             // when start_flag is false
-                            .otherwise(col("end") - lit(width).abs() + lit(1)),
+                            .otherwise(col(end) - lit(width).abs() + lit(1)),
                     )
                     // when both is false
                     .otherwise(
@@ -769,31 +861,31 @@ impl Grangers {
                         when(width >= 0)
                             .then(
                                 // tstart = all_starts[idx] - abs(width) if sf else all_ends[idx] + 1
-                                when(col("start_flags").eq(lit(true)))
-                                    .then(col("start") - lit(width))
-                                    .otherwise(col("end") + lit(1)),
+                                when(col("start_flags_temp").eq(lit(true)))
+                                    .then(col(start) - lit(width))
+                                    .otherwise(col(end) + lit(1)),
                             )
                             .otherwise(
                                 // tstart = all_starts[idx] if sf else all_ends[idx] + abs(width) + 1
-                                when(col("start_flags").eq(lit(true)))
-                                    .then(col("start"))
-                                    .otherwise(col("end") + lit(width) + lit(1)),
+                                when(col("start_flags_temp").eq(lit(true)))
+                                    .then(col(start))
+                                    .otherwise(col(end) + lit(width) + lit(1)),
                             ),
                     )
-                    .alias("start"),
+                    .alias(start),
             )
             .select([
                 // everything except end and start_flags
-                all().exclude(["end", "start_flags"]),
+                all().exclude([end, "start_flags_temp"]),
                 // new_ends.append(tstart + (width * (2 if both else 1) - 1))
-                col("start")
+                col(start)
                     .add(
                         (lit(width)
                             .abs()
                             .mul(when(lit(options.both)).then(lit(2)).otherwise(lit(1))))
                         .sub(lit(1)),
                     )
-                    .alias("end"),
+                    .alias(end),
             ])
             .select(
                 self.df()
@@ -834,92 +926,120 @@ impl Grangers {
 
     /// Find the gaps between features in each group identified by the provided `by` vector.
     /// As this function will call the `merge` function first, so it takes a `MergeOptions` as the parameter.
-    pub fn gaps(&self, options: &MergeOptions) -> anyhow::Result<Grangers> {
-        // check if the `by` vector contains valid column namess
-        for col_name in options.by.iter() {
-            if !self.is_column(col_name.as_ref()) {
-                bail!(
-                    " `by` contains non-existing column - {}. Cannot proceed",
-                    col_name
-                );
-            }
-        }
+    pub fn gaps<T: AsRef<str>>(&self, 
+        by: &[T],
+        ignore_strand: bool,
+        slack: Option<usize>
+    ) -> anyhow::Result<Grangers> {
 
         // merge returns a sorted and merged Grangers object
-        let mut gr = self.merge(options)?;
-        gr.df = gr.apply(&options.by, 0, options.ignore_strand, apply_gaps)?;
+        let mut gr = self.merge(by, ignore_strand, slack)?;
+
+        gr.df = gr.apply(&by, 1, ignore_strand, apply_gaps)?;
         Ok(gr)
     }
 
     /// drop rows inplace that contain missing values in the given columns.
     /// if `cols` is None, all columns will be checked.
-    pub fn drop_nulls(&mut self, cols: Option<&Vec<String>>) -> anyhow::Result<()> {
+    pub fn drop_nulls<T: AsRef<str>>(&mut self, fields: Option<&[T]>) -> anyhow::Result<()> {
+        self.validate(false, true)?;
         // check the validity of the column names
-        let check_cols = match cols {
-            Some(cols) => cols.to_owned(),
-            None => self
-                .df()
-                .get_column_names()
-                .into_iter()
-                .map(|n| n.to_string())
-                .collect(),
+        let cols = match fields {
+            Some(names) => {
+                self.columns(names)?.iter().map(|s| s.name()).collect()
+            },
+            None => self.df.get_column_names()
         };
-        for col in check_cols.iter() {
-            if !self.is_column(col) {
-                bail!("Column {} does not exist in the Grangers object.", col);
-            }
-        }
 
-        *self.df_mut() = self.df().drop_nulls(Some(&check_cols))?;
+        *self.df_mut() = self.df().drop_nulls(Some(&cols))?;
         Ok(())
     }
+
+
 
     /// merge the features by the given columns via the `by` argument to generate a new Grangers object.
     /// The `by` columns cannot have any missing value. If yours' do, run something like `gr.drop_nulls(&vec!["by_col1".to_string(), "by_col2".to_string()])` first.
     /// ### Argument:
     /// Merge Option: a struct containing the following fields:
     /// - `by`: a vector of string representing which group(s) to merge by. Each string should be a valid column name.
+    /// To make sense, one should provide the ID column of genes or transcripts. The range of each group will be the union of the ranges of all features in each group.\
     /// - `ignore_strand`: whether to ignore the strand information when merging.
     /// - `slack`: the maximum distance between two features to be merged. Slack should be a non-negative integer. For example we have three intervals, [1,2], [3,4] and [4,5]
     ///     - slack = 1 means [1,2] and [3,4] will be merged as [1,4]. This is the default (and desired) behavior unless you do not want to merge adjacent intervals.
     ///     - slack = 0 means [1,2] and [2,3] will stay separated although they are adjacent.
     ///     - slack=2 means[1,2] and [4,5] will be merged though there is a base [3,3] in between that separate them. The slack here is equivalent to the `min.gapwidth` argument in the GenomicRanges::reduce() function in R.
-    pub fn merge(&self, options: &MergeOptions) -> anyhow::Result<Grangers> {
-        // check if the `by` vector contains valid column namess
-        for col_name in options.by.iter() {
-            if !self.is_column(col_name.as_ref()) {
-                bail!(
-                    " `by` contains non-existing column - {}. Cannot proceed",
-                    col_name
-                );
+    pub fn merge<T: AsRef<str>>(&self, 
+        by: &[T],
+        ignore_strand: bool,
+        slack: Option<usize>
+    ) -> anyhow::Result<Grangers> {
+        self.validate(false, true)?;
+        // these are all valid after validateion
+        let fc = self.field_columns();
+        let seqname = fc.seqname();
+        let start = fc.start();
+        let end = fc.end();
+        let strand = fc.strand();
+
+        // this makes sure that field_column fields and their corresponding columns appear only once
+        let mut by_hash: HashSet<&str> = HashSet::with_capacity(by.len());
+        for name in by.iter() {
+            let name = self.get_column_name(name.as_ref(), true)?;
+            by_hash.insert(name);
+        };
+
+        // make sure that essential fields are not in the by hash
+
+        if by_hash.take(start).is_some()
+            | by_hash.take(end).is_some()
+        {
+            bail!("The provided `by` vector cannot contain the start or end column")
+        };
+
+        
+        let slack = if let Some(s) = slack {
+            if s < 1 {
+                warn!("It usually doen't make sense to set slack as zero.")
             }
+            s as i64
+        } else {
+        1 
+        };
+
+        if ignore_strand {
+            if by_hash.take(strand).is_some() {
+                warn!("Remove `strand` from the provided `by` vector as the ignored_strand flag is set.")
+            }
+        } else {
+            by_hash.insert(strand);
         }
-        let mut by = options.by.to_owned();
-        if !options.ignore_strand & !options.by.contains(&"strand".to_string()) {
-            warn!("ignore_strand is set to false. Added `strand` to the `by` vector");
-            by.push(String::from("strand"));
-        }
+
+        // add chromosome name and strand if needed
+        if by_hash.insert(seqname) {
+            info!("Added `seqname` to the `by` vector as it is required.")
+        };
+        let by: Vec<&str> = by_hash.into_iter().collect();
 
         let df = self.apply(
             &by,
-            options.slack,
-            options.ignore_strand,
+            slack,
+            ignore_strand,
             apply_merge,
         )?;
-
-        Ok(Grangers {
+        
+        Grangers::new(
             df,
-            seqinfo: self.seqinfo.clone(),
-            misc: self.misc.clone(),
-            lapper: self.lapper.clone(),
-            interval_type: self.interval_type,
-            field_columns: self.field_columns.clone(),
-        })
+            self.seqinfo.clone(),
+            self.misc.clone(),
+            None,
+            self.interval_type,
+            self.field_columns.clone(),
+        )
     }
 
-    fn apply<F>(
+    fn apply<F, T: AsRef<str>>(
         &self,
-        by: &[String],
+        by: &[T],
         slack: i64,
         ignore_strand: bool,
         apply_fn: F,
@@ -931,30 +1051,44 @@ impl Grangers {
             + std::marker::Sync
             + 'static,
     {
+        
+        self.validate(false, true)?;
+        // these are all valid after validateion
         let df = self.df();
         let fc = self.field_columns();
-        let seqname = check_col(df, Some(fc.seqname()))?;
-        let start = check_col(df, Some(fc.start()))?;
-        let end = check_col(df, Some(fc.end()))?;
-        let strand = check_col(df, Some(fc.strand()))?;
+        let seqname = fc.seqname();
+        let start = fc.start();
+        let end = fc.end();
+        let strand = fc.strand();
 
         // we take the selected columns and add two more columns: start and end
-        let mut selected = by.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
-        selected.append(vec![start.as_str(), end.as_str()].as_mut());
+        let mut selected = by.iter().map(|s| s.as_ref()).collect::<Vec<&str>>();
+        if !selected.contains(&seqname) {
+            selected.push(seqname);
+        }
+        if !selected.contains(&start) {
+            selected.push(start);
+        }
+        if !selected.contains(&end) {
+            selected.push(end);
+        }
+        if !ignore_strand && !selected.contains(&strand) {
+            selected.push(strand);
+        }
 
         // we want to sort the dataframe by first by columns, then the essential columns
-        let mut sorted_by_exprs_essential = vec![col(seqname.as_str()), col(start.as_str()), col(end.as_str())];
+        let mut sorted_by_exprs_essential = vec![col(seqname), col(start), col(end)];
         // we sort start in ascending order and end in descending order so that in each group, 
         let mut sorted_by_desc_essential = vec![false, false, true];
         if !ignore_strand {
-            sorted_by_exprs_essential.push(col(strand.as_str()));
+            sorted_by_exprs_essential.push(col(strand));
             sorted_by_desc_essential.push(false);
         }
 
         let mut sorted_by_exprs: Vec<Expr> = by
             .iter()
-            .filter(|&n| !sorted_by_exprs_essential.contains(&col(n.as_str())))
-            .map(|n| col(n.as_str()))
+            .filter(|&n| !sorted_by_exprs_essential.contains(&col(n.as_ref())))
+            .map(|n| col(n.as_ref()))
             .collect();
 
         let mut sorted_by_desc = vec![false; sorted_by_exprs.len()];
@@ -965,22 +1099,10 @@ impl Grangers {
         let mut df = df.select(&selected)?;
 
         // let's see polars' way of checking missing values saying df.isna().sum()
-        if df
-            .null_count()
-            .sum()
-            .get_row(0)?
-            .0
-            .into_iter()
-            .any(|c| c != AnyValue::UInt32(0))
+        if self.any_nulls(&selected, true, false)?
         {
             warn!("Found null value(s) in the selected columns -- {:?}. As null will be used for grouping, we recommend dropping all null values by calling gr.drops_nulls() beforehand.", selected)
         }
-
-        // we make sure that start and end have no null values
-        if df.column("start")?.null_count() > 0 {
-            bail!("The start column contains null values. Cannot proceed.")
-        };
-
 
         // we will do the following
         // 1. sort the dataframe by the `by` columns + start and end columns
@@ -992,41 +1114,40 @@ impl Grangers {
             .lazy()
             // TODO: This can be replaced by select([all().sort(essentials).over(groups)]). Not sure if it is faster
             .sort_by_exprs(&sorted_by_exprs, &sorted_by_desc, false)
-            .groupby(by.iter().map(|s| s.as_str()).collect::<Vec<&str>>())
+            .groupby(by.iter().map(|s| s.as_ref()).collect::<Vec<&str>>())
             .agg([
-                all().exclude([start.as_str(), end.as_str()]).first(),
+                all().exclude([start, end]).first(),
                 // process two columns at once
                 // Notice the df is sorted
-                as_struct(&[col(start.as_str()), col(end.as_str())])
+                as_struct(&[col(start), col(end)])
                     .apply(
                         move |s| apply_fn(s, slack),
                         GetOutput::from_type(DataType::List((DataType::Int64).into())),
                     )
-                    // .arr().sort(SortOptions {descending: if ignore_strand {false} else {col("strand").first() == lit("-")}, nulls_last: false, multithreaded:  true})
-                    .alias("pos"),
+                    .alias("start_end_list-temp-nobody-will-use-this-name-right"),
             ])
-            .explode(["pos"])
+            .explode(["start_end_list-temp-nobody-will-use-this-name-right"])
             // with_columns returns all columns and adds extra
             // as we can't drop a non-existing column, we need to add a dummy column
             .with_columns([
-                col("pos").arr().get(lit(0)).alias(start.as_str()),
-                col("pos").arr().get(lit(1)).alias("end"),
-                lit(NULL).cast(DataType::Utf8).alias(if ignore_strand {
-                    "strand"
+                col("start_end_list-temp-nobody-will-use-this-name-right").arr().get(lit(0)).alias(start),
+                col("start_end_list-temp-nobody-will-use-this-name-right").arr().get(lit(1)).alias(end),
+                lit(".").alias(if ignore_strand {
+                    strand
                 } else {
-                    "ignore_strand"
+                    "ignore_strand-temp-nobody-will-use-this-name-right"
                 }),
             ])
-            .drop_nulls(Some(vec![cols(["start", "end"])]))
-            .with_column(lit(NULL).cast(DataType::Utf8).alias("ignore_strand"))
-            .select([all().exclude(["pos", "ignore_strand"])])
+            .drop_nulls(Some(vec![cols([start, end])]))
+            .with_column(lit(".").cast(DataType::Utf8).alias("ignore_strand-temp-nobody-will-use-this-name-right"))
+            .select([all().exclude(["start_end_list-temp-nobody-will-use-this-name-right", "ignore_strand-temp-nobody-will-use-this-name-right"])])
             // rearrange the columns
             .select([
-                col("seqname"),
-                col("start"),
-                col("end"),
-                col("strand"),
-                all().exclude(["seqname", "start", "end", "strand"]),
+                col(seqname),
+                col(start),
+                col(end),
+                col(strand),
+                all().exclude([seqname, start, end, strand]),
             ])
             // groupby is multithreaded, so the order do not preserve
             .sort_by_exprs(sorted_by_exprs, sorted_by_desc, false)
@@ -2265,10 +2386,9 @@ mod tests {
         if SAY {
             println!("gr: {:?}", gr.df());
         }
-        let mo = MergeOptions::new(&vec!["seqname", "gene_id"], false, 1).unwrap();
 
         // default setting
-        let gr1: Grangers = gr.merge(&mo).unwrap();
+        let gr1: Grangers = gr.merge(&["seqname", "gene_id"], false, None).unwrap();
 
         if SAY {
             println!("gr1: {:?}", gr1.df());
@@ -2299,9 +2419,7 @@ mod tests {
         );
 
         // test ignore strand
-        let mo = MergeOptions::new(&vec!["seqname"], true, 1).unwrap();
-
-        let gr1 = gr.merge(&mo).unwrap();
+        let gr1 = gr.merge(&["seqname"], true, None).unwrap();
 
         if SAY {
             println!("gr1: {:?}", gr1.df());
@@ -2333,9 +2451,8 @@ mod tests {
 
         // slack=0
         // test ignore strand
-        let mo = MergeOptions::new(&vec!["seqname", "gene_id"], false, 0).unwrap();
 
-        let gr1: Grangers = gr.merge(&mo).unwrap();
+        let gr1: Grangers = gr.merge(&["seqname", "gene_id"], false, Some(0)).unwrap();
 
         if SAY {
             println!("gr1: {:?}", gr1.df());
@@ -2368,9 +2485,7 @@ mod tests {
         // slack=2
 
         // test ignore strand
-        let mo = MergeOptions::new(&vec!["seqname", "gene_id"], false, 2).unwrap();
-
-        let gr1: Grangers = gr.merge(&mo).unwrap();
+        let gr1: Grangers = gr.merge(&["seqname", "gene_id"], false, Some(2)).unwrap();
 
         if SAY {
             println!("gr1: {:?}", gr1.df());
@@ -2421,14 +2536,13 @@ mod tests {
             FieldColumns::default(),
         )
         .unwrap();
+    
         if SAY {
             println!("gr: {:?}", gr.df());
         }
 
-        let mo = MergeOptions::new(&vec!["seqname", "gene_id"], false, 1).unwrap();
-
         // default setting
-        let gr1: Grangers = gr.gaps(&mo).unwrap();
+        let gr1: Grangers = gr.gaps(&["seqname", "gene_id"], false, None).unwrap();
 
         if SAY {
             println!("gr1: {:?}", gr1.df());

@@ -50,6 +50,8 @@ impl Default for MergeOptions {
     }
 }
 
+
+
 impl MergeOptions {
     pub fn new<T: AsRef<str>>(
         by: &[T],
@@ -88,6 +90,7 @@ impl MergeOptions {
             ignore_strand,
         })
     }
+
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -114,7 +117,7 @@ pub enum OOBOption {
 /// https://useast.ensembl.org/info/website/upload/gff.html
 /// The default values are the column names used in GTF/GFF files.
 /// This will be used in almost all Grangers methods.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FieldColumns {
     /// the name of the reference sequence column, usually it is called "seqname".\
     /// This corresponds to the first column in a GTF/GFF file.\
@@ -229,149 +232,292 @@ impl Default for FieldColumns {
     }
 }
 
-impl FieldColumns { 
-    // TODO: this function causes too many parameters warning.
-    // we should either remove it or find a way to solve it
-    // /// create a new TxColumns struct.
-    // pub fn new<T: Into<String>>(
-    //     seqname: T,
-    //     source: Option<T>,
-    //     feature_type: Option<T>,
-    //     start: T,
-    //     end: T,
-    //     score: Option<T>,
-    //     strand: T,
-    //     phase: Option<T>,
-    //     gene_id: Option<T>,
-    //     transcript_id: Option<T>,
-    //     exon_id: Option<T>,
-    //     exon_number: Option<T>,
-    // ) -> Self {
-    //     Self {
-    //         seqname: seqname.into(),
-    //         source: source.map(|v| v.into()),
-    //         feature_type: feature_type.map(|v| v.into()),
-    //         start: start.into(),
-    //         end: end.into(),
-    //         score: score.map(|v| v.into()),
-    //         strand: strand.into(),
-    //         phase: phase.map(|v| v.into()),
-    //         gene_id: gene_id.map(|v| v.into()),
-    //         transcript_id: transcript_id.map(|v| v.into()),
-    //         exon_id: exon_id.map(|v| v.into()),
-    //         exon_number: exon_number.map(|v| v.into()),
-    //     }
-    // }
-
-    /// validate the provided dataframe.
-    /// If everything is Ok, return Ok(None)
-    /// If some required fields are missing, return an error.
-    /// if some optional fields are missing, return a FieldColumns struct with these missing fields set as None.
-    /// If not, return a FieldColumns struct with all missing field as None.
-    pub fn validate(&self, df: &DataFrame, complain: bool) -> anyhow::Result<Option<Self>> {
-        let mut fc = self.clone();
+impl FieldColumns {
+    pub fn optional_fields(&self) -> [Option<&str>;8] {
+        [
+            self.source(),
+            self.feature_type(),
+            self.score(),
+            self.phase(),
+            self.gene_id(),
+            self.transcript_id(),
+            self.exon_id(),
+            self.exon_number(),
+        ]
+    }
+    pub fn essential_fields(&self) -> [&str;4] {
+        [
+            self.seqname(),
+            self.start(),
+            self.end(),
+            self.strand(),
+        ]
+    }
+    /// Validate itself according to a provided dataframe.
+    /// If everything is Ok, return true, else, return false.
+    /// If fix is true, try to fix the fields by finding and using the columns with default field names(seqname, start, gene_id, etc) in the dataframe. if the essentail fields are invalid and cannot be fixed, return error
+    pub fn is_valid(&self, df: &DataFrame, is_warn: bool, is_bail: bool) -> anyhow::Result<bool> {
+        let mut is_valid = true;
         // check required fields
-        if df.column(fc.seqname.as_str()).is_err()
-            || df.column(fc.seqname.as_str())?.null_count() > 0
-        {
-            bail!(
-                "The dataframe either does not contain the specified seqname column {} or this column contains missing value; Cannot proceed",
-                fc.seqname
-            );
+        if df.column(self.seqname()).is_err() {
+            is_valid = false;
+            if is_warn {
+                warn!(
+                    "The dataframe does not contain the specified seqname column {}; Cannot proceed. You can add one by calling `df.add_column(\"seqname\", vec!['.'; df.height()])`",
+                    self.seqname()
+                )
+            }
         }
-        if df.column(fc.start.as_str()).is_err() || df.column(fc.start.as_str())?.null_count() > 0 {
-            bail!(
-                "The dataframe does not contain the specified start column {} or this column contains missing value; Cannot proceed",
-                fc.start
-            );
+        if df.column(self.start()).is_err() {
+            is_valid = false;
+            if is_warn {
+                warn!(
+                    "The dataframe does not contain the specified start column {}; Cannot proceed. You can add one by calling `df.add_column(\"start\", vec!['.'; df.height()])`",
+                    self.start()
+                )
+            }
         }
-        if df.column(fc.end.as_str()).is_err() || df.column(fc.end.as_str())?.null_count() > 0 {
-            bail!(
-                "The dataframe does not contain the specified end column {} or this column contains missing value; Cannot proceed",
-                fc.end
-            );
+        if df.column(self.end()).is_err() {
+            is_valid = false;
+            if is_warn {
+                warn!(
+                    "The dataframe does not contain the specified end column {}; Cannot proceed. You can add one by calling `df.add_column(\"end\", vec!['.'; df.height()])`",
+                    self.end()
+                )
+            }
         }
-        if df.column(fc.strand.as_str()).is_err() {
-            bail!(
-                "The dataframe does not contain the specified strand column {}; Cannot proceed. You can add one by calling `df.add_column(\"strand\", vec!['.'; df.height()])`",
-                fc.strand
-            );
+        if df.column(self.strand()).is_err() {
+            is_valid = false;
+            if is_warn {
+                warn!(
+                    "The dataframe does not contain the specified strand column {}; Cannot proceed. You can add one by calling `df.add_column(\"strand\", vec!['.'; df.height()])`",
+                    self.strand()
+                )
+            }
+        }
+        // check additional fields
+        if let Some(s) = self.source() {
+            if df.column(s).is_err() {
+                is_valid = false;
+                if is_warn {
+                    warn!("The provided source column {} is not found in the dataframe; It will be ignored", s)
+                }
+            }
+        }
+        if let Some(s) = self.feature_type() {
+            if df.column(s).is_err() {
+                is_valid = false;
+                if is_warn {
+                    warn!("The provided feature_type column {} is not found in the dataframe; It will be ignored", s)
+                }
+            }
+        }
+        if let Some(s) = self.score() {
+            if df.column(s).is_err() {
+                is_valid = false;
+                if is_warn {
+                    warn!("The provided score column {} is not found in the dataframe; It will be ignored", s)
+                }
+            }
+        }
+        if let Some(s) = self.phase() {
+            if df.column(s).is_err() {
+                is_valid = false;
+                if is_warn {
+                    warn!("The provided phase column {} is not found in the dataframe; It will be ignored", s)
+                }
+            }
+        }
+        if let Some(s) = self.gene_id() {
+            if df.column(s).is_err() {
+                is_valid = false;
+                if is_warn {
+                    warn!("The provided gene_id column {} is not found in the dataframe; It will be ignored", s)
+                }
+            }
+        }
+        
+        if let Some(s) = self.transcript_id() {
+            if df.column(s).is_err() {
+                is_valid = false;
+                if is_warn {
+                    warn!("The provided transcript_id column {} is not found in the dataframe; It will be ignored", s)
+                }
+            }
+        }
+        if let Some(s) = self.exon_id() {
+            if df.column(s).is_err() {
+                is_valid = false;
+                if is_warn {
+                    warn!("The provided exon_id column {} is not found in the dataframe; It will be ignored", s)
+                }
+            }
+        }
+        if let Some(s) = self.exon_number() {
+            if df.column(s).is_err() {
+                is_valid = false;
+                if is_warn {
+                    warn!("The provided exon_number column {} is not found in the dataframe; It will be ignored", s)
+                }
+            }
+        }
+        
+        if !is_valid & is_bail {
+            bail!("The FieldColumns is not valid; Please try fix it by calling FieldColumns::fix().")
         }
 
-        // check optional fields
-        if let Some(s) = fc.source.to_owned() {
-            if df.column(s.as_str()).is_err() {
-                fc.source = None;
-            }
-            if complain {
-                warn!("The provided source column {} is not found in the dataframe; It will be ignored", s)
-            }
+        if !is_valid & is_warn {
+            warn!("The FieldColumns is not valid; Please try fix it by calling FieldColumns::fix().")
         }
-        if let Some(s) = fc.feature_type.to_owned() {
-            if df.column(s.as_str()).is_err() {
-                fc.feature_type = None;
-            }
-            if complain {
-                warn!("The provided feature_type column {} is not found in the dataframe; It will be ignored", s)
-            }
-        }
-        if let Some(s) = fc.score.to_owned() {
-            if df.column(s.as_str()).is_err() {
-                fc.score = None;
-            }
-            if complain {
-                warn!("The provided score column {} is not found in the dataframe; It will be ignored", s)
-            }
-        }
-        if let Some(s) = fc.phase.to_owned() {
-            if df.column(s.as_str()).is_err() {
-                fc.phase = None;
-            }
-            if complain {
-                warn!("The provided phase column {} is not found in the dataframe; It will be ignored", s)
-            }
-        }
-        if let Some(s) = fc.gene_id.to_owned() {
-            if df.column(s.as_str()).is_err() {
-                fc.gene_id = None;
-            }
-            if complain {
-                warn!("The provided gene_id column {} is not found in the dataframe; It will be ignored", s)
-            }
-        }
-        if let Some(s) = fc.transcript_id.to_owned() {
-            if df.column(s.as_str()).is_err() {
-                fc.transcript_id = None;
-            }
-            if complain {
-                warn!("The provided transcript_id column {} is not found in the dataframe; It will be ignored", s)
-            }
-        }
-        if let Some(s) = fc.exon_id.to_owned() {
-            if df.column(s.as_str()).is_err() {
-                fc.exon_id = None;
-            }
-            if complain {
-                warn!("The provided exon_id column {} is not found in the dataframe; It will be ignored", s)
-            }
-        }
-        if let Some(s) = fc.exon_number.to_owned() {
-            if df.column(s.as_str()).is_err() {
-                fc.exon_number = None;
-            }
-            if complain {
-                warn!("The provided exon_number column {} is not found in the dataframe; It will be ignored", s)
-            }
-        }
-        // if fc is not the same as self, it means that some optional fields are missing.
-        if &fc == self {
-            Ok(None)
-        } else {
-            Ok(Some(fc))
-        }
+
+        Ok(is_valid)
     }
 
-    pub fn get_colname<T: AsRef<str>>(&self, field: T, complain: bool) -> Option<&str> {
+    pub fn fix(&mut self, df: &DataFrame, is_warn: bool) -> anyhow::Result<()> {
+        // try fix required fields
+        if df.column(self.seqname()).is_err() {
+            if is_warn {
+                warn!("cannot find the specified seqname column {} in the dataframe; try to fix", self.seqname());
+            }
+            if df.column("seqname").is_ok() {
+                self.seqname = "seqname".to_string();
+            } else {
+                bail!("The dataframe does not contain the specified seqname column {} or a column named \"seqname\"; Cannot fix.", self.seqname());
+            }
+        }
+        if df.column(self.start()).is_err() {
+            if is_warn {
+                warn!("cannot find the specified start column {} in the dataframe; try to fix", self.start());
+            }
+            if df.column("start").is_ok() {
+                self.start = "start".to_string();
+            } else {
+                bail!("The dataframe does not contain the specified start column {} or a column named \"start\"; Cannot fix.", self.start());
+            }
+        }
+        if df.column(self.end()).is_err() {
+            if is_warn {
+                warn!("cannot find the specified end column {} in the dataframe; try to fix", self.end());
+            }
+            if df.column("end").is_ok() {
+                self.end = "end".to_string();
+            } else {
+                bail!("The dataframe does not contain the specified end column {} or a column named \"end\"; Cannot fix.", self.end());
+            }
+        }
+        if df.column(self.strand()).is_err() {
+            if is_warn {
+                warn!("cannot find the specified strand column {} in the dataframe; try to fix", self.strand());
+            }
+            if df.column("strand").is_ok() {
+                self.strand = "strand".to_string();
+            } else {
+                bail!("The dataframe does not contain the specified strand column {} or a column named \"strand\"; Cannot fix. If this is desired, you can add a dummy strand column by calling `df.add_column(\"strand\", vec!['.'; df.height()])`", self.strand());
+            }
+        }
+
+        // try fix optional fields
+        if let Some(s) = self.source() {
+            if df.column(s).is_err() {
+                if is_warn {
+                    warn!("cannot find the specified source column {} in the dataframe; try to fix", s);
+                }
+                self.source = if df.column("source").is_ok() {
+                    Some("source".to_string())
+                } else {
+                    None
+                }
+            }
+        }
+        if let Some(s) = self.feature_type() {
+            if df.column(s).is_err() {
+                if is_warn {
+                    warn!("cannot find the specified feature_type column {} in the dataframe; try to fix", s);
+                }
+                self.feature_type = if df.column("feature_type").is_ok() {
+                    Some("feature_type".to_string())
+                } else {
+                    None
+                }
+            }
+        }
+        if let Some(s) = self.score() {
+            if df.column(s).is_err() {
+                if is_warn {
+                    warn!("cannot find the specified score column {} in the dataframe; try to fix", s);
+                }
+                self.score = if df.column("score").is_ok() {
+                    Some("score".to_string())
+                } else {
+                    None
+                }
+            }
+        }
+        if let Some(s) = self.phase() {
+            if df.column(s).is_err() {
+                if is_warn {
+                    warn!("cannot find the specified phase column {} in the dataframe; try to fix", s);
+                }
+                self.phase = if df.column("phase").is_ok() {
+                    Some("phase".to_string())
+                } else {
+                    None
+                }
+            }
+        }
+        if let Some(s) = self.gene_id() {
+            if df.column(s).is_err() {
+                if is_warn {
+                    warn!("cannot find the specified gene_id column {} in the dataframe; try to fix", s);
+                }
+                self.gene_id = if df.column("gene_id").is_ok() {
+                    Some("gene_id".to_string())
+                } else {
+                    None
+                }
+            }
+        }
+        if let Some(s) = self.transcript_id() {
+            if df.column(s).is_err() {
+                if is_warn {
+                    warn!("cannot find the specified transcript_id column {} in the dataframe; try to fix", s);
+                }
+                self.transcript_id = if df.column("transcript_id").is_ok() {
+                    Some("transcript_id".to_string())
+                } else {
+                    None
+                }
+            }
+        }
+        if let Some(s) = self.exon_id() {
+            if df.column(s).is_err() {
+                if is_warn {
+                    warn!("cannot find the specified exon_id column {} in the dataframe; try to fix", s);
+                }
+                self.exon_id = if df.column("exon_id").is_ok() {
+                    Some("exon_id".to_string())
+                } else {
+                    None
+                }
+            }
+        }
+        if let Some(s) = self.exon_number() {
+            if df.column(s).is_err() {
+                if is_warn {
+                    warn!("cannot find the specified exon_number column {} in the dataframe; try to fix", s);
+                }
+                self.exon_number = if df.column("exon_number").is_ok() {
+                    Some("exon_number".to_string())
+                } else {
+                    None
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
+    pub fn field<T: AsRef<str>>(&self, field: T) -> Option<&str> {
         match field.as_ref() {
             "seqname" => Some(self.seqname.as_str()),
             "source" => self.source(),
@@ -386,13 +532,37 @@ impl FieldColumns {
             "exon_id" => self.exon_id(),
             "exon_number" => self.exon_number(),
             _ => {
-                if complain {
-                    warn!(
-                        "The provided field {} is not a valid field name; It will be ignored",
+                None
+            }
+        }
+    }
+    pub fn field_checked<T: AsRef<str>>(&self, field: T, is_bail: bool) -> anyhow::Result<Option<&str>> {
+        match field.as_ref() {
+            "seqname" => Ok(Some(self.seqname.as_str())),
+            "source" => Ok(self.source()),
+            "feature_type" => Ok(self.feature_type()),
+            "start" => Ok(Some(self.start.as_str())),
+            "end" => Ok(Some(self.end.as_str())),
+            "score" => Ok(self.score()),
+            "strand" => Ok(Some(self.strand.as_str())),
+            "phase" => Ok(self.phase()),
+            "gene_id" => Ok(self.gene_id()),
+            "transcript_id" => Ok(self.transcript_id()),
+            "exon_id" => Ok(self.exon_id()),
+            "exon_number" => Ok(self.exon_number()),
+            _ => {
+                if is_bail {
+                    bail!(
+                        "The provided field {} is not a valid field name; Cannot proceed",
                         field.as_ref()
                     );
                 }
-                None
+
+                warn!(
+                    "The provided field {} is not a valid field name; It will be ignored",
+                    field.as_ref()
+                );
+                Ok(None)
             }
         }
     }

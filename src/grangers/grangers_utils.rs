@@ -1,6 +1,11 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+use tracing::warn;
+
+use crate::options::FieldColumns;
+
+pub(crate) const VALIDSTRANDS: [&str;2] = ["+", "-"];
 
 #[derive(Copy, Clone)]
 pub enum FileFormat {
@@ -173,22 +178,5 @@ impl IntervalType {
             IntervalType::Exclusive(c) => -1 + 1 - c,
         }
     }
-}
-
-pub fn check_col(df: & polars::prelude::DataFrame, col: Option<&str>) -> anyhow::Result<String> {
-    let col_name = if let Some(col) = col {
-        if df.column(col)?.null_count() > 0 {
-            anyhow::bail!(
-                "The gene ID column {} contains null values. Cannot proceed.",
-                col
-            );
-        } else {
-            col
-        }
-    } else {
-        anyhow::bail!("The gene ID column is not defined in the Grangers struct. Cannot extract transcript sequences.")
-    };
-    Ok(col_name.to_string())
-
 }
 

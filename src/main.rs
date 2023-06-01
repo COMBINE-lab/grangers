@@ -111,13 +111,43 @@ fn main() -> anyhow::Result<()> {
     // info!("extended and flanked gr: \n{:?}", flanked_gr.df());
 
 
-    let sequence = noodles::fasta::record::Sequence::from(b"ACGT".to_vec());
+    let mut df = df!(
+        "seqname" => ["chr1", "chr1", "chr1", "chr1", "chr1", "chr2", "chr2"],
+        "start" => [1i64, 5, 1, 11, 22, 1, 5],
+        "end" => [10i64, 10, 10, 20, 30, 10, 30],
+        "strand"=> ["+", "+", "-", "-", "-", "+", "-"],
+        "gene_id" => ["g1", "g1", "g2", "g2", "g2", "g3", "g4"],
+    )
+    .unwrap();
 
-    let start = noodles::core::Position::try_from(2)?;
-    println!("{:?}", sequence.get(start));
-    assert_eq!(sequence.get(start), Some(&b'C'));
+    let mut field_columns = FieldColumns::default();
+    let interval_type = IntervalType::Inclusive(1);
+    println!("{}", field_columns.is_valid(&df, true, false)?);
+    field_columns.fix(&df, false)?;
+    if interval_type.start_offset() != 0 {
+        df.with_column(df.column(field_columns.start()).unwrap() - interval_type.start_offset())?;
+    }
 
-    assert_eq!(sequence.get(start..), Some(&b"CGT"[..]));
+    if interval_type.end_offset() != 0 {
+        df.with_column(df.column(field_columns.end()).unwrap() - interval_type.end_offset())?;
+    }
+
+
+        // instantiate a new Grangers struct
+        let gr = Grangers {
+            df,
+            misc: None,
+            seqinfo: None,
+            lapper: None,
+            interval_type,
+            field_columns,
+        };
+
+        // validate
+        gr.any_nulls(&gr.df().get_column_names(), true, true)?;
+
+
+
 
 
 
