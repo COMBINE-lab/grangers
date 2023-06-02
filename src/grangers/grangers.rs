@@ -1377,7 +1377,7 @@ impl Grangers {
         let end = fc.end();
         let transcript_id = fc.transcript_id().unwrap();
         
-        let mut chr_gr: Grangers;
+
         // Now, we read the fasta file and process each reference sequence at a time
         let reader = std::fs::File::open(fasta_path).map(BufReader::new)?;
         let mut reader = noodles::fasta::Reader::new(reader);
@@ -1393,11 +1393,7 @@ impl Grangers {
             let record = result?;
 
             let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
-            chr_gr = exon_gr.filter(seqname, &[chr_name])?;
-
-            if chr_gr.df().height() == 0 {
-                continue
-            }
+            let chr_gr = exon_gr.filter(seqname, &[chr_name])?;
 
             // check if exons are in the range of the reference sequence
             if let Some(end_max) = chr_gr.df().column(end)?.i64()?.max() {
@@ -1475,15 +1471,25 @@ impl Grangers {
     /// - `file_format`: the format of the reference genome file. Currently only fasta is supported.
     /// - `oob_option`: the option for out-of-boundary positions. It can be either `Truncate` or `Skip`. If `Truncate`, the out-of-boundary positions will be truncated to the start or end of the sequence. If `Skip`, a None will be returned for features with OOB positions
     /// The function outputs the extracted sequence as a vector of `Option<Sequence>`. If the feature has OOB positions and the oob_option is set as `Skip`, the corresponding element in the vector will be None. The order of the vector follows the row order of the dataframe of the Grangers object.
-    pub fn get_sequences_fasta<T: AsRef<Path>>(
+    pub fn get_sequences<T: AsRef<Path>>(
         &mut self,
         fasta_path: T,
         ignore_strand: bool,
+        name: Option<&str>,
         oob_option: &OOBOption,
-    ) -> anyhow::Result<Vec<Option<Sequence>>>
+    ) -> anyhow::Result<Vec<Option<Record>>>
 // anyhow::Result<Vec<fasta::record::Sequence>>
     {
         self.validate(false, true)?;
+        
+        // if name is invalid, ignore
+        let name = if name.is_some() && self.get_column_name(name.unwrap(), true).is_ok() {
+            warn!("The provided name column {:?} is not in the dataframe. Ignored.", name);
+            Some(self.get_column_name(name.unwrap(), false)?.to_owned())
+        } else {
+            None
+        };
+
         let mut fc = self.field_columns().clone();
         // we need to map the sequence back to the original row order of the dataframe
         // So, we need to have a minimum copy of the dataset, which contains only the essential fields,
@@ -1508,11 +1514,9 @@ impl Grangers {
 
         let seqname = essential_gr.get_column_name("seqname", true)?;
 
-        let mut chr_gr: Grangers;
-
         let reader = std::fs::File::open(fasta_path).map(BufReader::new)?;
         let mut reader = noodles::fasta::Reader::new(reader);
-        let mut seq_vec: Vec<Option<Sequence>> = vec![None; essential_gr.df().height()];
+        let mut seq_vec: Vec<Option<Record>> = vec![None; essential_gr.df().height()];
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
         // 1. subset the dataframe by the chromosome name
         // 2. get the sequence of the features in the dataframe on that fasta record
@@ -1521,13 +1525,20 @@ impl Grangers {
             let record = result?;
 
             let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
+            let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
 
-            chr_gr = essential_gr.filter(seqname, &[chr_name])?;
-
+            if chr_gr.df().height() == 0 {
+                continue
+            }
+            let name_vec = if let Some(name) = &name {
+                chr_gr.df().column(name)?.utf8()?.into_iter().map(|s| s.unwrap()).collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
             // we get the sequence of a chromosome at a time
             let chr_seq_vec = chr_gr.get_sequences_fasta_record(&record, oob_option)?;
 
-            //
+            // we push seuqence to the correct position
             for (idx, seq) in chr_gr
                 .df()
                 .column("row_order")?
@@ -1535,7 +1546,16 @@ impl Grangers {
                 .into_iter()
                 .zip(chr_seq_vec.into_iter())
             {
-                seq_vec[idx.unwrap() as usize] = seq;
+                let idx: usize = idx.unwrap() as usize;
+                let seq_name = if name.is_some() {
+                    name_vec[idx].to_string()
+                } else {
+                    idx.to_string()
+                };
+
+                let definition = Definition::new(seq_name, None);
+
+                seq_vec[idx] = seq.map(|seq| Record::new(definition, seq));
             }
         }
 
