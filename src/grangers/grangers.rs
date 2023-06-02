@@ -1,6 +1,6 @@
 // TODO:
 // 1. gtf writer
-// 2. testing functions for get sequences functions
+// 2. fasta writer
 // 3. test sequence functions using true datasets
 use crate::grangers::grangers_utils::*;
 use crate::grangers::options::*;
@@ -620,7 +620,8 @@ impl Grangers {
         let end = self.get_column_name("end", true)?;
         let strand = self.get_column_name("strand", true)?;
         let gene_id = self.get_column_name("gene_id", true)?;
-        let transcript_id = self.get_column_name("transcript_id", false)?;        let exon_id = self.get_column_name("exon_id", false)?;
+        let transcript_id = self.get_column_name("transcript_id", false)?;
+        // let exon_id = self.get_column_name("exon_id", false)?;
 
         if exon_df.column(gene_id)?.null_count() > 0 {
             bail!("The gene_id column contains null values. Cannot proceed.")
@@ -628,9 +629,9 @@ impl Grangers {
         if exon_df.column(gene_id)?.null_count() > 0 {
             bail!("The gene_id column contains null values. Cannot proceed.")
         }
-        if exon_df.column(exon_id)?.null_count() > 0 {
-            bail!("The exon_id column contains null values. Cannot proceed.")
-        }
+        // if exon_df.column(exon_id)?.null_count() > 0 {
+        //     bail!("The exon_id column contains null values. Cannot proceed.")
+        // }
 
         // make sure that stand is valid:
         // - the exons of each transcript are on the same strand

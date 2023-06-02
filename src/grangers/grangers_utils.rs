@@ -60,8 +60,8 @@ impl std::fmt::Display for FileFormat {
     }
 }
 
-pub const GTFESSENTIALATTRIBUTES: [&str; 3] = ["gene_id", "gene_name", "transcript_id"];
-pub const GFFESSENTIALATTRIBUTES: [&str; 4] = ["ID", "gene_id", "gene_name", "transcript_id"];
+pub const GTFESSENTIALATTRIBUTES: [&str; 4] = ["gene_id", "transcript_id", "gene_name", "exon_number"];
+pub const GFFESSENTIALATTRIBUTES: [&str; 5] = ["ID", "gene_id", "gene_name", "transcript_id", "exon_number"];
 // pub const FIELDS: [&str; 8] = [
 //     "seqid",
 //     "source",

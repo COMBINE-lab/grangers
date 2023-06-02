@@ -32,7 +32,7 @@ fn main() -> anyhow::Result<()> {
     let fasta_file = PathBuf::from(args.get(2).unwrap());
 
     let start = Instant::now();
-    let mut gr = Grangers::from_gtf(gtf_file.as_path(), false)?;
+    let mut gr = Grangers::from_gtf(gtf_file.as_path(), true)?;
     let duration: Duration = start.elapsed();
     info!("Built Grangers in {:?}", duration);
     info!("Grangers shape {:?}", gr.df().shape());

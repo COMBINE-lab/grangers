@@ -152,7 +152,7 @@ pub struct FieldColumns {
     /// The column name of the transcript ID column, usually it is called "transcript_id".
     pub transcript_id: Option<String>,
     // The column name of the exon ID column, usually it is called "exon_id".
-    pub exon_id: Option<String>,
+    // pub exon_id: Option<String>,
     /// The column name of the exon number (order) column, usually it is called "exon_number".
     /// This column is used to sort the exons of a transcript.
     /// If this column is missing, the exons will be sorted by their start positions.
@@ -200,10 +200,10 @@ impl FieldColumns {
     pub fn transcript_id(&self) -> Option<&str> {
         self.transcript_id.as_deref()
     }
-    /// get a reference to the exon_id field
-    pub fn exon_id(&self) -> Option<&str> {
-        self.exon_id.as_deref()
-    }
+    // get a reference to the exon_id field
+    // pub fn exon_id(&self) -> Option<&str> {
+    //     self.exon_id.as_deref()
+    // }
     /// get a reference to the exon_number field
     pub fn exon_number(&self) -> Option<&str> {
         self.exon_number.as_deref()
@@ -223,14 +223,14 @@ impl Default for FieldColumns {
             phase: Some("phase".to_string()),
             gene_id: Some("gene_id".to_string()),
             transcript_id: Some("transcript_id".to_string()),
-            exon_id: Some("exon_id".to_string()),
+            // exon_id: Some("exon_id".to_string()),
             exon_number: Some("exon_number".to_string()),
         }
     }
 }
 
 impl FieldColumns {
-    pub fn optional_fields(&self) -> [Option<&str>; 8] {
+    pub fn optional_fields(&self) -> [Option<&str>; 7] {
         [
             self.source(),
             self.feature_type(),
@@ -238,7 +238,7 @@ impl FieldColumns {
             self.phase(),
             self.gene_id(),
             self.transcript_id(),
-            self.exon_id(),
+            // self.exon_id(),
             self.exon_number(),
         ]
     }
@@ -337,14 +337,14 @@ impl FieldColumns {
                 }
             }
         }
-        if let Some(s) = self.exon_id() {
-            if df.column(s).is_err() {
-                is_valid = false;
-                if is_warn {
-                    warn!("The provided exon_id column {} is not found in the dataframe; It will be ignored", s)
-                }
-            }
-        }
+        // if let Some(s) = self.exon_id() {
+        //     if df.column(s).is_err() {
+        //         is_valid = false;
+        //         if is_warn {
+        //             warn!("The provided exon_id column {} is not found in the dataframe; It will be ignored", s)
+        //         }
+        //     }
+        // }
         if let Some(s) = self.exon_number() {
             if df.column(s).is_err() {
                 is_valid = false;
@@ -509,21 +509,21 @@ impl FieldColumns {
                 }
             }
         }
-        if let Some(s) = self.exon_id() {
-            if df.column(s).is_err() {
-                if is_warn {
-                    warn!(
-                        "cannot find the specified exon_id column {} in the dataframe; try to fix",
-                        s
-                    );
-                }
-                self.exon_id = if df.column("exon_id").is_ok() {
-                    Some("exon_id".to_string())
-                } else {
-                    None
-                }
-            }
-        }
+        // if let Some(s) = self.exon_id() {
+        //     if df.column(s).is_err() {
+        //         if is_warn {
+        //             warn!(
+        //                 "cannot find the specified exon_id column {} in the dataframe; try to fix",
+        //                 s
+        //             );
+        //         }
+        //         self.exon_id = if df.column("exon_id").is_ok() {
+        //             Some("exon_id".to_string())
+        //         } else {
+        //             None
+        //         }
+        //     }
+        // }
         if let Some(s) = self.exon_number() {
             if df.column(s).is_err() {
                 if is_warn {
@@ -552,7 +552,7 @@ impl FieldColumns {
             "phase" => self.phase(),
             "gene_id" => self.gene_id(),
             "transcript_id" => self.transcript_id(),
-            "exon_id" => self.exon_id(),
+            // "exon_id" => self.exon_id(),
             "exon_number" => self.exon_number(),
             _ => None,
         }
@@ -573,7 +573,7 @@ impl FieldColumns {
             "phase" => Ok(self.phase()),
             "gene_id" => Ok(self.gene_id()),
             "transcript_id" => Ok(self.transcript_id()),
-            "exon_id" => Ok(self.exon_id()),
+            // "exon_id" => Ok(self.exon_id()),
             "exon_number" => Ok(self.exon_number()),
             _ => {
                 if is_bail {
