@@ -12,7 +12,7 @@ flate2 = { version = "1.0.26", features = ["zlib"], default-features = false }
 noodles = { version = "0.37.0", features = ["gtf","gff","fasta", "core"] }
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.16", default-features = true, features = ["env-filter"] }
-polars = { version = "0.29", features = ["lazy","dataframe_arithmetic","sort_multiple", "checked_arithmetic","rows","dtype-struct"]}
+polars = { version = "0.29", features = ["lazy","dataframe_arithmetic","sort_multiple", "checked_arithmetic","rows","dtype-struct", "dtype-categorical"]}
 peak_alloc = "0.2.0"
 bedrs = "0.0.26"
 rust-lapper = "1.1.0"
