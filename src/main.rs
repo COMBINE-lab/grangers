@@ -36,11 +36,18 @@ fn main() -> anyhow::Result<()> {
     let duration: Duration = start.elapsed();
     info!("Built Grangers in {:?}", duration);
     info!("Grangers shape {:?}", gr.df().shape());
-
     let start = Instant::now();
     gr.get_transcript_sequences(&fasta_file, None, true)?;
     let duration: Duration = start.elapsed();
     info!("extract transcript sequences in {:?}", duration);
+
+    gr.df = gr.df.head(Some(100000));
+    let start = Instant::now();
+    gr.get_sequences(&fasta_file, false, None, &options::OOBOption::Skip)?;
+    let duration: Duration = start.elapsed();
+    info!("extract first 100,000 sequences in {:?}", duration);
+
+
 
     // let mo = options::MergeOptions::new(&["seqname", "gene_id", "transcript_id"], false, 1)?;
     // let start = Instant::now();

@@ -68,7 +68,7 @@ impl Grangers {
         is_bail: bool,
     ) -> anyhow::Result<bool> {
         self.field_columns().is_valid(self.df(), true, true)?;
-        let mut valid = true;
+        let mut any_nulls = false;
         let df = self.df();
 
         for col in fields {
@@ -77,22 +77,22 @@ impl Grangers {
                 .null_count()
                 > 0
             {
-                valid = false;
+                any_nulls = true;
                 if is_warn {
                     warn!("The given field {} contains null values. This will cause problems for most Grangers functions.", col.as_ref());
                 }
             }
         }
 
-        if (!valid) & is_bail {
+        if (any_nulls) & is_bail {
             bail!("The dataframe contains null values. You can drop null values by using the Grangers::drop_nulls() method.")
         }
 
-        if (!valid) & is_warn {
+        if (any_nulls) & is_warn {
             warn!("You can drop null values by using the Grangers::drop_nulls() method.")
         }
 
-        Ok(valid)
+        Ok(any_nulls)
     }
 
     /// Instantiate a new Grangers struct according to
@@ -431,6 +431,13 @@ impl Grangers {
     /// - return error if the dataframe contains null values in the essential fields
     /// - return warning if the dataframe contains null values in the additional fields
     pub fn validate(&self, is_warn: bool, is_bail: bool) -> anyhow::Result<bool> {
+        if self.df().height() == 0 {
+            if is_bail {
+                bail!("The dataframe is empty. Cannot proceed.")
+            } else {
+                return Ok(false);
+            }
+        }
         // field columns will check if the fields exist in the dataframe
         let valid_fc = self.field_columns.is_valid(self.df(), false, true)?;
 
@@ -444,6 +451,7 @@ impl Grangers {
             self.any_nulls(&self.field_columns().essential_fields(), false, is_bail)?;
 
         if is_warn & essential_nulls {
+            println!("{:?}", self.df().select(self.field_columns().essential_fields())?.null_count());
             warn!("The dataframe contains null values in the essential fields - seqname, start, end and strand. You can use Grangers::drop_nulls() to drop them.");
             return Ok(false);
         }
@@ -1377,7 +1385,6 @@ impl Grangers {
         let end = fc.end();
         let transcript_id = fc.transcript_id().unwrap();
         
-
         // Now, we read the fasta file and process each reference sequence at a time
         let reader = std::fs::File::open(fasta_path).map(BufReader::new)?;
         let mut reader = noodles::fasta::Reader::new(reader);
@@ -1394,6 +1401,10 @@ impl Grangers {
 
             let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
             let chr_gr = exon_gr.filter(seqname, &[chr_name])?;
+
+            if chr_gr.df().height() == 0 {
+                continue;
+            }
 
             // check if exons are in the range of the reference sequence
             if let Some(end_max) = chr_gr.df().column(end)?.i64()?.max() {
