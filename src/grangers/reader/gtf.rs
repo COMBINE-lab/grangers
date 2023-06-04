@@ -136,9 +136,7 @@ pub struct GStruct {
     pub strand: Vec<Option<String>>,
     pub phase: Vec<Option<String>>,
     pub attributes: Attributes,
-    pub misc: Option<
-        HashMap<String, Vec<String>>, // , polars::export::ahash::RandomState
-    >,
+    pub misc: Option<HashMap<String, Vec<String>>>,
 }
 
 // implement GTF reader
@@ -316,7 +314,6 @@ impl GStruct {
             attributes: Attributes::new(attribute_mode, file_type)?,
             misc: Some(HashMap::new()),
         };
-
         Ok(gr)
     }
 
@@ -381,7 +378,7 @@ mod tests {
                         tally,
                     } => {
                         assert!(
-                            file_type.get_essential() == &["gene_id", "gene_name", "transcript_id"]
+                            file_type == FileFormat::GTF
                         );
                         assert!(essential
                             .get("gene_id")
@@ -485,8 +482,8 @@ mod tests {
                         tally,
                     } => {
                         assert!(
-                            file_type.get_essential()
-                                == &["ID", "gene_id", "gene_name", "transcript_id"]
+                            file_type == FileFormat::GFF
+
                         );
                         assert!(essential
                             .get("gene_id")

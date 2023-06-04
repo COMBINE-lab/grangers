@@ -1,8 +1,9 @@
 mod grangers;
 mod grangers_utils;
+pub mod options;
 pub mod reader;
 pub use grangers::*;
-pub use grangers_utils::FileFormat;
+pub use grangers_utils::{FileFormat, IntervalType};
 pub use reader::GStruct;
 
 // This function traverses the GTF file:
