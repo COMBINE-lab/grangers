@@ -147,8 +147,10 @@ pub struct FieldColumns {
     /// The column name of the phase column, usually it is called "frame" or "phase".
     /// This is the eighth column in a GTF/GFF file.
     pub phase: Option<String>,
-    /// The column name of the gene ID column, usually it is called "gene_id".
+    /// The column name of the gene_id column, usually it is called "gene_id".
     pub gene_id: Option<String>,
+    /// The column name of the gene_name column, usually it is called "gene_id".
+    pub gene_name: Option<String>,
     /// The column name of the transcript ID column, usually it is called "transcript_id".
     pub transcript_id: Option<String>,
     // The column name of the exon ID column, usually it is called "exon_id".
@@ -196,6 +198,12 @@ impl FieldColumns {
     pub fn gene_id(&self) -> Option<&str> {
         self.gene_id.as_deref()
     }
+
+    /// get a reference to the gene_name field
+    pub fn gene_name(&self) -> Option<&str> {
+        self.gene_name.as_deref()
+    }
+
     /// get a reference to the transcript_id field
     pub fn transcript_id(&self) -> Option<&str> {
         self.transcript_id.as_deref()
@@ -222,23 +230,23 @@ impl Default for FieldColumns {
             strand: "strand".to_string(),
             phase: Some("phase".to_string()),
             gene_id: Some("gene_id".to_string()),
+            gene_name: Some("gene_name".to_string()),
             transcript_id: Some("transcript_id".to_string()),
-            // exon_id: Some("exon_id".to_string()),
             exon_number: Some("exon_number".to_string()),
         }
     }
 }
 
 impl FieldColumns {
-    pub fn optional_fields(&self) -> [Option<&str>; 7] {
+    pub fn optional_fields(&self) -> [Option<&str>; 8] {
         [
             self.source(),
             self.feature_type(),
             self.score(),
             self.phase(),
             self.gene_id(),
+            self.gene_name(),
             self.transcript_id(),
-            // self.exon_id(),
             self.exon_number(),
         ]
     }
@@ -320,11 +328,21 @@ impl FieldColumns {
                 }
             }
         }
+        
         if let Some(s) = self.gene_id() {
             if df.column(s).is_err() {
                 is_valid = false;
                 if is_warn {
                     warn!("The provided gene_id column {} is not found in the dataframe; It will be ignored", s)
+                }
+            }
+        }
+
+        if let Some(s) = self.gene_name() {
+            if df.column(s).is_err() {
+                is_valid = false;
+                if is_warn {
+                    warn!("The provided gene_name column {} is not found in the dataframe; It will be ignored", s)
                 }
             }
         }
@@ -337,14 +355,7 @@ impl FieldColumns {
                 }
             }
         }
-        // if let Some(s) = self.exon_id() {
-        //     if df.column(s).is_err() {
-        //         is_valid = false;
-        //         if is_warn {
-        //             warn!("The provided exon_id column {} is not found in the dataframe; It will be ignored", s)
-        //         }
-        //     }
-        // }
+        
         if let Some(s) = self.exon_number() {
             if df.column(s).is_err() {
                 is_valid = false;
@@ -497,6 +508,23 @@ impl FieldColumns {
                 }
             }
         }
+
+        if let Some(s) = self.gene_name() {
+            if df.column(s).is_err() {
+                if is_warn {
+                    warn!(
+                        "cannot find the specified gene_name column {} in the dataframe; try to fix",
+                        s
+                    );
+                }
+                self.gene_id = if df.column("gene_name").is_ok() {
+                    Some("gene_name".to_string())
+                } else {
+                    None
+                }
+            }
+        }
+
         if let Some(s) = self.transcript_id() {
             if df.column(s).is_err() {
                 if is_warn {
@@ -509,21 +537,7 @@ impl FieldColumns {
                 }
             }
         }
-        // if let Some(s) = self.exon_id() {
-        //     if df.column(s).is_err() {
-        //         if is_warn {
-        //             warn!(
-        //                 "cannot find the specified exon_id column {} in the dataframe; try to fix",
-        //                 s
-        //             );
-        //         }
-        //         self.exon_id = if df.column("exon_id").is_ok() {
-        //             Some("exon_id".to_string())
-        //         } else {
-        //             None
-        //         }
-        //     }
-        // }
+        
         if let Some(s) = self.exon_number() {
             if df.column(s).is_err() {
                 if is_warn {
@@ -540,6 +554,27 @@ impl FieldColumns {
         Ok(())
     }
 
+    pub fn update<T: AsRef<str>>(&mut self, field: T, value: T) -> anyhow::Result<()> {
+        let value = value.as_ref().to_string();
+        match field.as_ref() {
+            "seqname" => self.seqname = value,
+            "source" => self.source = Some(value),
+            "feature_type" => self.feature_type = Some(value),
+            "start" => self.start = value,
+            "end" => self.end = value,
+            "score" => self.score = Some(value),
+            "strand" => self.strand = value,
+            "phase" => self.phase = Some(value),
+            "gene_id" => self.gene_id = Some(value),
+            "gene_name" => self.gene_name = Some(value),
+            "transcript_id" => self.transcript_id = Some(value),
+            "exon_number" => self.exon_number = Some(value),
+            _ => bail!("invalid field name: {}", field.as_ref()),
+        }
+
+        Ok(())
+    }
+
     pub fn field<T: AsRef<str>>(&self, field: T) -> Option<&str> {
         match field.as_ref() {
             "seqname" => Some(self.seqname.as_str()),
@@ -551,8 +586,8 @@ impl FieldColumns {
             "strand" => Some(self.strand.as_str()),
             "phase" => self.phase(),
             "gene_id" => self.gene_id(),
+            "gene_name" => self.gene_name(),
             "transcript_id" => self.transcript_id(),
-            // "exon_id" => self.exon_id(),
             "exon_number" => self.exon_number(),
             _ => None,
         }
@@ -572,8 +607,8 @@ impl FieldColumns {
             "strand" => Ok(Some(self.strand.as_str())),
             "phase" => Ok(self.phase()),
             "gene_id" => Ok(self.gene_id()),
+            "gene_name" => Ok(self.gene_name()),
             "transcript_id" => Ok(self.transcript_id()),
-            // "exon_id" => Ok(self.exon_id()),
             "exon_number" => Ok(self.exon_number()),
             _ => {
                 if is_bail {

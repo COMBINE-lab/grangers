@@ -1,27 +1,25 @@
 // TODO:
-// 1. gtf writer
-// 2. fasta writer
-// 3. test sequence functions using true datasets
+// 1. update write and get sequence functions to use the same implementation
+// 2. test sequence functions using true datasets
 use crate::grangers::grangers_utils::*;
 use crate::grangers::options::*;
 use crate::grangers::reader;
 use crate::grangers::reader::fasta::SeqInfo;
-use anyhow::Ok;
 use anyhow::{bail, Context};
+use bedrs::types::record;
 use noodles::core::Position;
 use noodles::fasta;
 pub use noodles::fasta::record::{Definition, Record, Sequence};
-use polars::lazy::dsl::col;
 use polars::{lazy::prelude::*, prelude::*, series::Series};
 use rust_lapper::{Interval, Lapper};
 use std::collections::{HashMap, HashSet};
+use std::f32::consts::E;
 use std::fs;
-use std::io::BufReader;
+use std::io::{BufReader, BufRead};
 use std::ops::{Add, Mul, Sub};
 use std::path::Path;
 use tracing::{info, warn};
-
-// const ESSENTIAL_FIELDS: [&str; 4] = ["seqname", "start", "end", "strand"];
+use std::result::Result::Ok;
 
 // GTF files are 1-based with closed intervals.
 /// The Grangers struct contains the following fields:
@@ -29,6 +27,8 @@ use tracing::{info, warn};
 /// - misc: the additional information
 /// - seqinfo: the reference information
 /// - lapper: the lapper interval tree
+/// - interval type: the interval type (inclusive/exclusive, 0-based/1-based)
+/// - field_columns: the name of the columns that are used to identify the genomic features
 ///
 /// **Notice** that Granges uses 1-based closed intervals for the ranges.
 /// If your ranges are not like this, when instantiating new Grangers,
@@ -79,17 +79,23 @@ impl Grangers {
             {
                 any_nulls = true;
                 if is_warn {
-                    warn!("The given field {} contains null values. This will cause problems for most Grangers functions.", col.as_ref());
+                    warn!("The dataframe contains null values in the given fields -- {:?}. This will cause problems for most Grangers functions.", col.as_ref());
                 }
             }
         }
 
+        df.drop_nulls(Some(&["start", "end"]))?;
         if (any_nulls) & is_bail {
-            bail!("The dataframe contains null values. You can drop null values by using the Grangers::drop_nulls() method.")
+            let fields_str = fields.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
+            bail!("The dataframe contains null values in the given fields -- {:?}. You can drop null values by calling `df.drop_nulls(Some(&{:?}))`", fields_str,fields_str);
         }
 
         if (any_nulls) & is_warn {
-            warn!("You can drop null values by using the Grangers::drop_nulls() method.")
+            let fields_str = fields.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
+            warn!(
+                "You can drop null values by calling `df.drop_nulls(Some(&{:?}))`",
+                fields_str
+            )
         }
 
         Ok(any_nulls)
@@ -160,16 +166,25 @@ impl Grangers {
             Series::new("phase", gstruct.phase),
         ];
 
+        println!("{:?}", gstruct.attributes.essential);
         //for essential attributes
         for (k, v) in gstruct.attributes.essential {
-            let s = Series::new(k.as_str(), v);
-            df_vec.push(s);
+            if !v.is_empty() {
+                df_vec.push(Series::new(k.as_str(), v));
+            };
         }
 
+        println!("{:?}", gstruct.attributes.extra);
         // for extra attributes
         if let Some(attributes) = gstruct.attributes.extra {
             for (k, v) in attributes {
-                df_vec.push(Series::new(k.as_str(), v))
+
+                let s = if v.is_empty() {
+                    Series::new_null(k.as_str(), gstruct.attributes.tally)
+                } else {
+                    Series::new(k.as_str(), v)
+                };
+                df_vec.push(s);
             }
         }
         let df = DataFrame::new(df_vec)?;
@@ -215,24 +230,100 @@ impl Grangers {
         Ok(())
     }
 
-    pub fn write(&self, file_path: &std::path::Path) -> anyhow::Result<()> {
+    pub fn get_gtf_df<T: AsRef<Path>>(&self, _file_path: T) -> anyhow::Result<DataFrame> {
+        // get a copy of the dataframe
+        let df = self.df();
+        let mut fc = self.field_columns.clone();
+        let mut attr_cols: HashSet<&str> = df.get_column_names().into_iter().collect();
+        let mut existing_field_cols = Vec::new();
+        let mut missing_field_cols = Vec::new();
+        // let attr_cols = Vec::new();
+
+        // we devide the columns into three groups
+        // 1. existing fields: the fields that are already in the dataframe
+        // 2. missing fields: the fields that are not in the dataframe
+        // 3. attr_cols: attribute columns
+        for field in GXFFIELDS {
+            if let Ok(col) = self.get_column_name(field, false) {
+                existing_field_cols.push(col);
+                fc.update(field, col)?;
+                attr_cols.remove(col);
+            } else {
+                missing_field_cols.push(field);
+                fc.update(field, field)?;
+            }
+        }
+
+        // then, the left elements in the df_cols are extra fields
+        // we will concat the name with its value to make it as a valid GTF attribute column, and finally concat all attributes into a single column
+        // key1 "value1"; key2 "value2"; key3 "value3"
+
+        // for existing fields, we select them
+        let mut expr_vec = existing_field_cols
+            .iter()
+            .map(|&col_name| col(col_name))
+            .collect::<Vec<_>>();
+
+        // for missing fields, we add each of them as a new column
+        expr_vec.extend(
+            missing_field_cols
+                .iter()
+                .map(|&col_name| lit(".").alias(col_name)),
+        );
+
+        // for attribute columns, we concat the name with its value
+        expr_vec.extend(attr_cols.iter().map(|&col_name| {
+            (when(col(col_name).is_not_null())
+                .then(lit(col_name) + lit(" \"") + col(col_name).cast(DataType::Utf8) + lit("\";"))
+                .otherwise(lit("")))
+            .alias(col_name)
+        }));
+
+        // then, we prepare the final datafram for polar csv writer
+        let out_df = self.df().clone()
+            .lazy()
+            .select(
+                expr_vec
+            )
+            .select([
+                col(fc.field("seqname").expect("Could not get the seqname field. Please report this issue in our GitHub repo.")),
+                col(fc.field("source").expect("Could not get the source field. Please report this issue in our GitHub repo.")),
+                col(fc.field("feature_type").expect("Could not get the feature_type field. Please report this issue in our GitHub repo.")),
+                col(fc.field("start").expect("Could not get the start field. Please report this issue in our GitHub repo.")),
+                col(fc.field("end").expect("Could not get the end field. Please report this issue in our GitHub repo.")),
+                col(fc.field("score").expect("Could not get the score field. Please report this issue in our GitHub repo.")),
+                col(fc.field("strand").expect("Could not get the strand field. Please report this issue in our GitHub repo.")),
+                col(fc.field("phase").expect("Could not get the phase field. Please report this issue in our GitHub repo.")),
+                concat_str(attr_cols.iter().map(|&c| col(c)).collect::<Vec<_>>(), "").alias("attributes"),
+            ])
+            .fill_nan(lit("."))
+            .fill_null(lit("."))
+            .collect()?;
+
+        Ok(out_df)
+    }
+
+    pub fn write_gtf<T: AsRef<Path>>(&self, file_path: T) -> anyhow::Result<()> {
+        let file_path = file_path.as_ref();
+
+        // create the folder if it doesn't exist
         fs::create_dir_all(file_path.parent().with_context(|| {
             format!(
                 "Could not get the parent directory of the given output file path {:?}",
                 file_path.as_os_str()
             )
         })?)?;
-        // match self.file_type {
-        //     reader::FileFormat::GTF => {
-        //         unimplemented!()
-        //     }
-        //     reader::FileFormat::GFF => {
-        //         unimplemented!()
-        //     }
-        // }
-        unimplemented!()
 
-        // Ok(())
+        let mut out_df = self.get_gtf_df(file_path)?;
+
+        let mut file = std::fs::File::create(file_path)?;
+        CsvWriter::new(&mut file)
+            .has_header(false)
+            .with_delimiter(b'\t')
+            .with_null_value(".".to_string())
+            .finish(&mut out_df)?;
+
+        Ok(())
     }
 }
 
@@ -290,15 +381,12 @@ impl Grangers {
 
     pub fn filter<T: AsRef<str>>(&self, by: T, values: &[T]) -> anyhow::Result<Grangers> {
         let column = self.get_column_name(by.as_ref(), false)?;
-        let df = self.df().filter(
-            &self.df().column(column)?.is_in(&Series::new(
+        let df = self
+            .df()
+            .filter(&self.df().column(column)?.is_in(&Series::new(
                 "values",
-                values
-                    .iter()
-                    .map(|s| s.as_ref())
-                    .collect::<Vec<&str>>(),
-            ))?,
-        )?;
+                values.iter().map(|s| s.as_ref()).collect::<Vec<&str>>(),
+            ))?)?;
         Ok(Grangers::new(
             df,
             self.seqinfo().cloned(),
@@ -427,7 +515,7 @@ impl Grangers {
 // validate Grangers
 impl Grangers {
     ///validate the Grangers struct
-    /// - return error if the field_columns is valid 
+    /// - return error if the field_columns is valid
     /// - return error if the dataframe contains null values in the essential fields
     /// - return warning if the dataframe contains null values in the additional fields
     pub fn validate(&self, is_warn: bool, is_bail: bool) -> anyhow::Result<bool> {
@@ -451,7 +539,12 @@ impl Grangers {
             self.any_nulls(&self.field_columns().essential_fields(), false, is_bail)?;
 
         if is_warn & essential_nulls {
-            println!("{:?}", self.df().select(self.field_columns().essential_fields())?.null_count());
+            println!(
+                "{:?}",
+                self.df()
+                    .select(self.field_columns().essential_fields())?
+                    .null_count()
+            );
             warn!("The dataframe contains null values in the essential fields - seqname, start, end and strand. You can use Grangers::drop_nulls() to drop them.");
             return Ok(false);
         }
@@ -590,11 +683,13 @@ impl Grangers {
         // all fields correspond to a column in the dataframe
         self.validate(false, true)?;
 
-        let exon_feature = if let Some(exon_feature) = exon_feature {
-            exon_feature
-        } else {
-            "exon"
-        };
+        let exon_feature = 
+            if let Some(exon_feature) = exon_feature {
+                exon_feature
+            } else {
+                "exon"
+            }
+        ;
 
         // feature_type can have null values, they will be ignored
         let feature_type = self.get_column_name("feature_type", false)?;
@@ -608,9 +703,7 @@ impl Grangers {
             &self
                 .df()
                 .column(feature_type)?
-                .iter()
-                .map(|f| f.eq(&AnyValue::Utf8(exon_feature)))
-                .collect(),
+                .is_in(&Series::new("exon_feature", [exon_feature]))?,
         )?;
 
         // We know fields are valid, then we need to check nulls
@@ -619,53 +712,47 @@ impl Grangers {
         let start = self.get_column_name("start", true)?;
         let end = self.get_column_name("end", true)?;
         let strand = self.get_column_name("strand", true)?;
-        let gene_id = self.get_column_name("gene_id", true)?;
         let transcript_id = self.get_column_name("transcript_id", false)?;
-        // let exon_id = self.get_column_name("exon_id", false)?;
 
-        if exon_df.column(gene_id)?.null_count() > 0 {
-            bail!("The gene_id column contains null values. Cannot proceed.")
-        }
-        if exon_df.column(gene_id)?.null_count() > 0 {
-            bail!("The gene_id column contains null values. Cannot proceed.")
-        }
-        // if exon_df.column(exon_id)?.null_count() > 0 {
-        //     bail!("The exon_id column contains null values. Cannot proceed.")
-        // }
-
-        // make sure that stand is valid:
-        // - the exons of each transcript are on the same strand
-        // - the strand column does not contain other values than "+" or "-"
-        let tx_strand = exon_df
-            .select([transcript_id, strand])?
-            .lazy()
-            .groupby([transcript_id])
-            .agg([col(strand).unique().count().gt(lit(1)).alias("is_solo")])
-            .collect()?;
-        if tx_strand.column("is_solo")?.bool()?.any() {
-            bail!("The strand column contains null values. Cannot proceed.")
+        // make sure that transcript_id is not null
+        if exon_df.column(transcript_id)?.null_count() > 0 {
+            bail!("Found exon features with a null transcript_id; Cannot proceed")
         }
 
+        // make sure that strand is valid
         if !exon_df
             .column(strand)?
             .unique()?
             .is_in(&Series::new("valid strands", ["+", "-"]))?
             .all()
         {
-            bail!("The strand column contains values that are not \"+\" or \"-\". Cannot proceed.")
+            bail!("Found exons that do not have a valid strand (+ or -). Cannot proceed.")
         }
+    
+        // make sure that stand is valid:
+        // - the exons of each transcript are on the same strand
+        // - the strand column does not contain other values than "+" or "-"
+        let tx_strand = exon_df
+            .select([seqname, transcript_id, strand])?
+            .lazy()
+            .groupby([seqname, transcript_id])
+            .agg([col(strand).unique().count().gt(lit(1)).alias("is_solo")])
+            .collect()?;
+        if tx_strand.column("is_solo")?.bool()?.any() {
+            bail!("Found transcripts with exons from multiple chromosomes or strands; Cannot proceed")
+        }
+
 
         // make sure start and end are positive
         if let Some(start_min) = exon_df.column(start)?.i64()?.min() {
             if start_min < 1 {
                 bail!(
-                    "The {} column contains values less than 1. Cannot proceed.",
-                    start
+                    "Found exons with non-positive start position. Cannot proceed."
                 )
             }
         } else {
             bail!(
-                "The Cannot get min value in the {} column. Cannot proceed.",
+                "Cannot get min value in the {} column. Cannot proceed.",
                 start
             )
         }
@@ -673,32 +760,33 @@ impl Grangers {
         if let Some(end_min) = exon_df.column(end)?.i64()?.min() {
             if end_min < 1 {
                 bail!(
-                    "The {} column contains values less than 1. Cannot proceed.",
-                    end
+                    "Found exons with non-positive start position. Cannot proceed."
                 )
             }
         } else {
             bail!(
-                "The Cannot get min value in the {} column. Cannot proceed.",
+                "Cannot get min value in the {} column. Cannot proceed.",
                 end
             )
         }
 
-        // if there is an exon number field, it should be valid
-        // if there is no exon number field, we will add one
-        let exon_number = if let Some(exon_number) = fc.exon_number.clone() {
-            if exon_df.column(exon_number.as_str())?.null_count() > 0 {
-                bail!("The exon number column {} contains null values. Cannot proceed. You can delete this column so that the exons() method will compute the number according to the start and strand fields.", exon_number);
-            }
-            exon_number
+        // if there is an exon number field, it should contain no null values
+        // otherwise we will compute the exon number from exon start position
+        if fc.exon_number.is_some() && exon_df.column(fc.exon_number().unwrap())?.null_count() > 0 {
+            warn!("The {} column contains null values. Will compute the exon number from exon start position .", fc.exon_number().unwrap());
+            fc.exon_number = None;
+        }
+
+        // if there is no exon number field, we will compute the exon number from exon start position
+        let exon_number = if let Some(exon_number) = fc.exon_number() {
+            exon_number.to_string()
         } else {
             // update exon number in fc
             fc.exon_number = Some("exon_number".to_string());
             // TODO: add an exon_number column if it doesn't exist
             exon_df = exon_df
                 .lazy()
-                .with_columns([
-                    all(),
+                .with_column(
                     when(col(fc.strand()).first().eq(lit("+")))
                         .then(
                             col(fc.start())
@@ -721,7 +809,7 @@ impl Grangers {
                         .over([transcript_id])
                         .cast(DataType::Utf8)
                         .alias(fc.exon_number().unwrap()),
-                ])
+                )
                 .collect()?;
             "exon_number".to_string()
         };
@@ -731,23 +819,22 @@ impl Grangers {
         let exon_df = exon_df
             .lazy()
             .with_column(col(exon_number.as_str()).cast(DataType::UInt32))
-            .select([all()
-                .sort_by([
-                    col(seqname).cast(DataType::Categorical(None)),
-                    col(strand).cast(DataType::Categorical(None)),
-                    col(gene_id).cast(DataType::Categorical(None)),
-                    col(transcript_id).cast(DataType::Categorical(None)),
-                    col(exon_number.as_str())], 
-                        [false]
-                    )
-                // .over([col(transcript_id).cast(DataType::Categorical(None))])
-                ]
-            )
+            .select([
+                all().sort_by(
+                    [
+                        col(seqname).cast(DataType::Categorical(None)),
+                        col(strand).cast(DataType::Categorical(None)),
+                        col(transcript_id).cast(DataType::Categorical(None)),
+                        col(exon_number.as_str()),
+                    ],
+                    [false],
+                ),
+            ])
             .collect()?;
-
 
         // well done!
         fc.fix(&exon_df, false)?;
+
         let gr = Grangers::new(
             exon_df,
             self.seqinfo.clone(),
@@ -1356,6 +1443,440 @@ impl Grangers {
     /// - The exons of a transcript should not overlap with each other.
     /// - Each value in the "seqname" column should represent a sequence in the reference file.
 
+    pub fn write_transcript_sequences<T: AsRef<Path>>(
+        &mut self,
+        ref_path: T,
+        out_path: T,
+        exon_name: Option<&str>,
+        multithreaded: bool,
+        append: bool,
+    ) -> anyhow::Result<()> {
+        let out_path = out_path.as_ref();
+
+        // if the file exists and append is true, we append to the file
+        let out_file = if out_path.try_exists()? && append {
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(out_path)
+                .with_context(|| {
+                    format!(
+                        "Could not open the output file {:?}",
+                        out_path.as_os_str()
+                    )
+                })?
+        } else {
+            // create the folder if it doesn't exist
+            fs::create_dir_all(out_path.parent().with_context(|| {
+                format!(
+                    "Could not get the parent directory of the given output file path {:?}",
+                    out_path.as_os_str()
+                )
+            })?)?;
+
+            // we prepare a fasta writer
+            std::fs::File::create(out_path).with_context(|| {
+                format!(
+                    "Could not create the output file {:?}",
+                    out_path.as_os_str()
+                )
+            })?
+        };
+
+        self.validate(false, true)?;
+        // get exon_gr
+        // exons() ensures that all exon records are valid,
+        // and they have a valid exon number
+        let mut exon_gr = self.exons(exon_name, multithreaded)?;
+        // we build an essential gr for avoiding copying unused columns
+        exon_gr.df = exon_gr.df().select([
+            exon_gr.get_column_name("seqname", true)?,
+            exon_gr.get_column_name("start", true)?,
+            exon_gr.get_column_name("end", true)?,
+            exon_gr.get_column_name("strand", true)?,
+            exon_gr.get_column_name("transcript_id", true)?,
+            exon_gr.get_column_name("exon_number", true)?,
+        ])?;
+
+        let mut fc = exon_gr.field_columns().clone();
+        fc.fix(exon_gr.df(), false)?;
+        exon_gr.field_columns = fc;
+
+        let fc = exon_gr.field_columns();
+        let seqname = fc.seqname();
+        let end = fc.end();
+        let transcript_id = fc.transcript_id().unwrap();
+
+        // Now, we read the fasta file and process each reference sequence at a time
+        let reader = std::fs::File::open(ref_path).map(BufReader::new)?;
+        let mut reader = noodles::fasta::Reader::new(reader);
+
+        // we also create a fasta writer
+        let mut writer = noodles::fasta::Writer::new(out_file);
+
+        // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
+        // 1. subset the dataframe by the seqname (chromosome name)
+        // 2. for each gene, we get the sequence of all its exons
+        // 3. for each transcript, we join the transcripts' exon sequences to get the sequence of the transcript
+        for result in reader.records() {
+            let record = result?;
+
+            let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
+            let chr_gr = exon_gr.filter(seqname, &[chr_name])?;
+
+            if chr_gr.df().height() == 0 {
+                continue;
+            }
+
+            // check if exons are in the range of the reference sequence
+            if let Some(end_max) = chr_gr.df().column(end)?.i64()?.max() {
+                if end_max > record.sequence().len() as i64 {
+                    bail!("Found exons that exceed the length of the reference sequence. Cannot proceed")
+                }
+            } else {
+                bail!("Could not get the maximum end value of the exons. Cannot proceed")
+            }
+
+            // we get the sequence of a chromosome at a time
+            let chr_seq_vec = chr_gr.get_sequences_fasta_record(&record, &OOBOption::Skip)?;
+
+            // we make sure that there is no invalid exon sequences
+            if chr_seq_vec
+                .iter()
+                .map(|f| f.is_none())
+                .fold(0, |acc, x| acc + x as usize)
+                > 0
+            {
+                bail!("Found invalid exons that exceed the chromosome length; Cannot proceed")
+            }
+
+            // we assemble the transcript sequences
+            // exons() will sort the exons by the exon number
+            // get_sequences_fasta_record() will take care of the strands
+            // so here we just need to join the exon sequences
+            // let mut transcript_seq_vec = vec![None; chr_df.height()];
+            let mut tx_id_iter = chr_gr
+                .df()
+                .column(transcript_id)?
+                .utf8()?
+                .into_iter()
+                .peekable();
+            let mut curr_tx = if let Some(id) = tx_id_iter
+                .peek()
+                .with_context(|| "Could not get the first transcript id")?
+            {
+                id.to_string()
+            } else {
+                bail!("Could not get the first transcript id")
+            };
+            // This is the vector that stores the exon sequences of the current transcript
+            // each element is a base, represented by its u8 value
+
+            let mut exon_u8_vec: Vec<u8> = Vec::new();
+
+            for (tx_id, seq) in tx_id_iter.zip(chr_seq_vec.into_iter()) {
+                if let (Some(tx_id), Some(seq)) = (tx_id, seq) {
+                    // first we want to check if the transcript id is the same as the previous one
+                    if tx_id == curr_tx {
+                        // if it is the same, we extend the exon_vec with the current sequence
+                        exon_u8_vec.extend(seq.as_ref().iter());
+                    } else {
+                        // // if it is not the same, we create a Sequence and push it to seq_vec
+                        let definition = Definition::new(curr_tx.clone(), None);
+                        let sequence = Sequence::from_iter(exon_u8_vec.clone());
+
+                        writer
+                            .write_record(&Record::new(definition, sequence))
+                            .with_context(|| {
+                                format!(
+                                "Could not write the sequence of transcript {} to the output file",
+                                curr_tx
+                            )
+                            })?;
+                        exon_u8_vec.clear();
+                        // update the current transcript id
+                        curr_tx = tx_id.to_string();
+                    }
+                } else {
+                    bail!("Found null transcript id or empty exon sequence. This should not happen, please report this bug.")
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Extract the sequence of the features in the Grangers object from the provided reference file.
+    /// Currently only fasta file is supported. This function four field columns: seqname, start, end, and strand.
+    /// Arguments:
+    /// - `genome_path`: the path to the reference genome file.
+    /// - `file_format`: the format of the reference genome file. Currently only fasta is supported.
+    /// - `oob_option`: the option for out-of-boundary positions. It can be either `Truncate` or `Skip`. If `Truncate`, the out-of-boundary positions will be truncated to the start or end of the sequence. If `Skip`, a None will be returned for features with OOB positions
+    /// The function outputs the extracted sequence as a vector of `Option<Sequence>`. If the feature has OOB positions and the oob_option is set as `Skip`, the corresponding element in the vector will be None. The order of the vector follows the row order of the dataframe of the Grangers object.
+    pub fn _write_sequences<T: AsRef<Path>>(
+        &mut self,
+        ref_path: T,
+        out_path: T,
+        ignore_strand: bool,
+        name_column: Option<&str>,
+        oob_option: &OOBOption,
+    ) -> anyhow::Result<()>
+    {
+        let out_path = out_path.as_ref();
+
+        // create the folder if it doesn't exist
+        fs::create_dir_all(out_path.parent().with_context(|| {
+            format!(
+                "Could not get the parent directory of the given output file path {:?}",
+                out_path.as_os_str()
+            )
+        })?)?;
+
+        // we prepare a fasta writer
+        let out_file = std::fs::File::create(out_path).with_context(|| {
+            format!(
+                "Could not create the output file {:?}",
+                out_path.as_os_str()
+            )
+        })?;
+
+        self.validate(false, true)?;
+
+        // if name is invalid, ignore
+        let name_column = if name_column.is_some() 
+        {
+            if self.get_column_name(name_column.unwrap(), true).is_ok() {
+                self.get_column_name(name_column.unwrap(), false)?
+                .to_owned()
+            } else {
+                warn!("The provided name column {:?} for naming the extracted sequences is not in the dataframe. Row order will will be used instead.", name_column);
+                "row_order".to_owned()
+            }
+        } else {
+            info!("No name column is provided. The extracted sequences will be named by the row order.");
+            "row_order".to_owned()
+        };
+
+        let mut fc = self.field_columns().clone();
+        // we need to map the sequence back to the original row order of the dataframe
+        // So, we need to have a minimum copy of the dataset, which contains only the essential fields,
+        // and add one more column representing the row order of the original dataframe
+        let selection = [fc.seqname(), fc.start(), fc.end(), fc.strand()];
+
+        let mut df = self.df.select(selection)?;
+
+        df.with_column(Series::new(
+            "row_order",
+            (0..df.height() as u32).collect::<Vec<u32>>(),
+        ))?;
+
+        // if ignore strand, set the strand to +
+        if ignore_strand {
+            df.with_column(Series::new(fc.strand(), vec!["+"; df.height()]))?;
+        }
+
+        fc.fix(&df, false)?;
+
+        let essential_gr = Grangers::new(df, None, None, None, IntervalType::default(), fc, false)?;
+
+        let seqname = essential_gr.get_column_name("seqname", true)?;
+
+        let reader = std::fs::File::open(ref_path).map(BufReader::new)?;
+        let mut reader = noodles::fasta::Reader::new(reader);
+
+        let mut writer = noodles::fasta::Writer::new(out_file);
+        let mut empty_counter = 0;
+
+        // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
+        // 1. subset the dataframe by the chromosome name
+        // 2. get the sequence of the features in the dataframe on that fasta record
+        // 3. insert the sequence into the sequence vector according to the row order
+        for result in reader.records() {
+            let record = result?;
+
+            let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
+            let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
+
+            if chr_gr.df().height() == 0 {
+                continue;
+            }
+            let name_vec = chr_gr
+                .df()
+                .column(name_column.as_str())?
+                .utf8()?
+                .into_iter()
+                .map(|s| s.unwrap())
+                .collect::<Vec<_>>();
+            // we get the sequence of a chromosome at a time
+            let chr_seq_vec = chr_gr.get_sequences_fasta_record(&record, oob_option)?;
+
+            // we push seuqence to the correct position
+            for (name, sequence) in name_vec.into_iter().zip(chr_seq_vec.into_iter()) {
+                let definition = Definition::new(name, None);
+                if let Some(sequence) = sequence {
+                    writer
+                        .write_record(&Record::new(definition, sequence))
+                        .with_context(|| {
+                            format!(
+                            "Could not write sequence {} to the output file; Cannot proceed.", name
+                        )
+                        })?;
+                } else {
+                    empty_counter += 1;
+                }
+            }
+        }
+        if empty_counter > 0 {
+            warn!("Extracted empty sequence from {} records. They are usually caused by out of boundary features.", empty_counter)
+        }
+
+        Ok(())
+    }
+
+    pub fn write_sequences<T: AsRef<Path>>(
+        &mut self,
+        ref_path: T,
+        out_path: T,
+        ignore_strand: bool,
+        name_column: Option<&str>,
+        oob_option: OOBOption,
+        append: bool,
+    ) -> anyhow::Result<()>
+    {
+        let out_path = out_path.as_ref();
+        
+        // if the file exists and append is true, we append to the file
+        let out_file = if out_path.try_exists()? && append {
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(out_path)
+                .with_context(|| {
+                    format!(
+                        "Could not open the output file {:?}",
+                        out_path.as_os_str()
+                    )
+                })?
+        } else {
+            // create the folder if it doesn't exist
+            fs::create_dir_all(out_path.parent().with_context(|| {
+                format!(
+                    "Could not get the parent directory of the given output file path {:?}",
+                    out_path.as_os_str()
+                )
+            })?)?;
+
+            // we prepare a fasta writer
+            std::fs::File::create(out_path).with_context(|| {
+                format!(
+                    "Could not create the output file {:?}",
+                    out_path.as_os_str()
+                )
+            })?
+        };
+
+        self.validate(false, true)?;
+
+        // if name is invalid, ignore
+        let name_column = if name_column.is_some() 
+        {
+            if self.get_column_name(name_column.unwrap(), true).is_ok() {
+                self.get_column_name(name_column.unwrap(), false)?
+                .to_owned()
+            } else {
+                warn!("The provided name column {:?} for naming the extracted sequences is not in the dataframe. Row order will will be used instead.", name_column);
+                "row_order".to_owned()
+            }
+        } else {
+            info!("No name column is provided. The extracted sequences will be named by the row order.");
+            "row_order".to_owned()
+        };
+
+        let mut fc = self.field_columns().clone();
+        // we need to map the sequence back to the original row order of the dataframe
+        // So, we need to have a minimum copy of the dataset, which contains only the essential fields,
+        // and add one more column representing the row order of the original dataframe
+        let selection = [fc.seqname(), fc.start(), fc.end(), fc.strand(), name_column.as_str()];
+
+        let mut df = if name_column.as_str() == "row_order" {
+            self.df.with_row_count("row_order", None)?.select(selection)?
+        } else {
+            self.df.select(selection)?
+        };
+
+        // if ignore strand, set the strand to +
+        if ignore_strand {
+            df.with_column(Series::new(fc.strand(), vec!["+"; df.height()]))?;
+        }
+
+        fc.fix(&df, false)?;
+
+        let essential_gr = Grangers::new(df, None, None, None, IntervalType::default(), fc, false)?;
+
+        let seqname = essential_gr.get_column_name("seqname", true)?;
+
+        let reader = std::fs::File::open(ref_path).map(BufReader::new)?;
+        let mut reader = noodles::fasta::Reader::new(reader);
+
+        let mut writer = noodles::fasta::Writer::new(out_file);
+        let mut empty_counter = 0;
+
+        // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
+        // 1. subset the dataframe by the chromosome name
+        // 2. get the sequence of the features in the dataframe on that fasta record
+        // 3. insert the sequence into the sequence vector according to the row order
+        for result in reader.records() {
+            let record = result?;
+
+            let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
+            let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
+
+            if chr_gr.df().height() == 0 {
+                continue;
+            }
+
+            let name_vec = chr_gr
+                .df()
+                .column(name_column.as_str())?
+                .utf8()?
+                .into_iter()
+                .map(|s| s.unwrap())
+                .collect::<Vec<_>>();
+
+            let chrsi = ChrRowSeqIter::new(&chr_gr, &record, oob_option)?;
+
+            for (feat_name,chrsi_rec) in name_vec.into_iter().zip(chrsi) {
+                if let Ok(sequence) = chrsi_rec {
+                    let definition = Definition::new(feat_name, None);
+                    
+                    // we write if the sequence is not empty
+                    writer
+                        .write_record(&Record::new(definition, sequence))
+                        .with_context(|| {
+                            format!(
+                            "Could not write sequence {} to the output file; Cannot proceed.", feat_name
+                        )
+                        })?;
+                    
+                } else {
+                    empty_counter += 1;
+                }
+            }
+        }
+        if empty_counter > 0 {
+            warn!("Unable to extract sequence for {} records. They are usually caused by out of boundary features or an invalid alphabet.", empty_counter)
+        }
+        Ok(())
+    }
+}
+
+// implement get sequence functions for Grangers
+impl Grangers {
+    /// Extract the transcript sequences in the Grangers object from the provided reference file.
+    /// This function works only if the features are well defined:
+    /// - Exon features cannot have a null "transcript_id".
+    /// - The exons of a transcript should have the same "seqname" and "strand".
+    /// - The exons of a transcript should not overlap with each other.
+    /// - Each value in the "seqname" column should represent a sequence in the reference file.
+
     pub fn get_transcript_sequences<T: AsRef<Path>>(
         &mut self,
         fasta_path: T,
@@ -1385,7 +1906,7 @@ impl Grangers {
         let seqname = fc.seqname();
         let end = fc.end();
         let transcript_id = fc.transcript_id().unwrap();
-        
+
         // Now, we read the fasta file and process each reference sequence at a time
         let reader = std::fs::File::open(fasta_path).map(BufReader::new)?;
         let mut reader = noodles::fasta::Reader::new(reader);
@@ -1483,7 +2004,7 @@ impl Grangers {
     /// - `file_format`: the format of the reference genome file. Currently only fasta is supported.
     /// - `oob_option`: the option for out-of-boundary positions. It can be either `Truncate` or `Skip`. If `Truncate`, the out-of-boundary positions will be truncated to the start or end of the sequence. If `Skip`, a None will be returned for features with OOB positions
     /// The function outputs the extracted sequence as a vector of `Option<Sequence>`. If the feature has OOB positions and the oob_option is set as `Skip`, the corresponding element in the vector will be None. The order of the vector follows the row order of the dataframe of the Grangers object.
-    pub fn get_sequences<T: AsRef<Path>>(
+    pub fn _get_sequences<T: AsRef<Path>>(
         &mut self,
         fasta_path: T,
         ignore_strand: bool,
@@ -1493,10 +2014,13 @@ impl Grangers {
 // anyhow::Result<Vec<fasta::record::Sequence>>
     {
         self.validate(false, true)?;
-        
+
         // if name is invalid, ignore
         let name = if name.is_some() && self.get_column_name(name.unwrap(), true).is_ok() {
-            warn!("The provided name column {:?} is not in the dataframe. Ignored.", name);
+            warn!(
+                "The provided name column {:?} is not in the dataframe. Ignored.",
+                name
+            );
             Some(self.get_column_name(name.unwrap(), false)?.to_owned())
         } else {
             None
@@ -1508,17 +2032,15 @@ impl Grangers {
         // and add one more column representing the row order of the original dataframe
         let selection = [fc.seqname(), fc.start(), fc.end(), fc.strand()];
 
-        let mut df = self.df.select(selection)?;
-
-        df.with_column(Series::new(
-            "row_order",
-            (0..df.height() as u32).collect::<Vec<u32>>(),
-        ))?;
-
-        // if ignore strand, set the strand to +
-        if ignore_strand {
-            df.with_column(Series::new(fc.strand(), vec!["+"; df.height()]))?;
-        }
+        let mut df = self.df.select(selection)?.lazy()
+        .with_row_count("row_order", None)
+        .with_column(
+            if ignore_strand {
+                lit("+").alias("strand")
+            } else {
+                col("strand")
+            })
+        .collect()?;
 
         fc.fix(&df, false)?;
 
@@ -1528,6 +2050,7 @@ impl Grangers {
 
         let reader = std::fs::File::open(fasta_path).map(BufReader::new)?;
         let mut reader = noodles::fasta::Reader::new(reader);
+
         let mut seq_vec: Vec<Option<Record>> = vec![None; essential_gr.df().height()];
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
         // 1. subset the dataframe by the chromosome name
@@ -1540,10 +2063,16 @@ impl Grangers {
             let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
 
             if chr_gr.df().height() == 0 {
-                continue
+                continue;
             }
             let name_vec = if let Some(name) = &name {
-                chr_gr.df().column(name)?.utf8()?.into_iter().map(|s| s.unwrap()).collect::<Vec<_>>()
+                chr_gr
+                    .df()
+                    .column(name)?
+                    .utf8()?
+                    .into_iter()
+                    .map(|s| s.unwrap())
+                    .collect::<Vec<_>>()
             } else {
                 Vec::new()
             };
@@ -1572,6 +2101,115 @@ impl Grangers {
         }
 
         Ok(seq_vec)
+    }
+
+
+    pub fn get_sequences<T: AsRef<Path>>(
+        &mut self,
+        ref_path: T,
+        ignore_strand: bool,
+        name_column: Option<&str>,
+        oob_option: OOBOption,
+    ) -> anyhow::Result<()>
+    {
+        self.validate(false, true)?;
+
+        // if name is invalid, ignore
+        let name_column = if name_column.is_some() 
+        {
+            if self.get_column_name(name_column.unwrap(), true).is_ok() {
+                self.get_column_name(name_column.unwrap(), false)?
+                .to_owned()
+            } else {
+                warn!("The provided name column {:?} for naming the extracted sequences is not in the dataframe. Row order will will be used instead.", name_column);
+                "row_order".to_owned()
+            }
+        } else {
+            info!("No name column is provided. The extracted sequences will be named by the row order.");
+            "row_order".to_owned()
+        };
+
+        let mut fc = self.field_columns().clone();
+        // we need to map the sequence back to the original row order of the dataframe
+        // So, we need to have a minimum copy of the dataset, which contains only the essential fields,
+        // and add one more column representing the row order of the original dataframe
+        let selection = [fc.seqname(), fc.start(), fc.end(), fc.strand(), name_column.as_str()];
+
+        let df = self.df.select(selection)?.lazy()
+        .with_row_count("row_order", None)
+        .with_column(
+            if ignore_strand {
+                lit("+").alias("strand")
+            } else {
+                col("strand")
+            })
+        .collect()?;
+
+        // we only use a subset of the columns, so fix fc
+        fc.fix(&df, false)?;
+
+        let essential_gr = Grangers::new(df, None, None, None, IntervalType::default(), fc, false)?;
+        let seqname = essential_gr.get_column_name("seqname", true)?;
+        let mut reader = std::fs::File::open(ref_path).map(BufReader::new).map(noodles::fasta::Reader::new)?;
+        // let mut reader = noodles::fasta::Reader::new(reader);
+
+        let mut seq_vec: Vec<Option<Record>> = vec![None; essential_gr.df().height()];
+        
+        // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
+        // 1. subset the dataframe by the chromosome name
+        // 2. get the sequence of the features in the dataframe on that fasta record
+        // 3. insert the sequence into the sequence vector according to the row order
+        for result in reader.records() {
+            let record = result?;
+
+            let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
+            let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
+
+            if chr_gr.df().height() == 0 {
+                continue;
+            }
+
+            let name_vec_iter = chr_gr
+                .df()
+                .column(name_column.as_str())?
+                .cast(&DataType::Utf8)?
+                .utf8()?
+                .into_iter()
+                .map(|s| s.expect("The name column contains null values. Please report this bug on GitHub.").to_string())
+                .collect::<Vec<String>>();
+
+            let row_order_iter = chr_gr
+                .df()
+                .column("row_order")?
+                .u32()?
+                .into_iter()
+                .map(|s| s.expect("Could not get row order. Please report this bug on GitHub."));
+
+            let chrsi = ChrRowSeqIter::new(&chr_gr, &record, oob_option)?;
+
+            for ((idx, feat_name),sequence) in row_order_iter.zip(name_vec_iter).zip(chrsi) {
+                let sequence = match sequence {
+                    Ok(sequence) => sequence,
+                    Err(e) => {
+                        warn!("Failed to get sequence for feature {} at row {}. The error message was {:?}", feat_name, idx, e);
+
+                        seq_vec[idx as usize] = None;
+                        continue;
+                    }
+                };
+                
+                let definition = Definition::new(feat_name, None);
+                let record = Record::new(definition, sequence);
+
+                seq_vec[idx as usize] = Some(record);
+            }
+        }
+
+        let empty_counter: usize = seq_vec.iter().fold(0usize, |acc, s| acc + s.is_none() as usize);
+        if empty_counter> 0 {
+            warn!("Unable to extract sequence for {} records. They are usually caused by out of boundary features or an invalid alphabet.", empty_counter)
+        }
+        Ok(())
     }
 
     /// Get the sequences of the intervals from one fasta record.
@@ -1636,27 +2274,28 @@ impl Grangers {
     }
 }
 
-// strandness cannot be processed internally, so we return a tuple of (strand, sequence pointer)
-// so that ppl can process the strandness externally
-pub struct FeatSeqIter<'a> {
+struct ChrRowSeqIter<'a> {
     iters: Vec<polars::series::SeriesIter<'a>>,
-    sequence: &'a noodles::fasta::record::Sequence,
+    record: &'a Record,
+    oob_option: OOBOption,
+    seqlen: usize,
 }
 
-impl<'a> FeatSeqIter<'a> {
-    pub fn new(grangers: &'a Grangers, sequence: &'a Sequence) -> anyhow::Result<Self> {
+impl<'a> ChrRowSeqIter<'a> {
+    pub fn new(grangers: &'a Grangers, record: &'a Record, oob_option: OOBOption) -> anyhow::Result<Self> {
         let fc = grangers.field_columns();
         let iters: Vec<polars::series::SeriesIter> = vec![
             grangers.df.column(fc.start())?.iter(),
             grangers.df.column(fc.end())?.iter(),
             grangers.df.column(fc.strand())?.iter(),
         ];
-        Ok(Self { iters, sequence })
+        let seqlen = record.sequence().len();
+        Ok(Self { iters, record,  oob_option, seqlen})
     }
 }
 
-impl<'a> Iterator for FeatSeqIter<'a> {
-    type Item = Option<(&'a str, &'a [u8])>;
+impl<'a> Iterator for ChrRowSeqIter<'a> {
+    type Item = anyhow::Result<Sequence>;
     fn next(&mut self) -> Option<Self::Item> {
         // first we check if we can extract value or not
         if let (Some(start), Some(end), Some(strand)) = (
@@ -1665,22 +2304,48 @@ impl<'a> Iterator for FeatSeqIter<'a> {
             self.iters[2].next(),
         ) {
             // the second if check if the start, end and strand are non-null
-            if let (AnyValue::Int64(start), AnyValue::Int64(end), AnyValue::Utf8(strand)) =
+            let sequence = if let (AnyValue::Int64(start), AnyValue::Int64(end), AnyValue::Utf8(strand)) =
                 (start, end, strand)
             {
-                // the third if check if the start and end are non-negative
-                if let (Some(start), Some(end)) =
-                    (Position::new(start as usize), Position::new(end as usize))
-                {
-                    let seq = self.sequence.get(start..=end).map(|s| (strand, s));
-                    Some(seq)
+                // we need to convert the start and end to trunacated one if oob_option is Truncate
+                let (start, end) = if self.oob_option == OOBOption::Truncate {
+                    (
+                        noodles::core::Position::new(std::cmp::max(1, start as usize)),
+                        noodles::core::Position::new(std::cmp::min(
+                            self.seqlen,
+                            end as usize,
+                        )),
+                    )
                 } else {
-                    Some(None)
+                    (
+                        noodles::core::Position::new(start as usize),
+                        noodles::core::Position::new(end as usize),
+                    )
+                };
+                // the third if check if the start and end are non-negative
+                if let (Some(start), Some(end)) =  (start, end)
+                {
+                    let seq = self.record.sequence().get(start..=end);
+                    // the fourth if check if the sequence is valid
+                    if let Some(seq) = seq {
+                        let mut sequence = Ok(Sequence::from_iter(seq.iter().map(|&s| s)));
+                        if strand == "-" {
+                            sequence = sequence.unwrap().complement().rev().collect::<Result<_, _>>().with_context(||format!("Could not get the reverse complement of a sequence. Please check if the alphabet is valid."));
+                        };
+                        sequence
+                    } else {
+                    // we can't get a slice from the start to the end
+                    Err(anyhow::anyhow!("Could not get the sequence from the start to the end. Please check if the start and end are valid."))
+                }
+                } else {
+                    // if start or end is negative, we return None
+                    Err(anyhow::anyhow!("Found invalid start or end. Please check if the start and end are within boundary."))
                 }
             } else {
                 // if we can't get valid start, end or strand, then we return None
-                Some(None)
-            }
+                Err(anyhow::anyhow!("Found null start, end or strand. Please check if the start, end and strand are valid."))
+            };
+            Some(sequence)
         } else {
             // if they are none, then we reach the end of the iterator
             None
@@ -3111,7 +3776,7 @@ mod tests {
             "gene_id" => ["g1", "g2"],
         )
         .unwrap();
-    
+
         let gr = Grangers::new(
             df,
             None,
@@ -3122,18 +3787,23 @@ mod tests {
             false,
         )
         .unwrap();
-    
+
         let definition = Definition::new("chr1", None);
-        let sequence = Sequence::from(b"GTAGTTCTCTGGGACCTGCAAGATTAGGCAGGGACATGTGAGAGGTGACAGGGACCTGCA".to_vec());
+        let sequence = Sequence::from(
+            b"GTAGTTCTCTGGGACCTGCAAGATTAGGCAGGGACATGTGAGAGGTGACAGGGACCTGCA".to_vec(),
+        );
         let record = Record::new(definition, sequence.clone());
-    
-        let seq_vec = gr.get_sequences_fasta_record(&record, &OOBOption::Skip).unwrap();
+
+        let seq_vec = gr
+            .get_sequences_fasta_record(&record, &OOBOption::Skip)
+            .unwrap();
         let start = Position::new(10).unwrap();
         let end = Position::new(20).unwrap();
         let expected_seq1 = sequence.slice(start..=end).unwrap();
         let start = Position::new(15).unwrap();
         let end = Position::new(30).unwrap();
-        let expected_seq2 = sequence.slice(start..=end)
+        let expected_seq2 = sequence
+            .slice(start..=end)
             .unwrap()
             .complement()
             .rev()
@@ -3142,5 +3812,113 @@ mod tests {
         assert_eq!(seq_vec[0], Some(expected_seq1));
         assert_eq!(seq_vec[1], Some(expected_seq2));
     }
-}
 
+    #[test]
+    fn test_DFRowFastaRecIter() {
+
+        let df = df!(
+            "seqname" => ["chr1", "chr1"],
+            "start" => [10i64, 15],
+            "end" => [20i64, 30],
+            "strand"=> ["+", "-"],
+            "gene_id" => ["g1", "g2"],
+        )
+        .unwrap();
+
+        let gr = Grangers::new(
+            df,
+            None,
+            None,
+            None,
+            IntervalType::Inclusive(1),
+            FieldColumns::default(),
+            false,
+        )
+        .unwrap();
+
+        let definition = Definition::new("chr1", None);
+        let sequence = Sequence::from(
+            b"GTAGTTCTCTGGGACCTGCAAGATTAGGCAGGGACATGTGAGAGGTGACAGGGACCTGCA".to_vec(),
+        );
+        let record = Record::new(definition, sequence.clone());
+
+        let mut chrsi = ChrRowSeqIter::new(&gr, &record, OOBOption::Skip).unwrap();
+
+        let chrsi1 = chrsi.next().unwrap().unwrap();
+        let chrsi2 = chrsi.next().unwrap().unwrap();
+        assert!(chrsi.next().is_none());
+        
+        let start = Position::new(10).unwrap();
+        let end = Position::new(20).unwrap();
+        let expected_seq1 = Sequence::from_iter(sequence.get(start..=end).unwrap().iter().cloned());
+        assert_eq!(chrsi1, expected_seq1);
+        
+        let start = Position::new(15).unwrap();
+        let end = Position::new(30).unwrap();
+        let expected_seq2 = Sequence::from_iter(sequence.get(start..=end).unwrap().iter().cloned()).complement().rev().collect::<Result<Sequence, _>>().unwrap();
+        assert_eq!(chrsi2, expected_seq2);
+
+    }
+
+    #[test]
+    fn test_write_gtf() {
+        let df = df!(
+            "seqname" => ["chr1", "chr1"],
+            "start" => [10i64, 15],
+            "end" => [20i64, 30],
+            "strand"=> ["+", "-"],
+            "source" => [Some("HAVANA"), None],
+            "gene_id" => ["g1", "g2"],
+            "gene_name" => [Some("gene_1"), None],
+        )
+        .unwrap();
+
+        let gr = Grangers::new(
+            df,
+            None,
+            None,
+            None,
+            IntervalType::Inclusive(1),
+            FieldColumns::default(),
+            false,
+        )
+        .unwrap();
+
+        if SAY {
+            println!("gr1: {:?}", gr.df());
+        }
+
+        let gtf_df = gr.get_gtf_df("a_fake_file").unwrap();
+
+        if SAY {
+            println!("gtf_df: {:?}", gtf_df);
+        }
+
+        let source = vec![String::from("HAVANA"), String::from(".")];
+        let gtf_df_attributes = gtf_df
+            .column("attributes")
+            .unwrap()
+            .utf8()
+            .unwrap()
+            .into_iter()
+            .map(|x| x.unwrap())
+            .collect::<Vec<&str>>();
+
+        // we cannot make sure that the order of the attributes are always the same
+        assert!(gtf_df_attributes[0].contains("gene_name \"gene_1\";"));
+        assert!(gtf_df_attributes[0].contains("gene_id \"g1\";"));
+        assert!(gtf_df_attributes[1].contains("gene_id \"g2\";"));
+
+        assert_eq!(
+            gtf_df
+                .column("source")
+                .unwrap()
+                .utf8()
+                .unwrap()
+                .into_iter()
+                .map(|x| x.unwrap())
+                .collect::<Vec<&str>>(),
+            source
+        );
+    }
+}

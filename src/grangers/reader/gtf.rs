@@ -378,7 +378,7 @@ mod tests {
                         tally,
                     } => {
                         assert!(
-                            file_type.get_essential() == &["gene_id", "gene_name", "transcript_id"]
+                            file_type == FileFormat::GTF
                         );
                         assert!(essential
                             .get("gene_id")
@@ -482,8 +482,8 @@ mod tests {
                         tally,
                     } => {
                         assert!(
-                            file_type.get_essential()
-                                == &["ID", "gene_id", "gene_name", "transcript_id"]
+                            file_type == FileFormat::GFF
+
                         );
                         assert!(essential
                             .get("gene_id")

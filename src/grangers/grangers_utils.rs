@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 pub(crate) const VALIDSTRANDS: [&str; 2] = ["+", "-"];
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub enum FileFormat {
     GTF,
     GFF,
@@ -17,8 +17,8 @@ pub enum FileFormat {
 impl FileFormat {
     pub fn get_essential(&self) -> &[&str] {
         match self {
-            FileFormat::GTF => GTFESSENTIALATTRIBUTES.as_ref(),
-            FileFormat::GFF => GFFESSENTIALATTRIBUTES.as_ref(),
+            FileFormat::GTF => GXFESSENTIALATTRIBUTES.as_ref(),
+            FileFormat::GFF => GXFESSENTIALATTRIBUTES.as_ref(),
             _ => &[],
         }
     }
@@ -60,18 +60,20 @@ impl std::fmt::Display for FileFormat {
     }
 }
 
-pub const GTFESSENTIALATTRIBUTES: [&str; 4] = ["gene_id", "transcript_id", "gene_name", "exon_number"];
-pub const GFFESSENTIALATTRIBUTES: [&str; 5] = ["ID", "gene_id", "gene_name", "transcript_id", "exon_number"];
-// pub const FIELDS: [&str; 8] = [
-//     "seqid",
-//     "source",
-//     "feature_type",
-//     "start",
-//     "end",
-//     "score",
-//     "strand",
-//     "phase",
-// ];
+pub(crate) const GXFESSENTIALATTRIBUTES: [&str; 4] =
+    ["gene_id", "gene_name",  "transcript_id","exon_number"];
+
+pub(crate) const GXFFIELDS: [&str; 8] = [
+    "seqname",
+    "source",
+    "feature_type",
+    "start",
+    "end",
+    "score",
+    "strand",
+    "phase",
+];
+
 /// traverse the given file to get the number of lines in the file
 pub fn _file_line_count<T: AsRef<Path>>(file_path: T) -> anyhow::Result<usize> {
     let reader = BufReader::new(File::open(file_path)?);
