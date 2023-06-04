@@ -517,7 +517,7 @@ impl FieldColumns {
                         s
                     );
                 }
-                self.gene_id = if df.column("gene_name").is_ok() {
+                self.gene_name = if df.column("gene_name").is_ok() {
                     Some("gene_name".to_string())
                 } else {
                     None
