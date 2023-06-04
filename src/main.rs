@@ -33,7 +33,7 @@ fn main() -> anyhow::Result<()> {
 
 
     // create the folder if it doesn't exist
-    std::fs::create_dir_all(out_dir)?;
+    std::fs::create_dir_all(&out_dir)?;
     let out_fa = out_dir.join("splici.fa");
 
     // 1. we read the gtf file as grangers. This will make sure that the eight fields are there.
@@ -110,10 +110,22 @@ fn main() -> anyhow::Result<()> {
     let gene_name_to_id = exon_gr.df().select([gene_name, gene_id])?.unique(None,UniqueKeepStrategy::Any, None)?;
 
     // Next, we write the transcript seuqences 
-    exon_gr.write_transcript_sequences(&fasta_file, &out_fa, None, true, true)?;
+    exon_gr.write_transcript_sequences(&fasta_file, &out_fa, None, true, false)?;
+
+    // Then, we get the introns
+    let mut intron_gr = exon_gr.introns(options::IntronsBy::Gene, None, true)?;
+
+    intron_gr.extend(86, &options::ExtendOption::Both, false)?;
+
+    // Then, we merge the overlapping introns
+    intron_gr = intron_gr.merge(&[intron_gr.get_column_name("gene_id", false)?], false, None)?;
+
+    // Then, we get the intron sequences
+    
+
+
 
     // next, we write transcripts and unspliced/itrons
-
         // 2. we quit if the required attributes are not valid:
             // - if transcript_id field dosn't exist
             // - if transcript_id field exists but is null for some exon features
