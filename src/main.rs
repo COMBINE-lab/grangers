@@ -1,6 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use polars::lazy::dsl::concat_str;
 use tracing::info;
 use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, EnvFilter};
 pub mod grangers;
@@ -107,7 +108,7 @@ fn main() -> anyhow::Result<()> {
     }
     
     // Next, we get the gene_name to id mapping
-    let gene_name_to_id = exon_gr.df().select([gene_name, gene_id])?.unique(None,UniqueKeepStrategy::Any, None)?;
+    let mut gene_name_to_id = exon_gr.df().select([gene_name, gene_id])?.unique(None,UniqueKeepStrategy::Any, None)?;
 
     // Next, we write the transcript seuqences 
     exon_gr.write_transcript_sequences(&fasta_file, &out_fa, None, true, false)?;
@@ -119,9 +120,21 @@ fn main() -> anyhow::Result<()> {
 
     // Then, we merge the overlapping introns
     intron_gr = intron_gr.merge(&[intron_gr.get_column_name("gene_id", false)?], false, None)?;
+    // intron_gr.df.with_column(intron_gr.df.)
+    intron_gr.add_order(Some(&["gene_id"]), "intron_order", Some(1), true)?;
+    intron_gr.df = intron_gr.df.lazy().with_column(concat_str([col("gene_id"), col("intron_order")], "").alias("intron_id")).collect()?;
+
+    intron_gr.write_sequences(&fasta_file, &out_fa, false, Some("intron_id"), options::OOBOption::Truncate, true)?;
+
+    let mut file = std::fs::File::create(out_dir.join("gene_name_to_id.tsv"))?;
+    CsvWriter::new(&mut file)
+        .has_header(false)
+        .with_delimiter(b'\t')
+        .finish(&mut gene_name_to_id)?;
+
 
     // Then, we get the intron sequences
-    
+
 
 
 
@@ -135,42 +148,42 @@ fn main() -> anyhow::Result<()> {
     //      - If gene_name is missing, we impute it with gene_id
     //      - If gene_id is missing, we impute it with gene_name
 
-    let start = Instant::now();
-    gr.get_transcript_sequences(&fasta_file, None, true)?;
-    let duration: Duration = start.elapsed();
-    info!("extract transcript sequences in {:?}", duration);
+    // let start = Instant::now();
+    // gr.get_transcript_sequences(&fasta_file, None, true)?;
+    // let duration: Duration = start.elapsed();
+    // info!("extract transcript sequences in {:?}", duration);
 
-    gr.df = gr.df.head(Some(100000));
-    let start = Instant::now();
-    gr.get_sequences(&fasta_file, false, None, options::OOBOption::Skip)?;
-    let duration: Duration = start.elapsed();
-    info!("extract first 100,000 sequences in {:?}", duration);
+    // gr.df = gr.df.head(Some(100000));
+    // let start = Instant::now();
+    // gr.get_sequences(&fasta_file, false, None, options::OOBOption::Skip)?;
+    // let duration: Duration = start.elapsed();
+    // info!("extract first 100,000 sequences in {:?}", duration);
 
-    let mo = options::MergeOptions::new(&["seqname", "gene_id", "transcript_id"], false, 1)?;
-    let start = Instant::now();
-    gr.merge(&["seqname", "gene_id", "transcript_id"], false, None)?;
-    let duration: Duration = start.elapsed();
-    info!("Merged overlapping ranges in {:?}", duration);
+    // let mo = options::MergeOptions::new(&["seqname", "gene_id", "transcript_id"], false, 1)?;
+    // let start = Instant::now();
+    // gr.merge(&["seqname", "gene_id", "transcript_id"], false, None)?;
+    // let duration: Duration = start.elapsed();
+    // info!("Merged overlapping ranges in {:?}", duration);
 
-    let start = Instant::now();
-    gr.flank(10, options::FlankOptions::default())?;
-    let duration: Duration = start.elapsed();
-    info!("Flanked ranges in {:?}", duration);
+    // let start = Instant::now();
+    // gr.flank(10, options::FlankOptions::default())?;
+    // let duration: Duration = start.elapsed();
+    // info!("Flanked ranges in {:?}", duration);
 
-    let start = Instant::now();
-    gr.introns(options::IntronsBy::Gene, None, true)?;
-    let duration: Duration = start.elapsed();
-    info!("Built intron's Grangers in {:?}", duration);
+    // let start = Instant::now();
+    // gr.introns(options::IntronsBy::Gene, None, true)?;
+    // let duration: Duration = start.elapsed();
+    // info!("Built intron's Grangers in {:?}", duration);
 
-    let start = Instant::now();
-    gr.extend(10, &options::ExtendOption::Both, false)?;
-    let duration: Duration = start.elapsed();
-    info!("Extended ranges in {:?}", duration);
+    // let start = Instant::now();
+    // gr.extend(10, &options::ExtendOption::Both, false)?;
+    // let duration: Duration = start.elapsed();
+    // info!("Extended ranges in {:?}", duration);
 
-    let start = Instant::now();
-    gr.build_lapper(&mo.by)?;
-    let duration: Duration = start.elapsed();
-    info!("Built interval tree in {:?}", duration);
+    // let start = Instant::now();
+    // gr.build_lapper(&mo.by)?;
+    // let duration: Duration = start.elapsed();
+    // info!("Built interval tree in {:?}", duration);
 
     // 2. we quit if the required attributes are not valid:
             // - if transcript_id field dosn't exist

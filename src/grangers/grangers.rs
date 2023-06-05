@@ -12,8 +12,8 @@ use noodles::fasta;
 pub use noodles::fasta::record::{Definition, Record, Sequence};
 use polars::{lazy::prelude::*, prelude::*, series::Series};
 use rust_lapper::{Interval, Lapper};
+use tracing::debug;
 use std::collections::{HashMap, HashSet};
-use std::f32::consts::E;
 use std::fs;
 use std::io::{BufReader, BufRead};
 use std::ops::{Add, Mul, Sub};
@@ -166,7 +166,6 @@ impl Grangers {
             Series::new("phase", gstruct.phase),
         ];
 
-        println!("{:?}", gstruct.attributes.essential);
         //for essential attributes
         for (k, v) in gstruct.attributes.essential {
             if !v.is_empty() {
@@ -174,7 +173,6 @@ impl Grangers {
             };
         }
 
-        println!("{:?}", gstruct.attributes.extra);
         // for extra attributes
         if let Some(attributes) = gstruct.attributes.extra {
             for (k, v) in attributes {
@@ -560,12 +558,6 @@ impl Grangers {
             self.any_nulls(&self.field_columns().essential_fields(), false, is_bail)?;
 
         if is_warn & essential_nulls {
-            println!(
-                "{:?}",
-                self.df()
-                    .select(self.field_columns().essential_fields())?
-                    .null_count()
-            );
             warn!("The dataframe contains null values in the essential fields - seqname, start, end and strand. You can use Grangers::drop_nulls() to drop them.");
             return Ok(false);
         }
@@ -1198,7 +1190,7 @@ impl Grangers {
 
         // add chromosome name and strand if needed
         if by_hash.insert(seqname) {
-            info!("Added `seqname` to the `by` vector as it is required.")
+            debug!("Added `seqname` to the `by` vector as it is required.")
         };
         let by: Vec<&str> = by_hash.into_iter().collect();
 
@@ -1628,6 +1620,7 @@ impl Grangers {
                             )
                             })?;
                         exon_u8_vec.clear();
+                        exon_u8_vec.extend(seq.as_ref().iter());
                         // update the current transcript id
                         curr_tx = tx_id.to_string();
                     }
@@ -2020,6 +2013,7 @@ impl Grangers {
                         let sequence = Sequence::from_iter(exon_u8_vec.clone());
                         transcript_seq_vec.push(Record::new(definition, sequence));
                         exon_u8_vec.clear();
+                        exon_u8_vec.extend(seq.as_ref().iter());
                         // update the current transcript id
                         curr_tx = tx_id.to_string();
                     }
