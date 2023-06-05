@@ -119,11 +119,11 @@ fn main() -> anyhow::Result<()> {
     // Then, we get the introns
     let mut intron_gr = exon_gr.introns(options::IntronsBy::Gene, None, true)?;
 
-    intron_gr.extend(86, &options::ExtendOption::Both, false)?;
+    intron_gr.extend(84, &options::ExtendOption::Both, false)?;
 
     // Then, we merge the overlapping introns
     intron_gr = intron_gr.merge(&[intron_gr.get_column_name("gene_id", false)?], false, None)?;
-    // intron_gr.df.with_column(intron_gr.df.)
+    
     intron_gr.add_order(Some(&["gene_id"]), "intron_order", Some(1), true)?;
     intron_gr.df = intron_gr.df.lazy().with_column(concat_str([col("gene_id"), col("intron_order")], "").alias("intron_id")).collect()?;
 

@@ -2157,7 +2157,7 @@ impl Grangers {
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
-    ) -> anyhow::Result<()>
+    ) -> anyhow::Result<Vec<Option<Record>>>
     {
         self.validate(false, true)?;
 
@@ -2256,7 +2256,7 @@ impl Grangers {
         if empty_counter> 0 {
             warn!("Unable to extract sequence for {} records. They are usually caused by out of boundary features or an invalid alphabet.", empty_counter)
         }
-        Ok(())
+        Ok(seq_vec)
     }
 
     /// Get the sequences of the intervals from one fasta record.
