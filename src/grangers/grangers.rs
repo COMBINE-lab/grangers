@@ -12,8 +12,8 @@ use noodles::fasta;
 pub use noodles::fasta::record::{Definition, Record, Sequence};
 use polars::{lazy::prelude::*, prelude::*, series::Series};
 use rust_lapper::{Interval, Lapper};
+use tracing::debug;
 use std::collections::{HashMap, HashSet};
-use std::f32::consts::E;
 use std::fs;
 use std::io::{BufReader, BufRead};
 use std::ops::{Add, Mul, Sub};
@@ -166,7 +166,6 @@ impl Grangers {
             Series::new("phase", gstruct.phase),
         ];
 
-        println!("{:?}", gstruct.attributes.essential);
         //for essential attributes
         for (k, v) in gstruct.attributes.essential {
             if !v.is_empty() {
@@ -174,7 +173,6 @@ impl Grangers {
             };
         }
 
-        println!("{:?}", gstruct.attributes.extra);
         // for extra attributes
         if let Some(attributes) = gstruct.attributes.extra {
             for (k, v) in attributes {
@@ -560,12 +558,6 @@ impl Grangers {
             self.any_nulls(&self.field_columns().essential_fields(), false, is_bail)?;
 
         if is_warn & essential_nulls {
-            println!(
-                "{:?}",
-                self.df()
-                    .select(self.field_columns().essential_fields())?
-                    .null_count()
-            );
             warn!("The dataframe contains null values in the essential fields - seqname, start, end and strand. You can use Grangers::drop_nulls() to drop them.");
             return Ok(false);
         }
@@ -1198,7 +1190,7 @@ impl Grangers {
 
         // add chromosome name and strand if needed
         if by_hash.insert(seqname) {
-            info!("Added `seqname` to the `by` vector as it is required.")
+            debug!("Added `seqname` to the `by` vector as it is required.")
         };
         let by: Vec<&str> = by_hash.into_iter().collect();
 
@@ -1542,9 +1534,7 @@ impl Grangers {
         let transcript_id = fc.transcript_id().unwrap();
 
         // Now, we read the fasta file and process each reference sequence at a time
-        let reader = std::fs::File::open(ref_path).map(BufReader::new)?;
-        let mut reader = noodles::fasta::Reader::new(reader);
-
+        let mut reader = std::fs::File::open(ref_path).map(BufReader::new).map(noodles::fasta::Reader::new)?;
         // we also create a fasta writer
         let mut writer = noodles::fasta::Writer::new(out_file);
 
@@ -1556,8 +1546,9 @@ impl Grangers {
             let record = result?;
 
             let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
+            
             let chr_gr = exon_gr.filter(seqname, &[chr_name])?;
-
+            
             if chr_gr.df().height() == 0 {
                 continue;
             }
@@ -1603,6 +1594,7 @@ impl Grangers {
             } else {
                 bail!("Could not get the first transcript id")
             };
+
             // This is the vector that stores the exon sequences of the current transcript
             // each element is a base, represented by its u8 value
 
@@ -1628,13 +1620,31 @@ impl Grangers {
                             )
                             })?;
                         exon_u8_vec.clear();
+                        exon_u8_vec.extend(seq.as_ref().iter());
                         // update the current transcript id
+
                         curr_tx = tx_id.to_string();
+
                     }
                 } else {
                     bail!("Found null transcript id or empty exon sequence. This should not happen, please report this bug.")
                 }
             }
+
+            // Don't forget our remaining transcript
+            // // if it is not the same, we create a Sequence and push it to seq_vec
+            let definition = Definition::new(curr_tx.clone(), None);
+            let sequence = Sequence::from_iter(exon_u8_vec.clone());
+
+            writer
+                .write_record(&Record::new(definition, sequence))
+                .with_context(|| {
+                    format!(
+                    "Could not write the sequence of transcript {} to the output file",
+                    curr_tx
+                )
+                })?;
+            exon_u8_vec.clear();
         }
 
         Ok(())
@@ -2003,6 +2013,7 @@ impl Grangers {
             } else {
                 bail!("Could not get the first transcript id")
             };
+
             // This is the vector that stores the exon sequences of the current transcript
             // each element is a base, represented by its u8 value
 
@@ -2010,16 +2021,18 @@ impl Grangers {
 
             for (tx_id, seq) in tx_id_iter.zip(chr_seq_vec.into_iter()) {
                 if let (Some(tx_id), Some(seq)) = (tx_id, seq) {
+                    
                     // first we want to check if the transcript id is the same as the previous one
                     if tx_id == curr_tx {
                         // if it is the same, we extend the exon_vec with the current sequence
                         exon_u8_vec.extend(seq.as_ref().iter());
                     } else {
-                        // // if it is not the same, we create a Sequence and push it to seq_vec
+                        // if it is not the same, we create a Sequence and push it to seq_vec
                         let definition = Definition::new(curr_tx.clone(), None);
                         let sequence = Sequence::from_iter(exon_u8_vec.clone());
                         transcript_seq_vec.push(Record::new(definition, sequence));
                         exon_u8_vec.clear();
+                        exon_u8_vec.extend(seq.as_ref().iter());
                         // update the current transcript id
                         curr_tx = tx_id.to_string();
                     }
@@ -2144,7 +2157,7 @@ impl Grangers {
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
-    ) -> anyhow::Result<()>
+    ) -> anyhow::Result<Vec<Option<Record>>>
     {
         self.validate(false, true)?;
 
@@ -2243,7 +2256,7 @@ impl Grangers {
         if empty_counter> 0 {
             warn!("Unable to extract sequence for {} records. They are usually caused by out of boundary features or an invalid alphabet.", empty_counter)
         }
-        Ok(())
+        Ok(seq_vec)
     }
 
     /// Get the sequences of the intervals from one fasta record.
