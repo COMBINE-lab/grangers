@@ -39,7 +39,7 @@ fn main() -> anyhow::Result<()> {
 
     // 1. we read the gtf file as grangers. This will make sure that the eight fields are there.
     let start = Instant::now();
-    let mut gr = Grangers::from_gtf(gtf_file.as_path(), true)?;
+    let gr = Grangers::from_gtf(gtf_file.as_path(), true)?;
     let duration: Duration = start.elapsed();
     info!("Built Grangers in {:?}", duration);
     info!("Grangers shape {:?}", gr.df().shape());
@@ -47,6 +47,7 @@ fn main() -> anyhow::Result<()> {
     // we get the exon df and validate it
     // this will make sure that each exon has a valid transcript ID, and the exon numbers are valid
     let mut exon_gr = gr.exons(None, true)?;
+
     let mut fc = exon_gr.field_columns().clone();
     let df = exon_gr.df_mut();
     
@@ -108,7 +109,9 @@ fn main() -> anyhow::Result<()> {
     }
     
     // Next, we get the gene_name to id mapping
-    let mut gene_name_to_id = exon_gr.df().select([gene_name, gene_id])?.unique(None,UniqueKeepStrategy::Any, None)?;
+    let mut gene_id_to_name = exon_gr.df().select([gene_id, gene_name])?.unique(None,UniqueKeepStrategy::Any, None)?;
+
+    info!("exon_gr has {} transcripts", exon_gr.df().column("transcript_id")?.n_unique()?);
 
     // Next, we write the transcript seuqences 
     exon_gr.write_transcript_sequences(&fasta_file, &out_fa, None, true, false)?;
@@ -126,11 +129,11 @@ fn main() -> anyhow::Result<()> {
 
     intron_gr.write_sequences(&fasta_file, &out_fa, false, Some("intron_id"), options::OOBOption::Truncate, true)?;
 
-    let mut file = std::fs::File::create(out_dir.join("gene_name_to_id.tsv"))?;
+    let mut file = std::fs::File::create(out_dir.join("gene_id_to_name.tsv"))?;
     CsvWriter::new(&mut file)
         .has_header(false)
         .with_delimiter(b'\t')
-        .finish(&mut gene_name_to_id)?;
+        .finish(&mut gene_id_to_name)?;
 
 
     // Then, we get the intron sequences

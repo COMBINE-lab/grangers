@@ -1534,9 +1534,7 @@ impl Grangers {
         let transcript_id = fc.transcript_id().unwrap();
 
         // Now, we read the fasta file and process each reference sequence at a time
-        let reader = std::fs::File::open(ref_path).map(BufReader::new)?;
-        let mut reader = noodles::fasta::Reader::new(reader);
-
+        let mut reader = std::fs::File::open(ref_path).map(BufReader::new).map(noodles::fasta::Reader::new)?;
         // we also create a fasta writer
         let mut writer = noodles::fasta::Writer::new(out_file);
 
@@ -1548,8 +1546,9 @@ impl Grangers {
             let record = result?;
 
             let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
+            
             let chr_gr = exon_gr.filter(seqname, &[chr_name])?;
-
+            
             if chr_gr.df().height() == 0 {
                 continue;
             }
@@ -1595,6 +1594,7 @@ impl Grangers {
             } else {
                 bail!("Could not get the first transcript id")
             };
+
             // This is the vector that stores the exon sequences of the current transcript
             // each element is a base, represented by its u8 value
 
@@ -1622,12 +1622,29 @@ impl Grangers {
                         exon_u8_vec.clear();
                         exon_u8_vec.extend(seq.as_ref().iter());
                         // update the current transcript id
+
                         curr_tx = tx_id.to_string();
+
                     }
                 } else {
                     bail!("Found null transcript id or empty exon sequence. This should not happen, please report this bug.")
                 }
             }
+
+            // Don't forget our remaining transcript
+            // // if it is not the same, we create a Sequence and push it to seq_vec
+            let definition = Definition::new(curr_tx.clone(), None);
+            let sequence = Sequence::from_iter(exon_u8_vec.clone());
+
+            writer
+                .write_record(&Record::new(definition, sequence))
+                .with_context(|| {
+                    format!(
+                    "Could not write the sequence of transcript {} to the output file",
+                    curr_tx
+                )
+                })?;
+            exon_u8_vec.clear();
         }
 
         Ok(())
@@ -1996,6 +2013,7 @@ impl Grangers {
             } else {
                 bail!("Could not get the first transcript id")
             };
+
             // This is the vector that stores the exon sequences of the current transcript
             // each element is a base, represented by its u8 value
 
@@ -2003,12 +2021,13 @@ impl Grangers {
 
             for (tx_id, seq) in tx_id_iter.zip(chr_seq_vec.into_iter()) {
                 if let (Some(tx_id), Some(seq)) = (tx_id, seq) {
+                    
                     // first we want to check if the transcript id is the same as the previous one
                     if tx_id == curr_tx {
                         // if it is the same, we extend the exon_vec with the current sequence
                         exon_u8_vec.extend(seq.as_ref().iter());
                     } else {
-                        // // if it is not the same, we create a Sequence and push it to seq_vec
+                        // if it is not the same, we create a Sequence and push it to seq_vec
                         let definition = Definition::new(curr_tx.clone(), None);
                         let sequence = Sequence::from_iter(exon_u8_vec.clone());
                         transcript_seq_vec.push(Record::new(definition, sequence));
