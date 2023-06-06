@@ -14,10 +14,10 @@ use tracing::warn;
 static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 
 fn main() -> anyhow::Result<()> {
-    // Check the `RUST_LOG` variable for the logger level and
-    // respect the value found there. If this environment
-    // variable is not set then set the logging level to
-    // INFO.
+    // // Check the `RUST_LOG` variable for the logger level and
+    // // respect the value found there. If this environment
+    // // variable is not set then set the logging level to
+    // // INFO.
     tracing_subscriber::registry()
         .with(fmt::layer())
         .with(
@@ -117,12 +117,14 @@ fn main() -> anyhow::Result<()> {
     exon_gr.write_transcript_sequences(&fasta_file, &out_fa, None, true, false)?;
 
     // Then, we get the introns
-    let mut intron_gr = exon_gr.introns(options::IntronsBy::Gene, None, true)?;
+    let mut intron_gr = exon_gr.introns(options::IntronsBy::Transcript, None, true, Some(&["gene_id"]))?;
 
-    intron_gr.extend(84, &options::ExtendOption::Both, false)?;
+    println!("intron_gr: {:?}", intron_gr.df());
+
+    intron_gr.extend(86, &options::ExtendOption::Both, false)?;
 
     // Then, we merge the overlapping introns
-    intron_gr = intron_gr.merge(&[intron_gr.get_column_name("gene_id", false)?], false, None)?;
+    intron_gr = intron_gr.merge(&[intron_gr.get_column_name("gene_id", false)?], false, None, None)?;
     
     intron_gr.add_order(Some(&["gene_id"]), "intron_order", Some(1), true)?;
     intron_gr.df = intron_gr.df.lazy().with_column(concat_str([col("gene_id"), col("intron_order")], "").alias("intron_id")).collect()?;
@@ -134,12 +136,6 @@ fn main() -> anyhow::Result<()> {
         .has_header(false)
         .with_delimiter(b'\t')
         .finish(&mut gene_id_to_name)?;
-
-
-    // Then, we get the intron sequences
-
-
-
 
     // next, we write transcripts and unspliced/itrons
         // 2. we quit if the required attributes are not valid:

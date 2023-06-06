@@ -591,6 +591,7 @@ impl Grangers {
         by: IntronsBy,
         exon_feature: Option<&str>,
         multithreaded: bool,
+        keep_columns: Option<&[&str]>,
     ) -> anyhow::Result<Grangers> {
         // get exon records only
         // if this call succeeds, we can make sure that the exon records are all valid
@@ -599,7 +600,7 @@ impl Grangers {
         // parse `by`
         // we need to make sure `by` points to a valid column
         let by = exon_gr.get_column_name_str(by.as_ref(), true)?;
-        exon_gr.gaps(&[by], false, None)
+        exon_gr.gaps(&[by], false, None, keep_columns)
     }
 
     /// get the range of each gene. The range of each gene will be the union of the ranges of all exons of the gene.\
@@ -1064,11 +1065,12 @@ impl Grangers {
         by: &[T],
         ignore_strand: bool,
         slack: Option<usize>,
+        keep_columns: Option<&[&str]>,
     ) -> anyhow::Result<Grangers> {
         // merge returns a sorted and merged Grangers object
-        let mut gr = self.merge(by, ignore_strand, slack)?;
+        let mut gr = self.merge(by, ignore_strand, slack, keep_columns)?;
 
-        gr.df = gr.apply(by, 1, ignore_strand, apply_gaps)?;
+        gr.df = gr.apply(by, None, ignore_strand, apply_gaps, keep_columns)?;
         Ok(gr)
     }
 
@@ -1149,6 +1151,7 @@ impl Grangers {
         by: &[T],
         ignore_strand: bool,
         slack: Option<usize>,
+        keep_columns: Option<&[&str]>,
     ) -> anyhow::Result<Grangers> {
         self.validate(false, true)?;
         // these are all valid after validateion
@@ -1157,6 +1160,45 @@ impl Grangers {
         let start = fc.start();
         let end = fc.end();
         let strand = fc.strand();
+
+        let df = self.apply(&by, slack, ignore_strand, apply_merge, keep_columns)?;
+
+        Grangers::new(
+            df,
+            self.seqinfo.clone(),
+            self.misc.clone(),
+            None,
+            IntervalType::default(),
+            self.field_columns.clone(),
+            false,
+        )
+    }
+
+    fn apply<F, T: AsRef<str>>(
+        &self,
+        by: &[T],
+        slack: Option<usize>,
+        ignore_strand: bool,
+        apply_fn: F,
+        keep_columns: Option<&[&str]>,
+    ) -> anyhow::Result<DataFrame>
+    where
+        F: Fn(Series, i64) -> Result<Option<polars::prelude::Series>, PolarsError>
+            + Copy
+            + std::marker::Send
+            + std::marker::Sync
+            + 'static,
+    {
+        self.validate(false, true)?;
+
+        // these are all valid after validateion
+        let df = self.df();
+        let fc = self.field_columns();
+        let seqname = fc.seqname();
+        let start = fc.start();
+        let end = fc.end();
+        let strand = fc.strand();
+
 
         // this makes sure that field_column fields and their corresponding columns appear only once
         let mut by_hash: HashSet<&str> = HashSet::with_capacity(by.len());
@@ -1173,7 +1215,7 @@ impl Grangers {
 
         let slack = if let Some(s) = slack {
             if s < 1 {
-                warn!("It usually doen't make sense to set slack as zero.")
+                warn!("It usually does not make sense to set slack as zero.")
             }
             s as i64
         } else {
@@ -1194,42 +1236,6 @@ impl Grangers {
         };
         let by: Vec<&str> = by_hash.into_iter().collect();
 
-        let df = self.apply(&by, slack, ignore_strand, apply_merge)?;
-
-        Grangers::new(
-            df,
-            self.seqinfo.clone(),
-            self.misc.clone(),
-            None,
-            IntervalType::default(),
-            self.field_columns.clone(),
-            false,
-        )
-    }
-
-    fn apply<F, T: AsRef<str>>(
-        &self,
-        by: &[T],
-        slack: i64,
-        ignore_strand: bool,
-        apply_fn: F,
-    ) -> anyhow::Result<DataFrame>
-    where
-        F: Fn(Series, i64) -> Result<Option<polars::prelude::Series>, PolarsError>
-            + Copy
-            + std::marker::Send
-            + std::marker::Sync
-            + 'static,
-    {
-        self.validate(false, true)?;
-        // these are all valid after validateion
-        let df = self.df();
-        let fc = self.field_columns();
-        let seqname = fc.seqname();
-        let start = fc.start();
-        let end = fc.end();
-        let strand = fc.strand();
-
         // we take the selected columns and add two more columns: start and end
         let mut selected = by.iter().map(|s| s.as_ref()).collect::<Vec<&str>>();
         if !selected.contains(&seqname) {
@@ -1243,6 +1249,11 @@ impl Grangers {
         }
         if !ignore_strand && !selected.contains(&strand) {
             selected.push(strand);
+        }
+
+        // let's see polars' way of checking missing values saying df.isna().sum()
+        if self.any_nulls(&selected, true, false)? {
+            warn!("Found null value(s) in the selected columns -- {:?}. As null will be used for grouping, we recommend dropping all null values by calling gr.drops_nulls() beforehand.", selected)
         }
 
         // we want to sort the dataframe by first by columns, then the essential columns
@@ -1265,12 +1276,16 @@ impl Grangers {
         sorted_by_desc.extend(sorted_by_desc_essential);
 
         // the lazy API of polars takes the ownership of a dataframe
-        let mut df = df.select(&selected)?;
-
-        // let's see polars' way of checking missing values saying df.isna().sum()
-        if self.any_nulls(&selected, true, false)? {
-            warn!("Found null value(s) in the selected columns -- {:?}. As null will be used for grouping, we recommend dropping all null values by calling gr.drops_nulls() beforehand.", selected)
+        // we want to keep the keep_columns
+        if let Some(keep_columns) = keep_columns {
+            for c in keep_columns {
+                if !selected.contains(&self.get_column_name_str(c, false)?) {
+                    selected.push(c);
+                }
+            }
         }
+
+        let mut df = df.select(&selected)?;
 
         // we will do the following
         // 1. sort the dataframe by the `by` columns + start and end columns
@@ -3194,7 +3209,7 @@ mod tests {
         }
 
         // default setting
-        let gr1: Grangers = gr.merge(&["seqname", "gene_id"], false, None).unwrap();
+        let gr1: Grangers = gr.merge(&["seqname", "gene_id"], false, None, None).unwrap();
 
         if SAY {
             println!("gr1: {:?}", gr1.df());
@@ -3225,7 +3240,7 @@ mod tests {
         );
 
         // test ignore strand
-        let gr1 = gr.merge(&["seqname"], true, None).unwrap();
+        let gr1 = gr.merge(&["seqname"], true, None, None).unwrap();
 
         if SAY {
             println!("gr1: {:?}", gr1.df());
@@ -3258,7 +3273,7 @@ mod tests {
         // slack=0
         // test ignore strand
 
-        let gr1: Grangers = gr.merge(&["seqname", "gene_id"], false, Some(0)).unwrap();
+        let gr1: Grangers = gr.merge(&["seqname", "gene_id"], false, Some(0), None).unwrap();
 
         if SAY {
             println!("gr1: {:?}", gr1.df());
@@ -3291,7 +3306,7 @@ mod tests {
         // slack=2
 
         // test ignore strand
-        let gr1: Grangers = gr.merge(&["seqname", "gene_id"], false, Some(2)).unwrap();
+        let gr1: Grangers = gr.merge(&["seqname", "gene_id"], false, Some(2), None).unwrap();
 
         if SAY {
             println!("gr1: {:?}", gr1.df());
@@ -3349,7 +3364,7 @@ mod tests {
         }
 
         // default setting
-        let gr1: Grangers = gr.gaps(&["seqname", "gene_id"], false, None).unwrap();
+        let gr1: Grangers = gr.gaps(&["seqname", "gene_id"], false, None, None).unwrap();
 
         if SAY {
             println!("gr1: {:?}", gr1.df());
@@ -3741,7 +3756,7 @@ mod tests {
         }
 
         // extend from both
-        let gr1 = gr.introns(IntronsBy::Gene, None, true).unwrap();
+        let gr1 = gr.introns(IntronsBy::Gene, None, true, None).unwrap();
         if SAY {
             println!("gr1: {:?}", gr1.df());
         }
@@ -3771,7 +3786,7 @@ mod tests {
         );
 
         // extend from both
-        let gr1 = gr.introns(IntronsBy::Transcript, None, true).unwrap();
+        let gr1 = gr.introns(IntronsBy::Transcript, None, true, None).unwrap();
         if SAY {
             println!("gr1: {:?}", gr1.df());
         }
