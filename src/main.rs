@@ -1,7 +1,7 @@
+use polars::lazy::dsl::concat_str;
 use std::env;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use polars::lazy::dsl::concat_str;
 use tracing::info;
 use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, EnvFilter};
 pub mod grangers;
@@ -32,7 +32,6 @@ fn main() -> anyhow::Result<()> {
     let fasta_file = PathBuf::from(args.get(2).unwrap());
     let out_dir = PathBuf::from(args.get(3).unwrap());
 
-
     // create the folder if it doesn't exist
     std::fs::create_dir_all(&out_dir)?;
     let out_fa = out_dir.join("splici.fa");
@@ -50,10 +49,12 @@ fn main() -> anyhow::Result<()> {
 
     let mut fc = exon_gr.field_columns().clone();
     let df = exon_gr.df_mut();
-    
+
     // we then make sure that the gene_id and gene_name fields are not both missing
     if fc.gene_id().is_none() && fc.gene_name().is_none() {
-        anyhow::bail!("The input GTF file must have either gene_id or gene_name field. Cannot proceed");
+        anyhow::bail!(
+            "The input GTF file must have either gene_id or gene_name field. Cannot proceed"
+        );
     } else if fc.gene_id().is_none() {
         warn!("The input GTF file do not have a gene_id field. We will use gene_name as gene_id");
         // we get gene name and rename it to gene_id
@@ -63,7 +64,9 @@ fn main() -> anyhow::Result<()> {
         // push to the df
         df.with_column(gene_id)?;
     } else if fc.gene_name().is_none() {
-        warn!("The input GTF file do not have a gene_name field. We will use gene_id as gene_name.");
+        warn!(
+            "The input GTF file do not have a gene_name field. We will use gene_id as gene_name."
+        );
         // we get gene id and rename it to gene_name
         let mut gene_name = df.column(fc.gene_id().unwrap())?.clone();
         gene_name.rename("gene_name");
@@ -79,55 +82,77 @@ fn main() -> anyhow::Result<()> {
     let gene_name = gene_name_s.as_str();
     let transcript_id_s = exon_gr.get_column_name("transcript_id", false)?.to_string();
     let transcript_id = transcript_id_s.as_str();
-    
+
     // Next, we fill the missing gene_id and gene_name fields
     if exon_gr.any_nulls(&[gene_id, gene_name], false, false)? {
         warn!("Found missing gene_id and/or gene_name; Imputing. If both missing, will impute using transcript_id; Otherwise, will impute using the existing one.");
-        exon_gr.df = exon_gr.df.lazy().with_columns([
-            when(col(gene_id).is_null())
-                .then(
-                    when(col(gene_name).is_null())
-                    .then(col(transcript_id))
-                    .otherwise(col(gene_name))
-                )
-                .otherwise(
-                    col(gene_id)
-                )
-                .alias(gene_id),
-            when(col(gene_name).is_null())
-                .then(
-                    when(col(gene_id).is_null())
-                    .then(col(transcript_id))
+        exon_gr.df = exon_gr
+            .df
+            .lazy()
+            .with_columns([
+                when(col(gene_id).is_null())
+                    .then(
+                        when(col(gene_name).is_null())
+                            .then(col(transcript_id))
+                            .otherwise(col(gene_name)),
+                    )
                     .otherwise(col(gene_id))
-                )
-                .otherwise(
-                    col(gene_name)
-                )
-                .alias(gene_name),
-        ])
-        .collect()?;
+                    .alias(gene_id),
+                when(col(gene_name).is_null())
+                    .then(
+                        when(col(gene_id).is_null())
+                            .then(col(transcript_id))
+                            .otherwise(col(gene_id)),
+                    )
+                    .otherwise(col(gene_name))
+                    .alias(gene_name),
+            ])
+            .collect()?;
     }
-    
+
     // Next, we get the gene_name to id mapping
-    let mut gene_id_to_name = exon_gr.df().select([gene_id, gene_name])?.unique(None,UniqueKeepStrategy::Any, None)?;
+    let mut gene_id_to_name =
+        exon_gr
+            .df()
+            .select([gene_id, gene_name])?
+            .unique(None, UniqueKeepStrategy::Any, None)?;
 
-    info!("Extracting the sequence of {} transcripts", exon_gr.df().column("transcript_id")?.n_unique()?);
+    info!(
+        "Extracting the sequence of {} transcripts",
+        exon_gr.df().column("transcript_id")?.n_unique()?
+    );
 
-    // Next, we write the transcript seuqences 
+    // Next, we write the transcript seuqences
     exon_gr.write_transcript_sequences(&fasta_file, &out_fa, None, true, false)?;
 
     // Then, we get the introns
-    let mut intron_gr = exon_gr.introns(options::IntronsBy::Transcript, None, true, Some(&["gene_id"]))?;
+    let mut intron_gr = exon_gr.introns(None, None, None, true)?;
 
     intron_gr.extend(86, &options::ExtendOption::Both, false)?;
 
     // Then, we merge the overlapping introns
-    intron_gr = intron_gr.merge(&[intron_gr.get_column_name("gene_id", false)?], false, None, None)?;
+    intron_gr = intron_gr.merge(
+        &[intron_gr.get_column_name("gene_id", false)?],
+        false,
+        None,
+        None,
+    )?;
 
-    intron_gr.add_order(Some(&["gene_id"]), "intron_order", Some(1), true)?;
-    intron_gr.df = intron_gr.df.lazy().with_column(concat_str([col("gene_id"), col("intron_order")], "-I").alias("intron_id")).collect()?;
-    
-    intron_gr.write_sequences(&fasta_file, &out_fa, false, Some("intron_id"), options::OOBOption::Truncate, true)?;
+    intron_gr.add_order(Some(&["gene_id"]), "intron_number", Some(1), true)?;
+    intron_gr.df = intron_gr
+        .df
+        .lazy()
+        .with_column(concat_str([col("gene_id"), col("intron_number")], "-I").alias("intron_id"))
+        .collect()?;
+
+    intron_gr.write_sequences(
+        &fasta_file,
+        &out_fa,
+        false,
+        Some("intron_id"),
+        options::OOBOption::Truncate,
+        true,
+    )?;
 
     let mut file = std::fs::File::create(out_dir.join("gene_id_to_name.tsv"))?;
     CsvWriter::new(&mut file)
@@ -136,10 +161,10 @@ fn main() -> anyhow::Result<()> {
         .finish(&mut gene_id_to_name)?;
 
     // next, we write transcripts and unspliced/itrons
-        // 2. we quit if the required attributes are not valid:
-            // - if transcript_id field dosn't exist
-            // - if transcript_id field exists but is null for some exon features
-            // - if gene_name and gene_id both are missing,
+    // 2. we quit if the required attributes are not valid:
+    // - if transcript_id field dosn't exist
+    // - if transcript_id field exists but is null for some exon features
+    // - if gene_name and gene_id both are missing,
     // 3. we warn if one of gene_name and gene_id fields is missing, and copy the existing one as the missing one.
     // 4. If gene_name and/or gene_id fields contain null values, we imputet them:
     //      - If gene_name is missing, we impute it with gene_id
@@ -183,15 +208,14 @@ fn main() -> anyhow::Result<()> {
     // info!("Built interval tree in {:?}", duration);
 
     // 2. we quit if the required attributes are not valid:
-            // - if transcript_id field dosn't exist
-            // - if transcript_id field exists but is null for some exon features
-            // - if gene_name and gene_id both are missing,
+    // - if transcript_id field dosn't exist
+    // - if transcript_id field exists but is null for some exon features
+    // - if gene_name and gene_id both are missing,
     // 3. we warn if one of gene_name and gene_id fields is missing, and copy the existing one as the missing one.
     // 4. If gene_name and/or gene_id fields contain null values, we imputet them:
     //      - If gene_name is missing, we impute it with gene_id
     //     - If gene_id is missing, we impute it with gene_name
     //     - If both are missing, we impute them with transcript_id
-
 
     // let df = df!(
     //     "seqname" => ["chr1", "chr1", "chr1", "chr1", "chr1", "chr2", "chr2", "chr3"],
