@@ -111,7 +111,7 @@ fn main() -> anyhow::Result<()> {
     // Next, we get the gene_name to id mapping
     let mut gene_id_to_name = exon_gr.df().select([gene_id, gene_name])?.unique(None,UniqueKeepStrategy::Any, None)?;
 
-    info!("exon_gr has {} transcripts", exon_gr.df().column("transcript_id")?.n_unique()?);
+    info!("Extracting the sequence of {} transcripts", exon_gr.df().column("transcript_id")?.n_unique()?);
 
     // Next, we write the transcript seuqences 
     exon_gr.write_transcript_sequences(&fasta_file, &out_fa, None, true, false)?;
@@ -119,16 +119,14 @@ fn main() -> anyhow::Result<()> {
     // Then, we get the introns
     let mut intron_gr = exon_gr.introns(options::IntronsBy::Transcript, None, true, Some(&["gene_id"]))?;
 
-    println!("intron_gr: {:?}", intron_gr.df());
-
     intron_gr.extend(86, &options::ExtendOption::Both, false)?;
 
     // Then, we merge the overlapping introns
     intron_gr = intron_gr.merge(&[intron_gr.get_column_name("gene_id", false)?], false, None, None)?;
-    
-    intron_gr.add_order(Some(&["gene_id"]), "intron_order", Some(1), true)?;
-    intron_gr.df = intron_gr.df.lazy().with_column(concat_str([col("gene_id"), col("intron_order")], "").alias("intron_id")).collect()?;
 
+    intron_gr.add_order(Some(&["gene_id"]), "intron_order", Some(1), true)?;
+    intron_gr.df = intron_gr.df.lazy().with_column(concat_str([col("gene_id"), col("intron_order")], "-I").alias("intron_id")).collect()?;
+    
     intron_gr.write_sequences(&fasta_file, &out_fa, false, Some("intron_id"), options::OOBOption::Truncate, true)?;
 
     let mut file = std::fs::File::create(out_dir.join("gene_id_to_name.tsv"))?;

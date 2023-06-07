@@ -1154,13 +1154,6 @@ impl Grangers {
         keep_columns: Option<&[&str]>,
     ) -> anyhow::Result<Grangers> {
         self.validate(false, true)?;
-        // these are all valid after validateion
-        let fc = self.field_columns();
-        let seqname = fc.seqname();
-        let start = fc.start();
-        let end = fc.end();
-        let strand = fc.strand();
-
         let df = self.apply(&by, slack, ignore_strand, apply_merge, keep_columns)?;
 
         Grangers::new(
