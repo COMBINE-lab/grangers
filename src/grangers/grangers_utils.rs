@@ -61,7 +61,7 @@ impl std::fmt::Display for FileFormat {
 }
 
 pub(crate) const GXFESSENTIALATTRIBUTES: [&str; 4] =
-    ["gene_id", "gene_name",  "transcript_id","exon_number"];
+    ["gene_id", "gene_name", "transcript_id", "exon_number"];
 
 pub(crate) const GXFFIELDS: [&str; 8] = [
     "seqname",

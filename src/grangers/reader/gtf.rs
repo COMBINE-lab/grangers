@@ -377,9 +377,7 @@ mod tests {
                         extra,
                         tally,
                     } => {
-                        assert!(
-                            file_type == FileFormat::GTF
-                        );
+                        assert!(file_type == FileFormat::GTF);
                         assert!(essential
                             .get("gene_id")
                             .unwrap()
@@ -481,10 +479,7 @@ mod tests {
                         extra,
                         tally,
                     } => {
-                        assert!(
-                            file_type == FileFormat::GFF
-
-                        );
+                        assert!(file_type == FileFormat::GFF);
                         assert!(essential
                             .get("gene_id")
                             .unwrap()

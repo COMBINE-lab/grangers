@@ -328,7 +328,7 @@ impl FieldColumns {
                 }
             }
         }
-        
+
         if let Some(s) = self.gene_id() {
             if df.column(s).is_err() {
                 is_valid = false;
@@ -355,7 +355,7 @@ impl FieldColumns {
                 }
             }
         }
-        
+
         if let Some(s) = self.exon_number() {
             if df.column(s).is_err() {
                 is_valid = false;
@@ -537,7 +537,7 @@ impl FieldColumns {
                 }
             }
         }
-        
+
         if let Some(s) = self.exon_number() {
             if df.column(s).is_err() {
                 if is_warn {
@@ -624,26 +624,6 @@ impl FieldColumns {
                 );
                 Ok(None)
             }
-        }
-    }
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub enum IntronsBy {
-    /// find exons of each gene and (deduplicate if needed)
-    Gene,
-    /// find exons of each transcript (no deduplication)
-    Transcript,
-    /// find exons according to a custom column
-    Other(String),
-}
-
-impl AsRef<str> for IntronsBy {
-    fn as_ref(&self) -> &str {
-        match self {
-            IntronsBy::Gene => "gene_id",
-            IntronsBy::Transcript => "transcript_id",
-            IntronsBy::Other(s) => s.as_str(),
         }
     }
 }
