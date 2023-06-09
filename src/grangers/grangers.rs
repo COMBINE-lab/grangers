@@ -71,7 +71,7 @@ impl Grangers {
 
         for col in fields {
             if df
-                .column(self.get_column_name(col.as_ref(), false)?)?
+                .column(&self.get_column_name(col.as_ref(), false)?)?
                 .null_count()
                 > 0
             {
@@ -378,7 +378,7 @@ impl Grangers {
         let column = self.get_column_name(by.as_ref(), false)?;
         let df = self
             .df()
-            .filter(&self.df().column(column)?.is_in(&Series::new(
+            .filter(&self.df().column(&column)?.is_in(&Series::new(
                 "values",
                 values.iter().map(|s| s.as_ref()).collect::<Vec<&str>>(),
             ))?)?;
@@ -2329,7 +2329,7 @@ impl Grangers {
         let strand = self.get_column_name("strand", true)?;
 
         // initialize seq vector
-        if df.column(seqname)?.unique()?.len() > 1 {
+        if df.column(&seqname)?.unique()?.len() > 1 {
             bail!("The dataframe contains more than one reference name. Please filter the dataframe by the reference name first.")
         }
 
