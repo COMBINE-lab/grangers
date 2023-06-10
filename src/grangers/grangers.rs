@@ -35,17 +35,17 @@ use tracing::{info, warn};
 #[derive(Clone)]
 pub struct Grangers {
     /// The underlying dataframe
-    pub(crate) df: DataFrame,
+    pub df: DataFrame,
     /// The additional information
-    pub(crate) misc: Option<HashMap<String, Vec<String>>>,
+    pub misc: Option<HashMap<String, Vec<String>>>,
     /// The reference information
-    pub(crate) seqinfo: Option<SeqInfo>,
+    pub seqinfo: Option<SeqInfo>,
     /// The lapper interval tree
-    pub(crate) lapper: Option<Lapper<u64, Vec<String>>>,
+    pub lapper: Option<Lapper<u64, Vec<String>>>,
     /// The interval type
-    pub(crate) interval_type: IntervalType,
+    pub interval_type: IntervalType,
     /// The name of the columns that are used to identify the genomic features
-    pub(crate) field_columns: FieldColumns,
+    pub field_columns: FieldColumns,
 }
 
 // IO
