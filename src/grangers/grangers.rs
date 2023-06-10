@@ -851,7 +851,7 @@ impl Grangers {
     /// extend each genomic feature by a given length from the start, end, or both sides.
     pub fn extend(
         &mut self,
-        length: i32,
+        length: i64,
         extend_option: &ExtendOption,
         ignore_strand: bool,
     ) -> anyhow::Result<()> {
