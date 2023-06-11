@@ -659,6 +659,8 @@ impl Grangers {
         exon_feature: Option<&str>,
         multithreaded: bool,
     ) -> anyhow::Result<Grangers> {
+        println!("doing boundary");
+
         self.validate(false, true)?;
         let mut exon_gr = self.exons(exon_feature, multithreaded)?;
         let fc = self.field_columns();
@@ -668,6 +670,8 @@ impl Grangers {
         let strand = fc.strand();
         let by = self.get_column_name_str(by, true)?;
 
+        println!("chekcing validity");
+
         // check if genes are well defined: all features of a gene should have a valid seqname, start, end, and strand
         let any_invalid = exon_gr
             .df()
@@ -675,16 +679,16 @@ impl Grangers {
             .lazy()
             .groupby([by])
             .agg([
-                col(seqname).unique().count().eq(lit(1)),
-                col(strand).unique().count().eq(lit(1)),
+                col(seqname).unique().count().neq(lit(1)),
+                col(strand).unique().count().neq(lit(1)),
             ])
-            .select([all().any()])
+            .select([col(seqname).any(), col(strand).any()])
             .collect()?
             .get_row(0)?
             .0
             .into_iter()
-            .any(|c| c != AnyValue::UInt32(0));
-
+            .any(|c| c != AnyValue::Boolean(false));
+        
         if any_invalid {
             bail!("The genes are not well defined. All features of a gene should be defined in the same seqname and strand. Cannot proceed.")
         };

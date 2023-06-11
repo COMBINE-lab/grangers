@@ -13,6 +13,286 @@ use tracing::warn;
 #[global_allocator]
 static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 
+use clap::{builder::ArgPredicate, ArgGroup, Args, Subcommand};
+
+/// The type of references we might create
+/// to map against for quantification with
+/// alevin-fry.
+#[derive(Clone, Debug)]
+pub enum ReferenceType {
+    /// The spliced + intronic (splici) reference
+    SplicedIntronic,
+    /// The spliced + unspliced (splicu) reference
+    SplicedUnspliced,
+    Spliced,
+}
+
+
+fn ref_type_parser(s: &str) -> Result<ReferenceType, String> {
+    match s {
+        "spliced+intronic" | "splici" => Ok(ReferenceType::SplicedIntronic),
+        "spliced+unspliced" | "spliceu" => Ok(ReferenceType::SplicedUnspliced),
+        t => Err(format!("Do not recognize reference type {}", t)),
+    }
+}
+
+
+#[derive(Debug, Subcommand)]
+pub enum Commands {
+    /// build the (expanded) reference index
+    #[command(arg_required_else_help = true)]
+    #[command(name = "make-spliced+intronic")]
+    #[command(group(
+        ArgGroup::new("reftype")
+        .required(true)
+        .args(["fasta", "ref_seq"])
+    ))]
+    MakeSplici {
+        /// The path to a genome fasta file.
+        #[arg(short, long, help_heading="Required Arguments", display_order = 1)]
+        genome: PathBuf,
+
+
+        /// The path to a GTF file.
+        #[arg(short, long, help_heading="Required Arguments", display_order = 2)]
+        genes: PathBuf,
+
+        /// The path to a GTF file.
+        #[arg(short, long, help_heading="Required Arguments", display_order = 2, default_value_t = 91 )]
+        read_length: i64,
+
+
+        /// reference genome to be used for the expanded reference construction
+        #[arg(short, long, help_heading="Expanded Reference Options", display_order = 2, 
+            requires_ifs([
+                (ArgPredicate::IsPresent, "gtf") 
+            ]),
+            conflicts_with = "ref_seq")]
+        fasta: Option<PathBuf>,
+
+        /// reference GTF file to be used for the expanded reference construction
+        #[arg(
+            short,
+            long,
+            help_heading = "Expanded Reference Options",
+            display_order = 3,
+            requires = "fasta",
+            conflicts_with = "ref_seq"
+        )]
+        gtf: Option<PathBuf>,
+
+        /// the target read length the splici index will be built for
+        #[arg(
+            short,
+            long,
+            help_heading = "Expanded Reference Options",
+            display_order = 4,
+            requires = "fasta",
+            conflicts_with = "ref_seq"
+        )]
+        rlen: Option<u32>,
+
+        /// deduplicate identical sequences in pyroe when building an expanded reference  reference
+        #[arg(
+            long = "dedup",
+            help_heading = "Expanded Reference Options",
+            display_order = 5,
+            requires = "fasta",
+            conflicts_with = "ref_seq"
+        )]
+        dedup: bool,
+
+        /// target sequences (provide target sequences directly; avoid expanded reference construction)
+        #[arg(long, alias = "refseq", help_heading = "Direct Reference Options", display_order = 6,
+              conflicts_with_all = ["dedup", "unspliced", "spliced", "rlen", "gtf", "fasta"])]
+        ref_seq: Option<PathBuf>,
+
+        /// path to FASTA file with extra spliced sequence to add to the index
+        #[arg(
+            long,
+            help_heading = "Expanded Reference Options",
+            display_order = 7,
+            requires = "fasta",
+            conflicts_with = "ref_seq"
+        )]
+        spliced: Option<PathBuf>,
+
+        /// path to FASTA file with extra unspliced sequence to add to the index
+        #[arg(
+            long,
+            help_heading = "Expanded Reference Options",
+            display_order = 8,
+            requires = "fasta",
+            conflicts_with = "ref_seq"
+        )]
+        unspliced: Option<PathBuf>,
+
+        /// use piscem instead of salmon for indexing and mapping
+        #[arg(long, help_heading = "Piscem Index Options", display_order = 1)]
+        use_piscem: bool,
+
+        /// the value of m to be used to construct the piscem index (must be < k)
+        #[arg(
+            short = 'm',
+            long = "minimizer-length",
+            default_value_t = 19,
+            requires = "use_piscem",
+            help_heading = "Piscem Index Options",
+            display_order = 2
+        )]
+        minimizer_length: u32,
+
+        /// path to output directory (will be created if it doesn't exist)
+        #[arg(short, long, display_order = 1)]
+        output: PathBuf,
+
+        /// overwrite existing files if the output directory is already populated
+        #[arg(long, display_order = 6)]
+        overwrite: bool,
+
+        /// number of threads to use when running
+        #[arg(short, long, default_value_t = 16, display_order = 2)]
+        threads: u32,
+
+        /// the value of k to be used to construct the index
+        #[arg(
+            short = 'k',
+            long = "kmer-length",
+            default_value_t = 31,
+            display_order = 3
+        )]
+        kmer_length: u32,
+
+        /// keep duplicated identical sequences when constructing the index
+        #[arg(long, display_order = 4)]
+        keep_duplicates: bool,
+
+        /// if this flag is passed, build the sparse rather than dense index for mapping
+        #[arg(
+            short = 'p',
+            long = "sparse",
+            conflicts_with = "use_piscem",
+            display_order = 5
+        )]
+        sparse: bool,
+    },
+    /// quantify a sample
+    #[command(arg_required_else_help = true)]
+    #[command(group(
+            ArgGroup::new("filter")
+            .required(true)
+            .args(["expect_cells", "explicit_pl", "forced_cells", "knee", "unfiltered_pl"])
+            ))]
+    #[command(group(
+            ArgGroup::new("input-type")
+            .required(true)
+            .args(["index", "map_dir"])
+            ))]
+    Quant {
+        /// chemistry
+        #[arg(short, long)]
+        chemistry: String,
+
+        /// output directory
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// number of threads to use when running
+        #[arg(short, long, default_value_t = 16)]
+        threads: u32,
+
+        /// path to index
+        #[arg(
+            short = 'i',
+            long = "index",
+            help_heading = "Mapping Options",
+            requires_ifs([
+                (ArgPredicate::IsPresent, "reads1"),
+                (ArgPredicate::IsPresent, "reads2")
+            ])
+        )]
+        index: Option<PathBuf>,
+
+        /// comma-separated list of paths to read 1 files
+        #[arg(
+            short = '1',
+            long = "reads1",
+            help_heading = "Mapping Options",
+            value_delimiter = ',',
+            requires = "index",
+            conflicts_with = "map_dir"
+        )]
+        reads1: Option<Vec<PathBuf>>,
+
+        /// comma-separated list of paths to read 2 files
+        #[arg(
+            short = '2',
+            long = "reads2",
+            help_heading = "Mapping Options",
+            value_delimiter = ',',
+            requires = "index",
+            conflicts_with = "map_dir"
+        )]
+        reads2: Option<Vec<PathBuf>>,
+
+        /// use selective-alignment for mapping (instead of pseudoalignment with structural
+        /// constraints).
+        #[arg(short = 's', long, help_heading = "Mapping Options")]
+        use_selective_alignment: bool,
+
+        /// use piscem for mapping (requires that index points to the piscem index)
+        #[arg(long, requires = "index", help_heading = "Mapping Options")]
+        use_piscem: bool,
+
+        /// path to a mapped output directory containing a RAD file to skip mapping
+        #[arg(long = "map-dir", conflicts_with_all = ["index", "reads1", "reads2"], help_heading = "Mapping Options")]
+        map_dir: Option<PathBuf>,
+
+        /// use knee filtering mode
+        #[arg(short, long, help_heading = "Permit List Generation Options")]
+        knee: bool,
+
+        /// use unfiltered permit list
+        #[arg(short, long, help_heading = "Permit List Generation Options")]
+        unfiltered_pl: Option<Option<PathBuf>>,
+
+        /// use forced number of cells
+        #[arg(short, long, help_heading = "Permit List Generation Options")]
+        forced_cells: Option<usize>,
+
+        /// use a filtered, explicit permit list
+        #[arg(short = 'x', long, help_heading = "Permit List Generation Options")]
+        explicit_pl: Option<PathBuf>,
+
+        /// use expected number of cells
+        #[arg(short, long, help_heading = "Permit List Generation Options")]
+        expect_cells: Option<usize>,
+
+        /// The expected direction/orientation of alignments in the chemistry being processed. If
+        /// not provided, will default to `fw` for 10xv2/10xv3, otherwise `both`.
+        #[arg(short = 'd', long, help_heading="Permit List Generation Options", value_parser = clap::builder::PossibleValuesParser::new(["fw", "rc", "both"]))]
+        expected_ori: Option<String>,
+
+        /// minimum read count threshold for a cell to be retained/processed; only used with --unfiltered-pl
+        #[arg(
+            long,
+            help_heading = "Permit List Generation Options",
+            default_value_t = 10
+        )]
+        min_reads: usize,
+
+        /// transcript to gene map
+        #[arg(short = 'm', long, help_heading = "UMI Resolution Options")]
+        t2g_map: Option<PathBuf>,
+
+        /// resolution mode
+        #[arg(short, long, help_heading = "UMI Resolution Options", value_parser = clap::builder::PossibleValuesParser::new(["cr-like", "cr-like-em", "parsimony", "parsimony-em", "parsimony-gene", "parsimony-gene-em"]))]
+        resolution: String,
+    },
+}
+
+
+
 fn main() -> anyhow::Result<()> {
     // // Check the `RUST_LOG` variable for the logger level and
     // // respect the value found there. If this environment
@@ -27,6 +307,8 @@ fn main() -> anyhow::Result<()> {
         )
         .init();
 
+    let ref_typ = ReferenceType::SplicedUnspliced;
+
     let args: Vec<String> = env::args().collect();
     let gtf_file = PathBuf::from(args.get(1).unwrap());
     let fasta_file = PathBuf::from(args.get(2).unwrap());
@@ -34,7 +316,7 @@ fn main() -> anyhow::Result<()> {
 
     // create the folder if it doesn't exist
     std::fs::create_dir_all(&out_dir)?;
-    let out_fa = out_dir.join("splici.fa");
+    let out_fa = out_dir.join("splici_fl86.fa");
 
     // 1. we read the gtf file as grangers. This will make sure that the eight fields are there.
     let start = Instant::now();
@@ -125,40 +407,61 @@ fn main() -> anyhow::Result<()> {
     // Next, we write the transcript seuqences
     exon_gr.write_transcript_sequences(&fasta_file, &out_fa, None, true, false)?;
 
-    // Then, we get the introns
-    let mut intron_gr = exon_gr.introns(None, None, None, true)?;
-
-    intron_gr.extend(86, &options::ExtendOption::Both, false)?;
-
-    // Then, we merge the overlapping introns
-    intron_gr = intron_gr.merge(
-        &[intron_gr.get_column_name("gene_id", false)?],
-        false,
-        None,
-        None,
-    )?;
-
-    intron_gr.add_order(Some(&["gene_id"]), "intron_number", Some(1), true)?;
-    intron_gr.df = intron_gr
-        .df
-        .lazy()
-        .with_column(concat_str([col("gene_id"), col("intron_number")], "-I").alias("intron_id"))
-        .collect()?;
-
-    intron_gr.write_sequences(
-        &fasta_file,
-        &out_fa,
-        false,
-        Some("intron_id"),
-        options::OOBOption::Truncate,
-        true,
-    )?;
+    match ref_typ {
+        ReferenceType::Spliced => {
+            // do nothing
+        },
+        ReferenceType::SplicedIntronic => {
+            // Then, we get the introns
+            let mut intron_gr = exon_gr.introns(None, None, None, true)?;
+        
+            intron_gr.extend(86, &options::ExtendOption::Both, false)?;
+        
+            // Then, we merge the overlapping introns
+            intron_gr = intron_gr.merge(
+                &[intron_gr.get_column_name("gene_id", false)?],
+                false,
+                None,
+                None,
+            )?;
+        
+            intron_gr.add_order(Some(&["gene_id"]), "intron_number", Some(1), true)?;
+            intron_gr.df = intron_gr
+                .df
+                .lazy()
+                .with_column(concat_str([col("gene_id"), col("intron_number")], "-I").alias("intron_id"))
+                .collect()?;
+        
+            intron_gr.write_sequences(
+                &fasta_file,
+                &out_fa,
+                false,
+                Some("intron_id"),
+                options::OOBOption::Truncate,
+                true,
+            )?;
+        },
+        ReferenceType::SplicedUnspliced => {
+            // Then, we get the introns
+            let mut intron_gr = exon_gr.genes(None, true)?;
+            intron_gr.write_sequences(
+                &fasta_file,
+                &out_fa,
+                false,
+                Some("gene_id"),
+                options::OOBOption::Truncate,
+                true,
+            )?;
+        },
+    };
 
     let mut file = std::fs::File::create(out_dir.join("gene_id_to_name.tsv"))?;
     CsvWriter::new(&mut file)
         .has_header(false)
         .with_delimiter(b'\t')
         .finish(&mut gene_id_to_name)?;
+
+
 
     // next, we write transcripts and unspliced/itrons
     // 2. we quit if the required attributes are not valid:
