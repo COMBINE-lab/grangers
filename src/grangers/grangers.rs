@@ -855,7 +855,7 @@ impl Grangers {
     /// extend each genomic feature by a given length from the start, end, or both sides.
     pub fn extend(
         &mut self,
-        length: i32,
+        length: i64,
         extend_option: &ExtendOption,
         ignore_strand: bool,
     ) -> anyhow::Result<()> {
@@ -1339,11 +1339,11 @@ impl Grangers {
             // as we can't drop a non-existing column, we need to add a dummy column
             .with_columns([
                 col("start_end_list-temp-nobody-will-use-this-name-right")
-                    .arr()
+                    .list()
                     .get(lit(0))
                     .alias(start),
                 col("start_end_list-temp-nobody-will-use-this-name-right")
-                    .arr()
+                    .list()
                     .get(lit(1))
                     .alias(end),
                 lit(".").alias(if ignore_strand {
