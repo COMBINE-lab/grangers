@@ -616,9 +616,9 @@ impl Grangers {
         }
 
         let by_str = if let Some(by) = by {
-            self.get_column_name_str(by, true)?
+            exon_gr.get_column_name_str(by, true)?
         } else {
-            self.get_column_name_str("transcript_id", true)?
+            exon_gr.get_column_name_str("transcript_id", true)?
         };
 
         exon_gr.gaps(&[by_str], false, None, Some(&kc))
@@ -679,16 +679,16 @@ impl Grangers {
             .lazy()
             .groupby([by])
             .agg([
-                col(seqname).unique().count().neq(lit(1)),
-                col(strand).unique().count().neq(lit(1)),
+                col(seqname).unique().count().neq(lit(1)).alias("seqname_any"),
+                col(strand).unique().count().neq(lit(1)).alias("strand_any"),
             ])
-            .select([col(seqname).any(), col(strand).any()])
+            .select([col("seqname_any").any(), col("strand_any").any()])
             .collect()?
             .get_row(0)?
             .0
             .into_iter()
             .any(|c| c != AnyValue::Boolean(false));
-        
+
         if any_invalid {
             bail!("The genes are not well defined. All features of a gene should be defined in the same seqname and strand. Cannot proceed.")
         };
