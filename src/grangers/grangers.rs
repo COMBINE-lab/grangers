@@ -659,8 +659,6 @@ impl Grangers {
         exon_feature: Option<&str>,
         multithreaded: bool,
     ) -> anyhow::Result<Grangers> {
-        println!("doing boundary");
-
         self.validate(false, true)?;
         let mut exon_gr = self.exons(exon_feature, multithreaded)?;
         let fc = self.field_columns();
@@ -669,8 +667,6 @@ impl Grangers {
         let end = fc.end();
         let strand = fc.strand();
         let by = self.get_column_name_str(by, true)?;
-
-        println!("chekcing validity");
 
         // check if genes are well defined: all features of a gene should have a valid seqname, start, end, and strand
         let any_invalid = exon_gr
@@ -699,7 +695,7 @@ impl Grangers {
             .groupby([seqname, by, strand])
             .agg([col(start).min(), col(end).max()])
             .collect()?;
-        Ok(self.clone())
+        Ok(exon_gr)
     }
 
     /// filter exon records and deduplicate if needed according to the by parameter.\
