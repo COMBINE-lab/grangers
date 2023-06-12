@@ -699,7 +699,7 @@ impl Grangers {
             .groupby([seqname, by, strand])
             .agg([col(start).min(), col(end).max()])
             .collect()?;
-        Ok(self.clone())
+        Ok(exon_gr)
     }
 
     /// filter exon records and deduplicate if needed according to the by parameter.\
