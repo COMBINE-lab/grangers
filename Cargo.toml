@@ -11,7 +11,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0"
 flate2 = { version = "1.0.26", features = ["zlib"], default-features = false }
-noodles = { version = "0.37.0", features = ["gtf","gff","fasta", "core"] }
+noodles = { version = "0.41.0", features = ["gtf","gff","fasta", "core"] }
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.16", default-features = true, features = ["env-filter"] }
 polars = { version = "0.30", features = ["lazy","dataframe_arithmetic","sort_multiple", "checked_arithmetic","rows","dtype-struct", "dtype-categorical", "list_eval","concat_str", "strings"]}

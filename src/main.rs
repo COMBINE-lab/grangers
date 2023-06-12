@@ -1,14 +1,8 @@
-use polars::lazy::dsl::concat_str;
-use std::env;
-use std::path::PathBuf;
-use std::time::{Duration, Instant};
+
 use tracing::info;
 use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, EnvFilter};
 pub mod grangers;
-use crate::grangers::{options, Grangers};
 use peak_alloc::PeakAlloc;
-use polars::prelude::*;
-use tracing::warn;
 
 #[global_allocator]
 static PEAK_ALLOC: PeakAlloc = PeakAlloc;

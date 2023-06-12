@@ -675,7 +675,11 @@ impl Grangers {
             .lazy()
             .groupby([by])
             .agg([
-                col(seqname).unique().count().neq(lit(1)).alias("seqname_any"),
+                col(seqname)
+                    .unique()
+                    .count()
+                    .neq(lit(1))
+                    .alias("seqname_any"),
                 col(strand).unique().count().neq(lit(1)).alias("strand_any"),
             ])
             .select([col("seqname_any").any(), col("strand_any").any()])
@@ -2665,8 +2669,8 @@ mod tests {
     // use polars::prelude::*;
     use super::*;
 
-    use noodles::core::Position;
     use crate::grangers::reader::gtf::{AttributeMode, Attributes, GStruct};
+    use noodles::core::Position;
 
     use crate::grangers::grangers_utils::FileFormat;
 
