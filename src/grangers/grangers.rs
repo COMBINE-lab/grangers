@@ -695,6 +695,9 @@ impl Grangers {
             .groupby([seqname, by, strand])
             .agg([col(start).min(), col(end).max()])
             .collect()?;
+
+        exon_gr.fix_field_columns(false)?;
+
         Ok(exon_gr)
     }
 
