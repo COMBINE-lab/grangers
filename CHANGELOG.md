@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/COMBINE-lab/grangers/compare/v0.1.3...v0.1.4) (2023-06-13)
+
+
+### Bug Fixes
+
+* readme description ([43b7a79](https://github.com/COMBINE-lab/grangers/commit/43b7a7944123e6139b9770d38d7bf08cddd271bd))
+
 ## [0.1.3](https://github.com/COMBINE-lab/grangers/compare/v0.1.2...v0.1.3) (2023-06-13)
 
 
