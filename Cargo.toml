@@ -2,16 +2,39 @@
 name = "grangers"
 version = "0.1.0"
 edition = "2021"
-
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-#[lib]
-#path = "src/grangers.rs"
+authors = [
+  "Dongze He <dhe17@umd.edu>",
+  "Rob Patro <rob@cs.umd.edu>",
+]
+description = "A rust library for working with genomic ranges and annotations."
+license-file = "LICENSE"
+readme = "README.md"
+repository = "https://github.com/COMBINE-lab/grangers"
+homepage = "https://github.com/COMBINE-lab/grangers"
+include = [
+  "/src/lib.rs",
+  "/src/grangers.rs",
+  "/src/grangers/*.rs",
+  "/Cargo.toml",
+  "/Cargo.lock",
+  "/README.md",
+  "/LICENSE",
+]
+keywords = [
+  "genomics",
+  "GTF",
+  "GFF",
+  "ranges",
+  "genes",
+  "gene-models",
+  "genome-annotation",
+]
+categories = ["science", "data-structures"]
 
 [dependencies]
 anyhow = "1.0"
 flate2 = { version = "1.0.26", features = ["zlib"], default-features = false }
-noodles = { version = "0.37.0", features = ["gtf","gff","fasta", "core"] }
+noodles = { version = "0.41.0", features = ["gtf","gff","fasta", "core"] }
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.16", default-features = true, features = ["env-filter"] }
 polars = { version = "0.30", features = ["lazy","dataframe_arithmetic","sort_multiple", "checked_arithmetic","rows","dtype-struct", "dtype-categorical", "list_eval","concat_str", "strings"]}
