@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.1.4](https://github.com/COMBINE-lab/grangers/compare/v0.1.3...v0.1.4) (2023-06-13)
+
+
+### Bug Fixes
+
+* readme description ([43b7a79](https://github.com/COMBINE-lab/grangers/commit/43b7a7944123e6139b9770d38d7bf08cddd271bd))
+
+## [0.1.3](https://github.com/COMBINE-lab/grangers/compare/v0.1.2...v0.1.3) (2023-06-13)
+
+
+### Bug Fixes
+
+* keywords in crate manifest ([8295546](https://github.com/COMBINE-lab/grangers/commit/8295546f393842ce7f3abb8485843bc95f9acdb9))
+
+## [0.1.2](https://github.com/COMBINE-lab/grangers/compare/v0.1.1...v0.1.2) (2023-06-13)
+
+
+### Bug Fixes
+
+* too many keywords in crate manifest ([1708f34](https://github.com/COMBINE-lab/grangers/commit/1708f34b5e1bd71040756ffb7e1305cd42f02dba))
+
+## [0.1.1](https://github.com/COMBINE-lab/grangers/compare/v0.1.0...v0.1.1) (2023-06-13)
+
+
+### Bug Fixes
+
+* fix crates build ([3557af6](https://github.com/COMBINE-lab/grangers/commit/3557af6ceda2dd9695f7f85b7097e947aa6b7e8b))
+
 ## 0.1.0 (2023-06-13)
 
 
