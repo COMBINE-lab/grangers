@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/COMBINE-lab/grangers/compare/v0.1.0...v0.1.1) (2023-06-13)
+
+
+### Bug Fixes
+
+* fix crates build ([3557af6](https://github.com/COMBINE-lab/grangers/commit/3557af6ceda2dd9695f7f85b7097e947aa6b7e8b))
+
 ## 0.1.0 (2023-06-13)
 
 
