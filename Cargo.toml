@@ -24,6 +24,7 @@ include = [
 keywords = [
   "genomics",
   "GTF",
+  "GFF3",
   "GFF",
   "ranges",
   "genes",
