@@ -1,6 +1,3 @@
 # grangers
 
-## TODO:
-- Extract intervals
-- Allow / simplify parsing of GTF vs GFF3
-- Allow gzipped fasta input
+A rust library for parsing and manipulating genomic annotations.
