@@ -23,12 +23,9 @@ include = [
 ]
 keywords = [
   "genomics",
-  "GTF",
-  "GFF3",
-  "GFF",
+  "GTF/GFF",
   "ranges",
   "genes",
-  "gene-models",
   "genome-annotation",
 ]
 categories = ["science", "data-structures"]
