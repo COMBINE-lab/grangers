@@ -15,6 +15,7 @@ include = [
   "/src/lib.rs",
   "/src/grangers.rs",
   "/src/grangers/*.rs",
+  "/src/grangers/reader/*.rs",
   "/Cargo.toml",
   "/Cargo.lock",
   "/README.md",
