@@ -1,5 +1,5 @@
-pub mod grangers;
 pub mod grangers_utils;
 pub mod options;
 pub mod reader;
-pub use self::grangers::Grangers;
+pub mod grangers_info;
+pub use grangers_info::Grangers as Grangers;

@@ -1265,7 +1265,7 @@ impl Grangers {
         let by: Vec<&str> = by_hash.into_iter().collect();
 
         // we take the selected columns and add two more columns: start and end
-        let mut selected = by.iter().map(|s| *s).collect::<Vec<&str>>();
+        let mut selected = by.to_vec();
         if !selected.contains(&seqname) {
             selected.push(seqname);
         }
@@ -2465,6 +2465,7 @@ impl<'a> Iterator for ChrRowSeqIter<'a> {
     }
 }
 
+#[allow(dead_code)]
 pub fn argsort1based<T: Ord>(data: &[T], descending: bool) -> Vec<usize> {
     let mut indices = (1..=data.len()).collect::<Vec<_>>();
     indices.sort_by_key(|&i| &data[i - 1]);
