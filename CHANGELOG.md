@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/COMBINE-lab/grangers/compare/v0.1.1...v0.1.2) (2023-06-13)
+
+
+### Bug Fixes
+
+* too many keywords in crate manifest ([1708f34](https://github.com/COMBINE-lab/grangers/commit/1708f34b5e1bd71040756ffb7e1305cd42f02dba))
+
 ## [0.1.1](https://github.com/COMBINE-lab/grangers/compare/v0.1.0...v0.1.1) (2023-06-13)
 
 
