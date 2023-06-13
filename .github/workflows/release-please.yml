@@ -16,7 +16,7 @@ jobs:
         id: release_main
         with:
           release-type: rust
-          package-name: simpleaf
+          package-name: grangers
           bump-minor-pre-major: true
           path: .
 
@@ -30,7 +30,7 @@ jobs:
       - uses: Swatinem/rust-cache@v1.3.0
         if: ${{ steps.release_main.outputs.release_created }}
       
-      - name: Publish simpleaf
+      - name: Publish grangers
         if: ${{ steps.release_main.outputs.release_created }}
         uses: actions-rs/cargo@v1
         with:
