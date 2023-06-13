@@ -23,7 +23,7 @@ include = [
 ]
 keywords = [
   "genomics",
-  "GTF/GFF",
+  "GTF-GFF",
   "ranges",
   "genes",
   "genome-annotation",
