@@ -1,6 +1,5 @@
 // TODO:
 // 1. update write and get sequence functions to use the same implementation
-// 2. test sequence functions using true datasets
 use crate::grangers::grangers_utils::*;
 use crate::grangers::options::*;
 use crate::grangers::reader;
@@ -41,7 +40,8 @@ pub struct Grangers {
     /// The reference information
     pub seqinfo: Option<SeqInfo>,
     /// The lapper interval tree
-    pub lapper: Option<Lapper<u64, Vec<String>>>,
+    pub lappers: Option<HashMap<[String;2], Lapper<u64, (usize, Vec<String>)>>>,
+    lappers_ignore_strand: Option<bool>,
     /// The interval type
     pub interval_type: IntervalType,
     /// The name of the columns that are used to identify the genomic features
@@ -110,7 +110,7 @@ impl Grangers {
         mut df: DataFrame,
         seqinfo: Option<SeqInfo>,
         misc: Option<HashMap<String, Vec<String>>>,
-        lapper: Option<Lapper<u64, Vec<String>>>,
+        // lappers: Option<HashMap<[String;2], Lapper<u64, (usize, Vec<String>)>>>,
         interval_type: IntervalType,
         mut field_columns: FieldColumns,
         verbose: bool,
@@ -135,7 +135,8 @@ impl Grangers {
             df,
             misc,
             seqinfo,
-            lapper,
+            lappers: None,
+            lappers_ignore_strand: None,
             interval_type,
             field_columns,
         };
@@ -187,7 +188,6 @@ impl Grangers {
             df,
             None,
             gstruct.misc,
-            None,
             interval_type,
             FieldColumns::default(),
             true,
@@ -386,7 +386,6 @@ impl Grangers {
             df,
             self.seqinfo().cloned(),
             self.misc.clone(),
-            self.lapper().clone(),
             IntervalType::default(),
             self.field_columns().clone(),
             true,
@@ -515,10 +514,11 @@ impl Grangers {
         )
     }
 
-    /// get the reference to the lapper (interval tree) of the Grangers struct
-    pub fn lapper(&self) -> &Option<Lapper<u64, Vec<String>>> {
-        &self.lapper
-    }
+    /// get the reference to the lappers of the Grangers struct
+    // TODO
+    // pub fn lappers(&self) -> &Option<Lapper<u64, Vec<String>>> {
+    //     &self.lappers
+    // }
 
     /// get the start, end, and strand columns as a dataframe
     pub fn range(&self) -> anyhow::Result<DataFrame> {
@@ -539,7 +539,7 @@ impl Grangers {
 // validate Grangers
 impl Grangers {
     ///validate the Grangers struct
-    /// - return error if the field_columns is valid
+    /// - return error if the field_columns is invalid
     /// - return error if the dataframe contains null values in the essential fields
     /// - return warning if the dataframe contains null values in the additional fields
     pub fn validate(&self, is_warn: bool, is_bail: bool) -> anyhow::Result<bool> {
@@ -1058,14 +1058,7 @@ impl Grangers {
                     .collect::<Vec<Expr>>(),
             )
             .collect()?;
-        Ok(Grangers {
-            df,
-            seqinfo: self.seqinfo.clone(),
-            misc: self.misc.clone(),
-            lapper: self.lapper.clone(),
-            interval_type: self.interval_type,
-            field_columns: self.field_columns.clone(),
-        })
+        Grangers::new(df, self.seqinfo.clone(), self.misc.clone(), self.interval_type, self.field_columns.clone(), false)
     }
 
     /// Find the set difference of genomic intervals with `other`.
@@ -1196,7 +1189,6 @@ impl Grangers {
             df,
             self.seqinfo.clone(),
             self.misc.clone(),
-            None,
             IntervalType::default(),
             self.field_columns.clone(),
             false,
@@ -1379,6 +1371,10 @@ impl Grangers {
 
         Ok(df)
     }
+}
+
+// lappers
+impl Grangers {
 
     /// merge the features by the given columns via the `by` argument to generate a new Grangers object.
     /// *** Argument:
@@ -1386,123 +1382,191 @@ impl Grangers {
     /// - `ignore_strand`: whether to ignore the strand information when merging.
     /// - `slack`: the maximum distance between two features to be merged.
     // TODO: add slack to this function
-    pub fn lapper_merge(&mut self, by: Vec<String>, _slack: i64) -> anyhow::Result<Grangers> {
-        self.build_lapper(&by)?;
+    // pub fn lapper_merge(&mut self, by: Vec<String>, _slack: i64) -> anyhow::Result<Grangers> {
+    //     // self.build_lapper(&by[..])?;
 
-        let mut lapper = if let Some(lapper) = self.lapper.clone() {
-            lapper
-        } else {
-            bail!("Could not find the lapper that was just built; Please report this bug!")
-        };
+    //     let mut lappers = if let Some(lappers) = self.lappers.clone() {
+    //         lappers
+    //     } else {
+    //         bail!("Could not find the lappers that was just built; Please report this bug!")
+    //     };
 
-        lapper.merge_overlaps();
+    //     lappers.merge_overlaps();
 
-        if !lapper.overlaps_merged {
-            info!("Did not find overlapping features. Nothing to merge.")
+    //     if !lappers.overlaps_merged {
+    //         info!("Did not find overlapping features. Nothing to merge.")
+    //     }
+
+    //     let lapper_vecs = LapperVecs::new(&lappers, &by);
+    //     let df = lapper_vecs.into_df()?;
+    //     Ok(Grangers {
+    //         df,
+    //         seqinfo: self.seqinfo.clone(),
+    //         misc: self.misc.clone(),
+    //         lappers: Some(lappers),
+    //         interval_type: self.interval_type,
+    //         field_columns: self.field_columns.clone(),
+    //     })
+    // }
+
+    /// Build a Lapper data structure for each `seqname` or (`seqname`,`strand`) for interval search and overlap detection. Lappers only work with non-negative start and end positions.
+    /// This function takes three parameters:
+    /// 1. `ignore_strand`: If true, build a lapper for each unique `seqname`. Otherwise, build a lapper for each unique (`seqname`,`strand`) pair.
+    /// 2. `ignore_invalid`: If true, ignore invalid features. Otherwise, return error if found invalid features. A feature is valid if it has a positive start and end site, a valid `seqname`, and a valid strand if `ignore_strand` is not set.
+    /// 3. `overwrite`: If true, overwrite if the lapper field exist. Otherwise, return without doing anything.
+    /// **Note** that as this functionality depends on an external crate assuming right-exclusive intervals, i.e., [start,end), you will see that the end of each lapper interval is 1 base greater than its corresponding features in the Grangers object, which relies on inclusive intervals, i.e., [start,end]. Therefore, if you want to use the lapper outise of Grangers function, please be aware of the difference.
+    /// Building the lapper for a Grangers object will provide you the following functions (from [rust-lapper's doc](https://docs.rs/rust-lapper/latest/rust_lapper/struct.Lapper.html#method.count)):
+    /// 1. find: Find all intervals in the lapper that overlap a given interval
+    /// 2. seek: Seek all intervals in the lapper that overlap a given interval. It uses a linear search from the last query instead of a binary search. A reference to a cursor must be passed in. This reference will be modified and should be reused in the next query. This allows seek to not need to make the lapper object mutable, and thus use the same lapper accross threads.
+    /// 3. count: Count all intervals in the lapper that overlap a given interval. This performs two binary search in order to find all the excluded elements, and then deduces the intersection from there. See BITS for more details.
+    /// 4. cov: Get the number of positions covered by the intervals in Lapper. This provides immutable access if it has already been set, or on the fly calculation.
+
+    pub fn build_lapper<T: AsRef<str>>(&mut self, ignore_invalid: bool, ignore_strand: bool, overwrite: bool, group_by: &[T]) -> anyhow::Result<()> {
+        // rust-lapper
+        let start_time = std::time::Instant::now();
+        // validate the Grangers object
+        self.validate(false, true)?;
+
+        // first we want to check if the lappers have already been built
+        if self.lappers.is_some() && !overwrite {
+            info!("The lappers has already been built. Nothing to do.");
+            return Ok(());
         }
 
-        let lapper_vecs = LapperVecs::new(&lapper, &by);
-        let df = lapper_vecs.into_df()?;
-        Ok(Grangers {
-            df,
-            seqinfo: self.seqinfo.clone(),
-            misc: self.misc.clone(),
-            lapper: Some(lapper),
-            interval_type: self.interval_type,
-            field_columns: self.field_columns.clone(),
-        })
-    }
+        let mut by = Vec::new();
+        for b in group_by.iter() {
+            by.push(self.get_column_name_str(b.as_ref(), true)?);
+        }
+        // get the column names
+        let start_s = self.get_column_name("start", true)?;
+        let start = start_s.as_str();
+        let end_s = self.get_column_name("end", true)?;
+        let end = end_s.as_str();
+        let seqname_s = self.get_column_name("seqname", true)?;
+        let seqname = seqname_s.as_str();
+        let strand_s = self.get_column_name("strand", true)?;
+        let strand = strand_s.as_str();
 
-    /// Instantiate a Lapper struct for interval search and overlap detection
-    /// The Lapper struct works for unsigned integer only, so the start and end values will be converted to unsigned integer.
-    /// The range is [start, end), i.e. inclusive start and exclusive end. Note that for GTF/GFF, the start is 1-based and the end is closed; for BED, the start is 0-based and open but the end is closed.
-    // TODO: figure out the interval ex/inclusive and slack issue and then improve it
-    pub fn build_lapper(&mut self, meta_cols: &Vec<String>) -> anyhow::Result<()> {
-        // rust_lapper
-        // only unsigned
-        // [start, stop) Inclusive start, exclusive of stop
-        type Iv = Interval<u64, Vec<String>>;
-
+        let selected = [start, end, seqname, strand];
         let df = self.df();
-        let mut meta_vec = vec![Vec::<String>::with_capacity(meta_cols.len()); df.height()];
-        let mut iters = df
-            .columns(meta_cols)?
-            .iter()
-            .map(|s| s.iter())
-            .collect::<Vec<_>>();
 
-        // build meta_vec
-        // iterate over the iterator of each selected column
-        for row in 0..df.height() {
-            for iter in &mut iters {
-                let value = iter
-                    .next()
-                    .expect("should have as many iterations as rows")
-                    // .cast(&DataType::Utf8)? // this will cause a bug saying cannot cast non numeric to numeric
-                    .to_string();
-                // process value
-                if let Some(v) = meta_vec.get_mut(row) {
-                    v.push(value);
-                } else {
-                    bail!("meta_vec length is not equal to the dataframe height! Please Report this bug!")
+        // we build a vector indicating if the start and end of features are valid  
+        let valid_rows_df = df.select([start, end, strand])?.lazy()
+            .select([
+                col(start).gt(lit(0)),
+                col(end).gt(lit(0)),
+                col(strand).eq(lit("+")).or(col(strand).eq(lit("-"))),
+            ])
+            .select([col(start).and(col(end)).alias("pos_valid"), col(start).and(col(end)).alias("pos_strand_valid")])
+            .collect()?;
+        let valid_pos = valid_rows_df.column("pos_valid")?;
+        let valid_pos_strand = valid_rows_df.column("pos_strand_valid")?;
+
+        // Then we bail if ignore_invalid is false but we found invalid features
+        if !ignore_invalid {
+            if ignore_strand {
+                // we need to make sure start and end are valid
+                if valid_pos.iter().any(|v| v != AnyValue::Boolean(true)) {
+                    bail!("Found features with non-positive start/end position. Please remove them first or set ignore_invalid to true.")
+                }
+            } else {
+                // we need to make sure start, end and strand are all valid
+                if valid_pos_strand.iter().any(|v| v != AnyValue::Boolean(true)) {
+                    bail!("Found features with non-positive start/end/strand position. Please remove them first or set ignore_invalid to true.")
                 }
             }
         }
 
-        // build a lapper from the dataframe
-        // check if negative start or end
-        let min_start = df
-            .column("start")?
-            .cast(&DataType::Int64)?
-            .i64()?
-            .min()
-            .with_context(|| {
-                "Could not get the minimum start value from the dataframe.".to_string()
-            })?;
+        // [start, stop) Inclusive start, exclusive of stop
+        // we define start and end as u64, and we use Vec<String> to store group_by column values
+        type Iv = Interval<u64, (usize,Vec<String>)>;
 
-        // let mut pos_vec = vec![Vec::<String>::with_capacity(meta_cols.len()); df.height()];
-        let mut iters = df
-            .columns(["start", "end"])?
+        let mut by_iters = df
+            .columns(by)?
             .iter()
             .map(|s| s.iter())
             .collect::<Vec<_>>();
 
-        let mut lapper_tree_vec = Vec::with_capacity(df.height());
-        // build pos_vec
-        for (_rid, meta) in meta_vec.into_iter().enumerate() {
-            let s: i64 = iters[0]
-                .next()
-                .expect("should have as many iterations as rows")
-                .cast(&DataType::Int64)?
-                .try_extract()?;
-            let e: i64 = iters[1]
-                .next()
-                .expect("should have as many iterations as rows")
-                .cast(&DataType::Int64)?
-                .try_extract()?;
+        let mut ess_iters = self.df()
+            .columns(&selected)?
+            .iter()
+            .map(|s| s.iter())
+            .collect::<Vec<_>>();
 
-            // lappers take unsigned integer
-            let (start, end) = if !min_start.is_negative() {
-                (s as u64, e as u64)
+        let valid_rows = if ignore_strand {
+            valid_pos
+        } else {
+            valid_pos_strand
+        };
+
+        // we first build the vectors, and then build the lappers using that
+        let mut lapper_tree_vec_hm = HashMap::new();
+
+        for (rid, is_valid) in valid_rows.iter().enumerate() {
+            // we skip invalid rows as we have bailed already if needed
+            if is_valid != AnyValue::Boolean(true) {
+                continue;
+            }
+
+            // then, we take the start and end
+            let s = ess_iters[0]
+                .next()
+                .expect("should have as many iterations as rows")
+                .cast(&DataType::Int64)?
+                .try_extract::<i64>()? as u64;
+
+            // we add 1 to the end because rust-lappers uses right-exclusive intervals
+            let e = ess_iters[1]
+                .next()
+                .expect("should have as many iterations as rows")
+                .cast(&DataType::Int64)?
+                .try_extract::<i64>()? as u64 + 1 ;
+
+            // we take the seqname and strand
+            let seqn = ess_iters[2]
+                .next()
+                .expect("should have as many iterations as rows")
+                .to_string();
+
+            let strd = if ignore_strand {
+                String::from(".")
             } else {
-                ((s + min_start.abs()) as u64, (e + min_start.abs()) as u64)
+                ess_iters[3]
+                    .next()
+                    .expect("should have as many iterations as rows")
+                    .to_string()
             };
-
+            
+            // we take the by columns
+            let mut by_vec = Vec::new();
+            for it in by_iters.iter_mut() {
+                by_vec.push(it.next().expect("should have as many iterations as rows").to_string());
+            }
+            let lapper_tree_vec = lapper_tree_vec_hm.entry([seqn.clone(), strd.clone()]).or_insert(Vec::new());
             lapper_tree_vec.push(Iv {
-                start,
-                stop: end,
-                val: meta,
+                start: s,
+                stop: e,
+                val: (rid, by_vec),
             });
         }
 
-        // rust-lapper
-        let start = std::time::Instant::now();
-        self.lapper = Some(Lapper::new(lapper_tree_vec));
-        let duration: std::time::Duration = start.elapsed();
-        info!("build rust-lapper in {:?}", duration);
+        // we build the lappers
+        let mut lappers = HashMap::new();
+
+        for (key, lapper_tree_vec) in lapper_tree_vec_hm.into_iter() {
+            let lapper = Lapper::new(lapper_tree_vec);
+            lappers.insert(key, lapper);
+        }
+
+
+        self.lappers = Some(lappers);
+        self.lappers_ignore_strand = Some(ignore_strand);
+        let duration: std::time::Duration = start_time.elapsed();
+        debug!("build rust-lappers in {:?}", duration);
         Ok(())
     }
 }
+
 
 // implement get sequence functions for Grangers
 impl Grangers {
@@ -1759,7 +1823,7 @@ impl Grangers {
 
         fc.fix(&df, false)?;
 
-        let essential_gr = Grangers::new(df, None, None, None, IntervalType::default(), fc, false)?;
+        let essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
 
@@ -1895,7 +1959,7 @@ impl Grangers {
 
         fc.fix(&df, false)?;
 
-        let essential_gr = Grangers::new(df, None, None, None, IntervalType::default(), fc, false)?;
+        let essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
 
         let seqname_s = essential_gr.get_column_name("seqname", true)?;
         let seqname = seqname_s.as_str();
@@ -2135,7 +2199,7 @@ impl Grangers {
 
         fc.fix(&df, false)?;
 
-        let essential_gr = Grangers::new(df, None, None, None, IntervalType::default(), fc, false)?;
+        let essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
 
@@ -2243,7 +2307,7 @@ impl Grangers {
         // we only use a subset of the columns, so fix fc
         fc.fix(&df, false)?;
 
-        let essential_gr = Grangers::new(df, None, None, None, IntervalType::default(), fc, false)?;
+        let essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
         let mut reader = std::fs::File::open(ref_path)
             .map(BufReader::new)
@@ -2473,55 +2537,6 @@ pub fn argsort1based<T: Ord>(data: &[T], descending: bool) -> Vec<usize> {
         indices.reverse();
     }
     indices
-}
-
-struct LapperVecs {
-    start: Vec<i64>,
-    end: Vec<i64>,
-    val: Vec<Vec<String>>,
-    val_names: Vec<String>,
-}
-
-impl LapperVecs {
-    fn new(lapper: &Lapper<u64, Vec<String>>, meta_cols: &Vec<String>) -> LapperVecs {
-        // initialize the vectors
-        let mut start: Vec<i64> = Vec::with_capacity(lapper.len());
-        let mut end: Vec<i64> = Vec::with_capacity(lapper.len());
-        let mut val: Vec<Vec<String>> =
-            vec![Vec::<String>::with_capacity(lapper.len()); meta_cols.len()];
-
-        // build the vectors
-        for iv in lapper.iter() {
-            start.push(iv.start as i64);
-            end.push(iv.stop as i64);
-            for (i, v) in iv.val.iter().enumerate() {
-                val.get_mut(i)
-                    .expect("lapper vec val is shorter than designed")
-                    .push(v.to_string());
-            }
-        }
-
-        LapperVecs {
-            start,
-            end,
-            val,
-            val_names: meta_cols.clone(),
-        }
-    }
-
-    fn into_df(self) -> anyhow::Result<DataFrame> {
-        let mut df_vec = vec![
-            Series::new("start", self.start),
-            Series::new("end", self.end),
-        ];
-
-        for (name, value) in self.val_names.into_iter().zip(self.val.into_iter()) {
-            df_vec.push(Series::new(name.as_str(), value));
-        }
-
-        let df = DataFrame::new(df_vec)?;
-        Ok(df)
-    }
 }
 
 fn apply_merge(s: Series, slack: i64) -> Result<Option<polars::prelude::Series>, PolarsError> {
@@ -3248,7 +3263,6 @@ mod tests {
             df,
             None,
             None,
-            None,
             IntervalType::Inclusive(1),
             FieldColumns::default(),
             false,
@@ -3409,7 +3423,6 @@ mod tests {
             df,
             None,
             None,
-            None,
             IntervalType::Inclusive(1),
             FieldColumns::default(),
             false,
@@ -3466,7 +3479,6 @@ mod tests {
 
         let gr = Grangers::new(
             df,
-            None,
             None,
             None,
             IntervalType::Inclusive(1),
@@ -3659,7 +3671,6 @@ mod tests {
             df,
             None,
             None,
-            None,
             IntervalType::Inclusive(1),
             FieldColumns::default(),
             false,
@@ -3728,7 +3739,6 @@ mod tests {
 
         let gr = Grangers::new(
             df,
-            None,
             None,
             None,
             IntervalType::Inclusive(1),
@@ -3800,7 +3810,6 @@ mod tests {
 
         let gr = Grangers::new(
             df,
-            None,
             None,
             None,
             IntervalType::Inclusive(1),
@@ -3900,7 +3909,6 @@ mod tests {
             df,
             None,
             None,
-            None,
             IntervalType::Inclusive(1),
             FieldColumns::default(),
             false,
@@ -3945,7 +3953,6 @@ mod tests {
 
         let gr = Grangers::new(
             df,
-            None,
             None,
             None,
             IntervalType::Inclusive(1),
@@ -3998,7 +4005,6 @@ mod tests {
             df,
             None,
             None,
-            None,
             IntervalType::Inclusive(1),
             FieldColumns::default(),
             false,
@@ -4041,5 +4047,40 @@ mod tests {
                 .collect::<Vec<&str>>(),
             source
         );
+    }
+
+
+    #[test]
+    fn test_build_lappers() {
+        let df = df!(
+            "seqname" => ["chr1", "chr1", "chr1", "chr2", "chr2", "chr2", "chr2"],
+            "feature_type" => ["exon", "exon", "exon", "exon", "exon", "exon", "exon"],
+            "start" => [1i64, 21, -5, 1, 51, 1, 51],
+            "end" => [10i64, 30, 5, 100, 150, 100, 150],
+            "strand"=> ["+", "+", "+", "+", "+", "-", "-"],
+            "gene_id" => ["g1", "g1", "g1", "g2", "g2", "g2", "g2"],
+        )
+        .unwrap();
+
+        let mut gr = Grangers::new(
+            df,
+            None,
+            None,
+            IntervalType::Inclusive(1),
+            FieldColumns::default(),
+            false,
+        )
+        .unwrap();
+
+        if SAY {
+            println!("gr1: {:?}", gr.df());
+        }
+
+        gr.build_lapper(true, false, true, &["gene_id"]).unwrap();
+
+        println!("{:?}", gr.lappers);
+
+        // assert!(false);
+
     }
 }
