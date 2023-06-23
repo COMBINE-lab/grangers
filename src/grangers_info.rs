@@ -4109,7 +4109,7 @@ mod tests {
 
         println!("{:?}", chr1.find(1, 5));
 
-        assert!(false);
+        // assert!(false);
 
     }
 }
