@@ -1,4 +1,4 @@
-use crate::grangers::grangers_utils::equal_length;
+use crate::grangers_utils::equal_length;
 use anyhow::bail;
 use noodles::fasta;
 use std::collections::HashMap;

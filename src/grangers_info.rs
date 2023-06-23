@@ -1,9 +1,9 @@
 // TODO:
 // 1. update write and get sequence functions to use the same implementation
-use crate::grangers::grangers_utils::*;
-use crate::grangers::options::*;
-use crate::grangers::reader;
-use crate::grangers::reader::fasta::SeqInfo;
+use crate::grangers_utils::*;
+use crate::options::*;
+use crate::reader;
+use crate::reader::fasta::SeqInfo;
 use anyhow::{bail, Context};
 use noodles::fasta;
 pub use noodles::fasta::record::{Definition, Record, Sequence};
@@ -1435,7 +1435,11 @@ impl Grangers {
 
         let mut by = Vec::new();
         for b in group_by.iter() {
-            by.push(self.get_column_name_str(b.as_ref(), true)?);
+            let name = b.as_ref();
+            if !self.field_columns().gtf_fields().contains(&name) {
+                warn!("The provided `by` vector contains a non-attribute column. There should be a strong reason of doing so")
+            }
+            by.push(self.get_column_name_str(name, true)?);
         }
         // get the column names
         let start_s = self.get_column_name("start", true)?;
@@ -1457,7 +1461,9 @@ impl Grangers {
                 col(end).gt(lit(0)),
                 col(strand).eq(lit("+")).or(col(strand).eq(lit("-"))),
             ])
-            .select([col(start).and(col(end)).alias("pos_valid"), col(start).and(col(end)).alias("pos_strand_valid")])
+            .select([
+                col(start).and(col(end)).alias("pos_valid"), 
+                col(start).and(col(end)).and(col(strand)).alias("pos_strand_valid")])
             .collect()?;
         let valid_pos = valid_rows_df.column("pos_valid")?;
         let valid_pos_strand = valid_rows_df.column("pos_strand_valid")?;
@@ -1523,24 +1529,38 @@ impl Grangers {
                 .try_extract::<i64>()? as u64 + 1 ;
 
             // we take the seqname and strand
-            let seqn = ess_iters[2]
+            let seqn = if let AnyValue::Utf8(t) = ess_iters[2]
                 .next()
-                .expect("should have as many iterations as rows")
-                .to_string();
-
+                .expect("should have as many iterations as rows") {
+                    t.to_string()
+                } else {
+                    bail!("Could not get the seqname of the feature")
+                };
+            
             let strd = if ignore_strand {
                 String::from(".")
             } else {
-                ess_iters[3]
+                if let AnyValue::Utf8(t) = ess_iters[3]
                     .next()
-                    .expect("should have as many iterations as rows")
-                    .to_string()
+                    .expect("should have as many iterations as rows") {
+                        t.to_string()
+                    } else {
+                        bail!("Could not get the strand of the feature")
+                    }
             };
-            
+
             // we take the by columns
             let mut by_vec = Vec::new();
             for it in by_iters.iter_mut() {
-                by_vec.push(it.next().expect("should have as many iterations as rows").to_string());
+                let v = if let AnyValue::Utf8(t) = 
+                    it.next()
+                    .expect("should have as many iterations as rows") {
+                        t.to_string()
+                    } else {
+                        bail!("Could not get the strand of the feature")
+                    };
+
+                by_vec.push(v);
             }
             let lapper_tree_vec = lapper_tree_vec_hm.entry([seqn.clone(), strd.clone()]).or_insert(Vec::new());
             lapper_tree_vec.push(Iv {
@@ -2685,10 +2705,10 @@ mod tests {
     // use polars::prelude::*;
     use super::*;
 
-    use crate::grangers::reader::gtf::{AttributeMode, Attributes, GStruct};
+    use crate::reader::gtf::{AttributeMode, Attributes, GStruct};
     use noodles::core::Position;
 
-    use crate::grangers::grangers_utils::FileFormat;
+    use crate::grangers_utils::FileFormat;
 
     const SAY: bool = true;
     #[test]
@@ -4078,9 +4098,18 @@ mod tests {
 
         gr.build_lapper(true, false, true, &["gene_id"]).unwrap();
 
-        println!("{:?}", gr.lappers);
 
-        // assert!(false);
+        if SAY {
+            println!("{:?}", gr.lappers);
+        }
+
+        let lappers = gr.lappers.unwrap();
+
+        let chr1 = lappers.get(&["chr1".to_string(), "+".to_string()]).unwrap();
+
+        println!("{:?}", chr1.find(1, 5));
+
+        assert!(false);
 
     }
 }
