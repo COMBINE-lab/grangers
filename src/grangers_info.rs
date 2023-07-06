@@ -2540,6 +2540,21 @@ impl<'a> Iterator for GrangersSeqIter<'a> {
     type Item = (String, anyhow::Result<Sequence>);
 
     pub fn next(&self) -> Option<Self::Item> {
+        // check if we currently have a chr_iter, if so 
+        // yield the next element.  If not, then see if 
+        // we can advance the record iterator and prepare 
+        // the next chr_iter.
+
+        if let Some(chr_iter) = self.chr_iter {
+
+        } else {
+            if let Some(record) = self.records.next() {
+
+            } else {
+                return None
+            }
+        }
+            /*
         let feat_name = self.name_vec.unwrap().next();
 
         if let Some(chrsi_rec) = self.chr_iter.unwrap().next() {
@@ -2568,6 +2583,7 @@ impl<'a> Iterator for GrangersSeqIter<'a> {
         if self.chr.is_none() {
             return None;
         }
+            */
 
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
