@@ -2509,6 +2509,224 @@ impl Grangers {
     }
 }
 
+struct GrangersSeqIter<'a> {
+    // where we are reading the reference 
+    // sequences from (e.g. the chromosome)
+    chr_records: noodles::fasta::reader::Records<'a, BufReader<std::fs::File>>,
+    essential_gr: Grangers,
+    chr: Option<noodles::fasta::Record>,
+    chr_gr: Option<Grangers>,
+    name_vec: Option<Vec<String>>,
+    chr_iter: Option<ChrRowSeqIter<'a>>,
+    empty_counter: usize,
+}
+
+impl<'a> GrangersSeqIter<'a> {
+    pub fn new(breader: BufReader<std::fs::File>, essential_gr: Grangers) -> Self {
+        let mut reader = noodles::fasta::Reader::new(breader);
+        GrangersSeqIter {
+            chr_records: reader.records(),
+            essential_gr,
+            chr: None,
+            chr_gr: None,
+            name_vec: None,
+            chr_iter: None,
+            empty_counter: 0
+        }
+    }
+}
+
+impl<'a> Iterator for GrangersSeqIter<'a> {
+    type Item = (String, anyhow::Result<Sequence>);
+
+    pub fn next(&self) -> Option<Self::Item> {
+        let feat_name = self.name_vec.unwrap().next();
+
+        if let Some(chrsi_rec) = self.chr_iter.unwrap().next() {
+
+            if let Ok(sequence) = chrsi_rec {
+                let definition = Definition::new(feat_name, None);
+
+                // we write if the sequence is not empty
+                writer
+                    .write_record(&Record::new(definition, sequence))
+                    .with_context(|| {
+                        format!(
+                            "Could not write sequence {} to the output file; Cannot proceed.",
+                            feat_name
+                        )
+                    })?;
+            } else {
+                empty_counter += 1;
+            }
+        }
+
+        if self.chr.is_none() {
+            self.chr = reader.next();
+        } 
+
+        if self.chr.is_none() {
+            return None;
+        }
+
+
+        // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
+        // 1. subset the dataframe by the chromosome name
+        // 2. get the sequence of the features in the dataframe on that fasta record
+        // 3. insert the sequence into the sequence vector according to the row order
+        for result in reader.records() {
+            let record = result?;
+
+            let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
+            let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
+
+            if chr_gr.df().height() == 0 {
+                continue;
+            }
+
+            let name_vec = chr_gr
+                .df()
+                .column(name_column.as_str())?
+                .utf8()?
+                .into_iter()
+                .map(|s| s.unwrap())
+                .collect::<Vec<_>>();
+
+            let chrsi = ChrRowSeqIter::new(&chr_gr, &record, oob_option)?;
+
+            for (feat_name, chrsi_rec) in name_vec.into_iter().zip(chrsi) {
+                if let Ok(sequence) = chrsi_rec {
+                    let definition = Definition::new(feat_name, None);
+
+                    // we write if the sequence is not empty
+                    writer
+                        .write_record(&Record::new(definition, sequence))
+                        .with_context(|| {
+                            format!(
+                                "Could not write sequence {} to the output file; Cannot proceed.",
+                                feat_name
+                            )
+                        })?;
+                } else {
+                    empty_counter += 1;
+                }
+            }
+        }
+ 
+    }
+}
+
+impl Grangers {
+    /// Get an iterator over the relevant set of records from a 
+    /// Grangers structure
+    pub fn try_matching_sequence_iter<T: AsRef<Path>>(
+        &mut self,
+        ref_path: T,
+        ignore_strand: bool,
+        name_column: Option<&str>,
+        oob_option: OOBOption,
+    ) -> anyhow::Result<GrangersSeqIter> {
+        self.validate(false, true)?;
+
+        // if name is invalid, ignore
+        let name_column = if let Some(name_column) = name_column {
+            if self.get_column_name_str(name_column, true).is_ok() {
+                self.get_column_name(name_column, false)?
+            } else {
+                warn!("The provided name column {:?} for naming the extracted sequences is not in the dataframe. Row order will will be used instead.", name_column);
+                "row_order".to_owned()
+            }
+        } else {
+            info!("No name column is provided. The extracted sequences will be named by the row order.");
+            "row_order".to_owned()
+        };
+
+        let mut fc = self.field_columns().clone();
+
+        // we need to map the sequence back to the original row order of the dataframe
+        // So, we need to have a minimum copy of the dataset, which contains only the essential fields,
+        // and add one more column representing the row order of the original dataframe
+        let selection = [
+            fc.seqname(),
+            fc.start(),
+            fc.end(),
+            fc.strand(),
+            name_column.as_str(),
+        ];
+
+        let mut df = if name_column.as_str() == "row_order" {
+            self.df
+                .with_row_count("row_order", None)?
+                .select(selection)?
+        } else {
+            self.df.select(selection)?
+        };
+
+        // if ignore strand, set the strand to +
+        if ignore_strand {
+            df.with_column(Series::new(fc.strand(), vec!["+"; df.height()]))?;
+        }
+
+        fc.fix(&df, false)?;
+
+        let essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+
+        let seqname_s = essential_gr.get_column_name("seqname", true)?;
+        let seqname = seqname_s.as_str();
+
+        let reader = std::fs::File::open(ref_path).map(BufReader::new)?;
+        let mut reader = noodles::fasta::Reader::new(reader);
+
+        let mut empty_counter = 0;
+
+        // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
+        // 1. subset the dataframe by the chromosome name
+        // 2. get the sequence of the features in the dataframe on that fasta record
+        // 3. insert the sequence into the sequence vector according to the row order
+        for result in reader.records() {
+            let record = result?;
+
+            let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
+            let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
+
+            if chr_gr.df().height() == 0 {
+                continue;
+            }
+
+            let name_vec = chr_gr
+                .df()
+                .column(name_column.as_str())?
+                .utf8()?
+                .into_iter()
+                .map(|s| s.unwrap())
+                .collect::<Vec<_>>();
+
+            let chrsi = ChrRowSeqIter::new(&chr_gr, &record, oob_option)?;
+
+            for (feat_name, chrsi_rec) in name_vec.into_iter().zip(chrsi) {
+                if let Ok(sequence) = chrsi_rec {
+                    let definition = Definition::new(feat_name, None);
+
+                    // we write if the sequence is not empty
+                    writer
+                        .write_record(&Record::new(definition, sequence))
+                        .with_context(|| {
+                            format!(
+                                "Could not write sequence {} to the output file; Cannot proceed.",
+                                feat_name
+                            )
+                        })?;
+                } else {
+                    empty_counter += 1;
+                }
+            }
+        }
+        if empty_counter > 0 {
+            warn!("Unable to extract sequence for {} records. They are usually caused by out of boundary features or an invalid alphabet.", empty_counter)
+        }
+    }
+}
+
 struct ChrRowSeqIter<'a> {
     iters: Vec<polars::series::SeriesIter<'a>>,
     record: &'a Record,
