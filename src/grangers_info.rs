@@ -6,6 +6,7 @@ use crate::reader;
 use crate::reader::fasta::SeqInfo;
 use anyhow::{bail, Context};
 use noodles::fasta;
+use noodles::fasta::reader::Records;
 pub use noodles::fasta::record::{Definition, Record, Sequence};
 use polars::{lazy::prelude::*, prelude::*, series::Series};
 use rust_lapper::{Interval, Lapper};
@@ -2514,11 +2515,11 @@ struct GrangersSeqIter<'a> {
     // sequences from (e.g. the chromosome)
     chr_records: noodles::fasta::reader::Records<'a, BufReader<std::fs::File>>,
     essential_gr: Grangers,
-    chr: Option<noodles::fasta::Record>,
     chr_gr: Option<Grangers>,
-    name_vec: Option<Vec<String>>,
-    chr_iter: Option<ChrRowSeqIter<'a>>,
+    name_vec: Vec<String>,
+    chr_seq_iter: Option<ChrRowSeqIter<'a>>,
     empty_counter: usize,
+    name_vec_offset: usize
 }
 
 impl<'a> GrangersSeqIter<'a> {
@@ -2527,108 +2528,90 @@ impl<'a> GrangersSeqIter<'a> {
         GrangersSeqIter {
             chr_records: reader.records(),
             essential_gr,
-            chr: None,
             chr_gr: None,
-            name_vec: None,
-            chr_iter: None,
-            empty_counter: 0
+            name_vec: vec![],
+            chr_seq_iter: None,
+            empty_counter: 0,
+            name_vec_offset: 0
         }
     }
 }
 
 impl<'a> Iterator for GrangersSeqIter<'a> {
-    type Item = (String, anyhow::Result<Sequence>);
+    type Item = Record;
 
-    pub fn next(&self) -> Option<Self::Item> {
+    fn next(&self) -> Option<Self::Item> {
         // check if we currently have a chr_iter, if so 
         // yield the next element.  If not, then see if 
         // we can advance the record iterator and prepare 
         // the next chr_iter.
+        'top: loop {
 
-        if let Some(chr_iter) = self.chr_iter {
+            if let Some(chr_iter) = self.chr_seq_iter {
 
-        } else {
-            if let Some(record) = self.records.next() {
+                if let Some(chrsi_rec) = chr_iter.next() {
+                    let feat_name = self.name_vec[self.name_vec_offset];
+                    self.name_vec_offset += 1;
 
+                    if let Ok(sequence) = chrsi_rec {
+                        let definition = Definition::new(feat_name, None);
+                        return Some(Record::new(definition, sequence));
+                    } else {
+                        self.empty_counter += 1;
+                    }
+                } else {
+                    // here, the chr_iter was valid, but we have exhusted the 
+                    // chr_iter's iterator (i.e. it returned None). In this case 
+                    // we want to set the iterator Option for the chr_iter and 
+                    // name_vec to None and return whatever another call to 
+                    // next returns.
+                    self.chr_seq_iter = None;
+                    self.name_vec.clear();
+                    self.name_vec_offset = 0;
+                    break 'top;
+                }
             } else {
+
+                // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
+                // 1. subset the dataframe by the chromosome name
+                // 2. get the sequence of the features in the dataframe on that fasta record
+                // 3. yield the iterator over that data frame
+                while let Some(result) = self.records.next() {
+                    let record = result?;
+
+                    let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
+                    self.chr_gr = Some(self.essential_gr.filter(seqname, &[chr_name])?);
+
+                    let chr_gr = self.chr_gr.unwrap();
+
+                    if chr_gr.df().height() == 0 {
+                        self.chr_gr = None;
+                        continue;
+                    }
+
+                    self.name_vec = chr_gr
+                        .df()
+                        .column(name_column.as_str())?
+                        .utf8()?
+                        .into_iter()
+                        .map(|s| s.unwrap())
+                        .collect::<Vec<_>>();
+                    self.chr_seq_iter = Some(ChrRowSeqIter::new(&chr_gr, &record, oob_option)?);
+                    break;
+                }
+
+                // if we've now obtained a valid 
+                // chr_gr to iterate upon, then 
+                // go back to the top of the loop
+                // so we can yield the next element
+                if self_gr.is_some() {
+                    break 'top;
+                }
+
                 return None
             }
         }
-            /*
-        let feat_name = self.name_vec.unwrap().next();
-
-        if let Some(chrsi_rec) = self.chr_iter.unwrap().next() {
-
-            if let Ok(sequence) = chrsi_rec {
-                let definition = Definition::new(feat_name, None);
-
-                // we write if the sequence is not empty
-                writer
-                    .write_record(&Record::new(definition, sequence))
-                    .with_context(|| {
-                        format!(
-                            "Could not write sequence {} to the output file; Cannot proceed.",
-                            feat_name
-                        )
-                    })?;
-            } else {
-                empty_counter += 1;
-            }
-        }
-
-        if self.chr.is_none() {
-            self.chr = reader.next();
-        } 
-
-        if self.chr.is_none() {
-            return None;
-        }
-            */
-
-
-        // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
-        // 1. subset the dataframe by the chromosome name
-        // 2. get the sequence of the features in the dataframe on that fasta record
-        // 3. insert the sequence into the sequence vector according to the row order
-        for result in reader.records() {
-            let record = result?;
-
-            let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
-            let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
-
-            if chr_gr.df().height() == 0 {
-                continue;
-            }
-
-            let name_vec = chr_gr
-                .df()
-                .column(name_column.as_str())?
-                .utf8()?
-                .into_iter()
-                .map(|s| s.unwrap())
-                .collect::<Vec<_>>();
-
-            let chrsi = ChrRowSeqIter::new(&chr_gr, &record, oob_option)?;
-
-            for (feat_name, chrsi_rec) in name_vec.into_iter().zip(chrsi) {
-                if let Ok(sequence) = chrsi_rec {
-                    let definition = Definition::new(feat_name, None);
-
-                    // we write if the sequence is not empty
-                    writer
-                        .write_record(&Record::new(definition, sequence))
-                        .with_context(|| {
-                            format!(
-                                "Could not write sequence {} to the output file; Cannot proceed.",
-                                feat_name
-                            )
-                        })?;
-                } else {
-                    empty_counter += 1;
-                }
-            }
-        }
- 
+        None
     }
 }
 
@@ -2691,55 +2674,7 @@ impl Grangers {
         let seqname = seqname_s.as_str();
 
         let reader = std::fs::File::open(ref_path).map(BufReader::new)?;
-        let mut reader = noodles::fasta::Reader::new(reader);
-
-        let mut empty_counter = 0;
-
-        // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
-        // 1. subset the dataframe by the chromosome name
-        // 2. get the sequence of the features in the dataframe on that fasta record
-        // 3. insert the sequence into the sequence vector according to the row order
-        for result in reader.records() {
-            let record = result?;
-
-            let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
-            let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
-
-            if chr_gr.df().height() == 0 {
-                continue;
-            }
-
-            let name_vec = chr_gr
-                .df()
-                .column(name_column.as_str())?
-                .utf8()?
-                .into_iter()
-                .map(|s| s.unwrap())
-                .collect::<Vec<_>>();
-
-            let chrsi = ChrRowSeqIter::new(&chr_gr, &record, oob_option)?;
-
-            for (feat_name, chrsi_rec) in name_vec.into_iter().zip(chrsi) {
-                if let Ok(sequence) = chrsi_rec {
-                    let definition = Definition::new(feat_name, None);
-
-                    // we write if the sequence is not empty
-                    writer
-                        .write_record(&Record::new(definition, sequence))
-                        .with_context(|| {
-                            format!(
-                                "Could not write sequence {} to the output file; Cannot proceed.",
-                                feat_name
-                            )
-                        })?;
-                } else {
-                    empty_counter += 1;
-                }
-            }
-        }
-        if empty_counter > 0 {
-            warn!("Unable to extract sequence for {} records. They are usually caused by out of boundary features or an invalid alphabet.", empty_counter)
-        }
+        Ok(GrangersSeqIter::new(reader, essential_gr))
     }
 }
 
