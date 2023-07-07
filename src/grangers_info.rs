@@ -2510,10 +2510,18 @@ impl Grangers {
     }
 }
 
-struct GrangersSeqIter<'a> {
+pub struct GrangersFilterOpts {
+    seqname: String, 
+    name_column: String,
+    oob_option: OOBOption,
+}
+
+pub struct GrangersSeqIter<'a> {
     // where we are reading the reference 
     // sequences from (e.g. the chromosome)
-    chr_records: noodles::fasta::reader::Records<'a, BufReader<std::fs::File>>,
+    reader: noodles::fasta::reader::Reader<BufReader<std::fs::File>>,
+    curr_record: noodles::fasta::record::Record,
+    filt_opt: GrangersFilterOpts,
     essential_gr: Grangers,
     chr_gr: Option<Grangers>,
     name_vec: Vec<String>,
@@ -2523,11 +2531,16 @@ struct GrangersSeqIter<'a> {
 }
 
 impl<'a> GrangersSeqIter<'a> {
-    pub fn new(breader: BufReader<std::fs::File>, essential_gr: Grangers) -> Self {
-        let mut reader = noodles::fasta::Reader::new(breader);
+    pub fn new(breader: BufReader<std::fs::File>, filt_opt: GrangersFilterOpts, essential_gr: Grangers) -> Self {
+        let reader = noodles::fasta::Reader::new(breader);
+        let definition = Definition::new("empty", None);
+        let sequence = Sequence::from(b"A".to_vec());
+        let curr_record = fasta::Record::new(definition, sequence);
         GrangersSeqIter {
-            chr_records: reader.records(),
-            essential_gr,
+            reader,
+            curr_record,
+            filt_opt,
+            essential_gr,            
             chr_gr: None,
             name_vec: vec![],
             chr_seq_iter: None,
@@ -2537,20 +2550,21 @@ impl<'a> GrangersSeqIter<'a> {
     }
 }
 
-impl<'a> Iterator for GrangersSeqIter<'a> {
-    type Item = Record;
+impl<'a> GrangersSeqIter<'a> {
 
-    fn next(&self) -> Option<Self::Item> {
+    pub fn get_next_record<'b>(&'b mut self) -> Option<Record> 
+    where 'b: 'a {
+
         // check if we currently have a chr_iter, if so 
         // yield the next element.  If not, then see if 
         // we can advance the record iterator and prepare 
         // the next chr_iter.
         'top: loop {
 
-            if let Some(chr_iter) = self.chr_seq_iter {
+            if let Some(ref mut chr_iter) = &mut self.chr_seq_iter {
 
                 if let Some(chrsi_rec) = chr_iter.next() {
-                    let feat_name = self.name_vec[self.name_vec_offset];
+                    let feat_name = &self.name_vec[self.name_vec_offset];
                     self.name_vec_offset += 1;
 
                     if let Ok(sequence) = chrsi_rec {
@@ -2576,27 +2590,53 @@ impl<'a> Iterator for GrangersSeqIter<'a> {
                 // 1. subset the dataframe by the chromosome name
                 // 2. get the sequence of the features in the dataframe on that fasta record
                 // 3. yield the iterator over that data frame
-                while let Some(result) = self.records.next() {
-                    let record = result?;
+                loop {
+                    let mut buf = String::new();
+                    let def_bytes = self.reader.read_definition(&mut buf)
+                        .expect("GrangersSeqIter: could not read definition from reference file");
+                    // if we reached the end of the file, exhaust the iterator
+                    if def_bytes == 0 { return None; }
+                    let definition = noodles::fasta::record::Definition::new(buf, None);
 
-                    let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
-                    self.chr_gr = Some(self.essential_gr.filter(seqname, &[chr_name])?);
+                    let mut buf = Vec::<u8>::new();
+                    let seq_bytes = self.reader.read_sequence(&mut buf)
+                        .expect("GrangersSeqIter: could not read sequence from reference file");
+                    if seq_bytes == 0 { 
+                        warn!("GrangersSeqIter: was able to read record definition, but no sequence. This seems like a problem!");
+                        return None;
+                    }
+                    let sequence = noodles::fasta::record::sequence::Sequence::from(buf);
 
-                    let chr_gr = self.chr_gr.unwrap();
+                    // at this point we have the next sequence record
+                    self.curr_record = Record::new(definition, sequence);
 
-                    if chr_gr.df().height() == 0 {
+                    let chr_name = self.curr_record.name().strip_suffix(' ').unwrap_or(self.curr_record.name());
+                    self.chr_gr = Some(
+                        self.essential_gr.filter(
+                            self.filt_opt.seqname.clone(), 
+                            &[chr_name.to_string()]).expect("GrangersSeqIter: cannot filter essential_gr"),
+                    );
+
+                    if self.chr_gr.as_ref().unwrap().df().height() == 0 {
                         self.chr_gr = None;
                         continue;
                     }
 
-                    self.name_vec = chr_gr
+                    self.name_vec = self.chr_gr.as_ref().unwrap()
                         .df()
-                        .column(name_column.as_str())?
-                        .utf8()?
+                        .column(self.filt_opt.name_column.as_str())
+                        .expect("GrangersSeqIter: cannot get name_column")
+                        .utf8()
+                        .expect("GrangersSeqIter: cannot convert name_vec to utf8")
                         .into_iter()
-                        .map(|s| s.unwrap())
+                        .map(|s| s.unwrap().to_owned())
                         .collect::<Vec<_>>();
-                    self.chr_seq_iter = Some(ChrRowSeqIter::new(&chr_gr, &record, oob_option)?);
+                    self.chr_seq_iter = Some(
+                        ChrRowSeqIter::new(
+                            self.chr_gr.as_ref().unwrap(), 
+                            &self.curr_record, 
+                            self.filt_opt.oob_option).expect("cannot create ChrRowSeqIter")
+                    );
                     break;
                 }
 
@@ -2604,7 +2644,7 @@ impl<'a> Iterator for GrangersSeqIter<'a> {
                 // chr_gr to iterate upon, then 
                 // go back to the top of the loop
                 // so we can yield the next element
-                if self_gr.is_some() {
+                if self.chr_gr.is_some() {
                     break 'top;
                 }
 
@@ -2674,7 +2714,12 @@ impl Grangers {
         let seqname = seqname_s.as_str();
 
         let reader = std::fs::File::open(ref_path).map(BufReader::new)?;
-        Ok(GrangersSeqIter::new(reader, essential_gr))
+        let filt_opt = GrangersFilterOpts{
+            seqname: seqname.to_owned(),
+            name_column,
+            oob_option
+        };
+        Ok(GrangersSeqIter::new(reader, filt_opt, essential_gr))
     }
 }
 
