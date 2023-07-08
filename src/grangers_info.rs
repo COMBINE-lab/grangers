@@ -1649,7 +1649,7 @@ impl Grangers {
     ) -> anyhow::Result<()> {
         // let null_fn = 
         self.write_transcript_sequences_with_filter(
-            ref_path, out_file, exon_name, multithreaded, None::<fn(&noodles::fasta::Record)->bool>
+            ref_path, out_file, exon_name, multithreaded, &mut None::<fn(&noodles::fasta::Record)->bool>
         )
     }
 
@@ -1666,7 +1666,7 @@ impl Grangers {
         out_file: W,
         exon_name: Option<&str>,
         multithreaded: bool,
-        mut record_filter: Option<F>
+        record_filter: &mut Option<F>
     ) -> anyhow::Result<()> 
     where F: FnMut(&noodles::fasta::Record) -> bool {
 
@@ -1958,7 +1958,7 @@ impl Grangers {
         oob_option: OOBOption,
     ) -> anyhow::Result<()> {
         self.write_sequences_with_filter(
-            ref_path, out_file, ignore_strand, name_column, oob_option, None::<fn(&noodles::fasta::Record)->bool>
+            ref_path, out_file, ignore_strand, name_column, oob_option, &mut None::<fn(&noodles::fasta::Record)->bool>
         )
     }
 
@@ -1969,7 +1969,7 @@ impl Grangers {
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
-        mut record_filter: Option<F>
+        record_filter: &mut Option<F>
     ) -> anyhow::Result<()> 
     where F: FnMut(&noodles::fasta::Record)->bool {
 
