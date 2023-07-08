@@ -5,6 +5,8 @@ use crate::options::*;
 use crate::reader;
 use crate::reader::fasta::SeqInfo;
 use anyhow::{bail, Context};
+use std::io::Write;
+use std::ops::FnMut;
 use noodles::fasta;
 pub use noodles::fasta::record::{Definition, Record, Sequence};
 use polars::{lazy::prelude::*, prelude::*, series::Series};
@@ -1637,6 +1639,20 @@ impl Grangers {
 
 // implement get sequence functions for Grangers
 impl Grangers {
+
+    pub fn write_transcript_sequences<T: AsRef<Path>, W: Write>(
+        &mut self,
+        ref_path: T,
+        out_file: W,
+        exon_name: Option<&str>,
+        multithreaded: bool,
+    ) -> anyhow::Result<()> {
+        // let null_fn = 
+        self.write_transcript_sequences_with_filter(
+            ref_path, out_file, exon_name, multithreaded, None::<fn(&noodles::fasta::Record)->bool>
+        )
+    }
+
     /// Extract the transcript sequences in the Grangers object from the provided reference file.
     /// This function works only if the features are well defined:
     /// - Exon features cannot have a null "transcript_id".
@@ -1644,41 +1660,15 @@ impl Grangers {
     /// - The exons of a transcript should not overlap with each other.
     /// - Each value in the "seqname" column should represent a sequence in the reference file.
 
-    pub fn write_transcript_sequences<T: AsRef<Path>>(
+    pub fn write_transcript_sequences_with_filter<T: AsRef<Path>, W: Write, F>(
         &mut self,
         ref_path: T,
-        out_path: T,
+        out_file: W,
         exon_name: Option<&str>,
         multithreaded: bool,
-        append: bool,
-    ) -> anyhow::Result<()> {
-        let out_path = out_path.as_ref();
-
-        // if the file exists and append is true, we append to the file
-        let out_file = if out_path.try_exists()? && append {
-            std::fs::OpenOptions::new()
-                .append(true)
-                .open(out_path)
-                .with_context(|| {
-                    format!("Could not open the output file {:?}", out_path.as_os_str())
-                })?
-        } else {
-            // create the folder if it doesn't exist
-            fs::create_dir_all(out_path.parent().with_context(|| {
-                format!(
-                    "Could not get the parent directory of the given output file path {:?}",
-                    out_path.as_os_str()
-                )
-            })?)?;
-
-            // we prepare a fasta writer
-            std::fs::File::create(out_path).with_context(|| {
-                format!(
-                    "Could not create the output file {:?}",
-                    out_path.as_os_str()
-                )
-            })?
-        };
+        mut record_filter: Option<F>
+    ) -> anyhow::Result<()> 
+    where F: FnMut(&noodles::fasta::Record) -> bool {
 
         self.validate(false, true)?;
         // get exon_gr
@@ -1783,15 +1773,27 @@ impl Grangers {
                         // // if it is not the same, we create a Sequence and push it to seq_vec
                         let definition = Definition::new(curr_tx.clone(), None);
                         let sequence = Sequence::from_iter(exon_u8_vec.clone());
+                        let rec = &Record::new(definition, sequence);
 
-                        writer
-                            .write_record(&Record::new(definition, sequence))
-                            .with_context(|| {
-                                format!(
-                                "Could not write the sequence of transcript {} to the output file",
-                                curr_tx
-                            )
-                            })?;
+
+                        let write_record: bool;
+                        // call the callback if we have one
+                        if let Some(ref mut cb) = record_filter {
+                            write_record = cb(rec);
+                        } else {
+                            write_record = true;
+                        }
+
+                        if write_record {
+                            writer
+                                .write_record(rec)
+                                .with_context(|| {
+                                    format!(
+                                        "Could not write the sequence of transcript {} to the output file",
+                                        curr_tx
+                                    )
+                                })?;
+                        }
                         exon_u8_vec.clear();
                         exon_u8_vec.extend(seq.as_ref().iter());
                         // update the current transcript id
@@ -1947,42 +1949,29 @@ impl Grangers {
         Ok(())
     }
 
-    pub fn write_sequences<T: AsRef<Path>>(
+    pub fn write_sequences<T: AsRef<Path>, W: Write, F>(
         &mut self,
         ref_path: T,
-        out_path: T,
+        out_file: W,
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
-        append: bool,
     ) -> anyhow::Result<()> {
-        let out_path = out_path.as_ref();
+        self.write_sequences_with_filter(
+            ref_path, out_file, ignore_strand, name_column, oob_option, None::<fn(&noodles::fasta::Record)->bool>
+        )
+    }
 
-        // if the file exists and append is true, we append to the file
-        let out_file = if out_path.try_exists()? && append {
-            std::fs::OpenOptions::new()
-                .append(true)
-                .open(out_path)
-                .with_context(|| {
-                    format!("Could not open the output file {:?}", out_path.as_os_str())
-                })?
-        } else {
-            // create the folder if it doesn't exist
-            fs::create_dir_all(out_path.parent().with_context(|| {
-                format!(
-                    "Could not get the parent directory of the given output file path {:?}",
-                    out_path.as_os_str()
-                )
-            })?)?;
-
-            // we prepare a fasta writer
-            std::fs::File::create(out_path).with_context(|| {
-                format!(
-                    "Could not create the output file {:?}",
-                    out_path.as_os_str()
-                )
-            })?
-        };
+    pub fn write_sequences_with_filter<T: AsRef<Path>, W: Write, F>(
+        &mut self,
+        ref_path: T,
+        out_file: W,
+        ignore_strand: bool,
+        name_column: Option<&str>,
+        oob_option: OOBOption,
+        mut record_filter: Option<F>
+    ) -> anyhow::Result<()> 
+    where F: FnMut(&noodles::fasta::Record)->bool {
 
         self.validate(false, true)?;
 
@@ -2064,16 +2053,28 @@ impl Grangers {
             for (feat_name, chrsi_rec) in name_vec.into_iter().zip(chrsi) {
                 if let Ok(sequence) = chrsi_rec {
                     let definition = Definition::new(feat_name, None);
+                    let rec = &Record::new(definition, sequence);
 
-                    // we write if the sequence is not empty
-                    writer
-                        .write_record(&Record::new(definition, sequence))
-                        .with_context(|| {
-                            format!(
-                                "Could not write sequence {} to the output file; Cannot proceed.",
-                                feat_name
-                            )
-                        })?;
+                    let write_record: bool;
+                    // call the callback if we have one
+                    if let Some(ref mut cb) = record_filter {
+                        write_record = cb(rec);
+                    } else {
+                        write_record = true;
+                    }
+
+                    // we write if the sequence is not empty and 
+                    // it passes the filter (or there is no filter)
+                    if write_record {
+                        writer
+                            .write_record(rec)
+                            .with_context(|| {
+                                format!(
+                                    "Could not write sequence {} to the output file; Cannot proceed.",
+                                    feat_name
+                                )
+                            })?;
+                    }
                 } else {
                     empty_counter += 1;
                 }
