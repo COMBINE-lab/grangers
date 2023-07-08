@@ -1809,15 +1809,26 @@ impl Grangers {
             // // if it is not the same, we create a Sequence and push it to seq_vec
             let definition = Definition::new(curr_tx.clone(), None);
             let sequence = Sequence::from_iter(exon_u8_vec.clone());
+            let rec = &Record::new(definition, sequence);
 
-            writer
-                .write_record(&Record::new(definition, sequence))
-                .with_context(|| {
-                    format!(
-                        "Could not write the sequence of transcript {} to the output file",
-                        curr_tx
-                    )
-                })?;
+            let write_record: bool;
+            // call the callback if we have one
+            if let Some(ref mut cb) = record_filter {
+                write_record = cb(rec);
+            } else {
+                write_record = true;
+            }
+
+            if write_record {
+                writer
+                    .write_record(rec)
+                    .with_context(|| {
+                        format!(
+                            "Could not write the sequence of transcript {} to the output file",
+                            curr_tx
+                        )
+                    })?;
+            }
             exon_u8_vec.clear();
         }
 
