@@ -5,8 +5,6 @@ use crate::options::*;
 use crate::reader;
 use crate::reader::fasta::SeqInfo;
 use anyhow::{bail, Context};
-use std::io::Write;
-use std::ops::FnMut;
 use noodles::fasta;
 pub use noodles::fasta::record::{Definition, Record, Sequence};
 use polars::{lazy::prelude::*, prelude::*, series::Series};
@@ -14,6 +12,8 @@ use rust_lapper::{Interval, Lapper};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::BufReader;
+use std::io::Write;
+use std::ops::FnMut;
 use std::ops::{Add, Mul, Sub};
 use std::path::Path;
 use std::result::Result::Ok;
@@ -1639,7 +1639,6 @@ impl Grangers {
 
 // implement get sequence functions for Grangers
 impl Grangers {
-
     pub fn write_transcript_sequences<T: AsRef<Path>, W: Write>(
         &mut self,
         ref_path: T,
@@ -1647,9 +1646,13 @@ impl Grangers {
         exon_name: Option<&str>,
         multithreaded: bool,
     ) -> anyhow::Result<()> {
-        // let null_fn = 
+        // let null_fn =
         self.write_transcript_sequences_with_filter(
-            ref_path, out_file, exon_name, multithreaded, &mut None::<fn(&noodles::fasta::Record)->bool>
+            ref_path,
+            out_file,
+            exon_name,
+            multithreaded,
+            &mut None::<fn(&noodles::fasta::Record) -> bool>,
         )
     }
 
@@ -1666,10 +1669,11 @@ impl Grangers {
         out_file: W,
         exon_name: Option<&str>,
         multithreaded: bool,
-        record_filter: &mut Option<F>
-    ) -> anyhow::Result<()> 
-    where F: FnMut(&noodles::fasta::Record) -> bool {
-
+        record_filter: &mut Option<F>,
+    ) -> anyhow::Result<()>
+    where
+        F: FnMut(&noodles::fasta::Record) -> bool,
+    {
         self.validate(false, true)?;
         // get exon_gr
         // exons() ensures that all exon records are valid,
@@ -1775,7 +1779,6 @@ impl Grangers {
                         let sequence = Sequence::from_iter(exon_u8_vec.clone());
                         let rec = &Record::new(definition, sequence);
 
-
                         let write_record: bool;
                         // call the callback if we have one
                         if let Some(ref mut cb) = record_filter {
@@ -1820,14 +1823,12 @@ impl Grangers {
             }
 
             if write_record {
-                writer
-                    .write_record(rec)
-                    .with_context(|| {
-                        format!(
-                            "Could not write the sequence of transcript {} to the output file",
-                            curr_tx
-                        )
-                    })?;
+                writer.write_record(rec).with_context(|| {
+                    format!(
+                        "Could not write the sequence of transcript {} to the output file",
+                        curr_tx
+                    )
+                })?;
             }
             exon_u8_vec.clear();
         }
@@ -1969,7 +1970,12 @@ impl Grangers {
         oob_option: OOBOption,
     ) -> anyhow::Result<()> {
         self.write_sequences_with_filter(
-            ref_path, out_file, ignore_strand, name_column, oob_option, &mut None::<fn(&noodles::fasta::Record)->bool>
+            ref_path,
+            out_file,
+            ignore_strand,
+            name_column,
+            oob_option,
+            &mut None::<fn(&noodles::fasta::Record) -> bool>,
         )
     }
 
@@ -1980,10 +1986,11 @@ impl Grangers {
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
-        record_filter: &mut Option<F>
-    ) -> anyhow::Result<()> 
-    where F: FnMut(&noodles::fasta::Record)->bool {
-
+        record_filter: &mut Option<F>,
+    ) -> anyhow::Result<()>
+    where
+        F: FnMut(&noodles::fasta::Record) -> bool,
+    {
         self.validate(false, true)?;
 
         // if name is invalid, ignore
@@ -2074,17 +2081,15 @@ impl Grangers {
                         write_record = true;
                     }
 
-                    // we write if the sequence is not empty and 
+                    // we write if the sequence is not empty and
                     // it passes the filter (or there is no filter)
                     if write_record {
-                        writer
-                            .write_record(rec)
-                            .with_context(|| {
-                                format!(
-                                    "Could not write sequence {} to the output file; Cannot proceed.",
-                                    feat_name
-                                )
-                            })?;
+                        writer.write_record(rec).with_context(|| {
+                            format!(
+                                "Could not write sequence {} to the output file; Cannot proceed.",
+                                feat_name
+                            )
+                        })?;
                     }
                 } else {
                     empty_counter += 1;
