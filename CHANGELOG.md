@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/COMBINE-lab/grangers/compare/v0.1.4...v0.2.0) (2023-07-09)
+
+
+### Features
+
+* add filterable writers ([2f4890d](https://github.com/COMBINE-lab/grangers/commit/2f4890da23d817e5e3b66b8fbd162f71ef7c7b12))
+
+
+### Bug Fixes
+
+* format ([4cc41bd](https://github.com/COMBINE-lab/grangers/commit/4cc41bdf1e649afe121c66511373b9fa32e2282d))
+
 ## [0.1.4](https://github.com/COMBINE-lab/grangers/compare/v0.1.3...v0.1.4) (2023-06-13)
 
 
