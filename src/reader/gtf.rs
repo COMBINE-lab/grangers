@@ -1,4 +1,4 @@
-use crate::grangers::grangers_utils::{is_gzipped, FileFormat};
+use crate::grangers_utils::{is_gzipped, FileFormat};
 use anyhow;
 use flate2::bufread::GzDecoder;
 use noodles::{gff, gtf};

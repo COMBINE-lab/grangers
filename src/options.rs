@@ -3,6 +3,26 @@ use polars::prelude::DataFrame;
 use std::collections::HashSet;
 use tracing::warn;
 
+/// Inclusive interval used in Grangers
+pub struct InclusiveInterval {
+    pub start: u64,
+    pub end: u64,
+}
+
+pub enum Strand {
+    Positive,
+    Negative,
+}
+
+impl std::fmt::Display for Strand {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Strand::Positive => write!(f, "+"),
+            Strand::Negative => write!(f, "-"),
+        }
+    }
+}
+
 #[derive(Copy, Clone)]
 pub struct FlankOptions {
     pub start: bool,
@@ -250,6 +270,28 @@ impl FieldColumns {
             self.exon_number(),
         ]
     }
+    pub fn gtf_fields(&self) -> [&str; 8] {
+        [
+            self.seqname(),
+            self.source().unwrap_or(""),
+            self.feature_type().unwrap_or(""),
+            self.start(),
+            self.end(),
+            self.score().unwrap_or(""),
+            self.strand(),
+            self.phase().unwrap_or(""),
+        ]
+    }
+
+    pub fn gtf_attributes(&self) -> [Option<&str>; 4] {
+        [
+            self.gene_id(),
+            self.gene_name(),
+            self.transcript_id(),
+            self.exon_number(),
+        ]
+    }
+
     pub fn essential_fields(&self) -> [&str; 4] {
         [self.seqname(), self.start(), self.end(), self.strand()]
     }
