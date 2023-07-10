@@ -13,9 +13,11 @@ repository = "https://github.com/COMBINE-lab/grangers"
 homepage = "https://github.com/COMBINE-lab/grangers"
 include = [
   "/src/lib.rs",
-  "/src/grangers.rs",
-  "/src/grangers/*.rs",
-  "/src/grangers/reader/*.rs",
+  "/src/grangers_info.rs",
+  "/src/grangers_utils.rs",
+  "/src/options.rs",
+  "/src/reader.rs",
+  "/src/reader/*.rs",
   "/Cargo.toml",
   "/Cargo.lock",
   "/README.md",
