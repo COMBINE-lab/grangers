@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/COMBINE-lab/grangers/compare/v0.2.0...v0.2.1) (2023-07-10)
+
+
+### Bug Fixes
+
+* Fix cargo file ([cd17195](https://github.com/COMBINE-lab/grangers/commit/cd171953f70234d69f0f90aa1df22eda05b3364d))
+
 ## [0.2.0](https://github.com/COMBINE-lab/grangers/compare/v0.1.4...v0.2.0) (2023-07-09)
 
 
