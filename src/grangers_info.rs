@@ -2550,10 +2550,9 @@ impl<'a> GrangersSeqIter<'a> {
     }
 }
 
-impl<'a> GrangersSeqIter<'a> {
+impl<'a> Iterator for GrangersSeqIter<'a> {
 
-    pub fn get_next_record<'b>(&'b mut self) -> Option<Record> 
-    where 'b: 'a {
+    pub fn next(&'a mut self) -> Option<Record>{
 
         // check if we currently have a chr_iter, if so 
         // yield the next element.  If not, then see if 
