@@ -2645,6 +2645,7 @@ impl GrangersSeqIter {
 impl Iterator for GrangersSeqIter {
     type Item = Record;
 
+    #[allow(clippy::question_mark)]
     fn next(&mut self) -> Option<Self::Item> {
 
         loop {
@@ -2752,9 +2753,7 @@ impl Iterator for GrangersSeqIter {
 
                 // if we got to this point, and we weren't able to fill in 
                 // self.chr_seq_iter, then the iterator should be exhausted
-                if self.chr_seq_iter.is_none() { 
-                    return None;
-                }
+                if self.chr_seq_iter.is_none() { return None; }
             }
         }
     }
