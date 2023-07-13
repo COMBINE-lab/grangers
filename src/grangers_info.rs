@@ -2647,7 +2647,6 @@ impl Iterator for GrangersSeqIter {
 
     fn next(&mut self) -> Option<Self::Item> {
 
-        println!("hello world");
         loop {
             // check if the inner iterator exists and, if so, if we have 
             // elements to yield from it.
@@ -2666,7 +2665,6 @@ impl Iterator for GrangersSeqIter {
                 // go to the top of the loop.
                 self.chr_seq_iter = None;
             } else { 
-                println!("here else");
                 // in this branch, chr_seq_iter was None, so either we exhausted the previous
                 // inner iterator, or we haven't created it yet.
                 // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
@@ -2706,7 +2704,7 @@ impl Iterator for GrangersSeqIter {
                         .name()
                         .strip_suffix(' ')
                         .unwrap_or(self.seq_record.name());
-                    println!("chr_name : {}", chr_name);
+
                     self.chr_gr = Some(
                         self.essential_gr
                             .filter(self.filt_opt.seqname.clone(), &[chr_name.to_string()])
@@ -2714,12 +2712,9 @@ impl Iterator for GrangersSeqIter {
                     );
 
                     if self.chr_gr.as_ref().unwrap().df().height() == 0 {
-                        println!("empty! had chr_gr with height {}", self.chr_gr.as_ref().unwrap().df().height());
                         self.chr_gr = None;
                         continue;
-                    } else {
-                        println!("had chr_gr with height {}", self.chr_gr.as_ref().unwrap().df().height());
-                    }
+                    } 
 
                     self.name_vec_iter = self
                         .chr_gr
