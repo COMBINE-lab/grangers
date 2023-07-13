@@ -2611,10 +2611,15 @@ pub struct GrangersSeqIter {
     seq_record: noodles::fasta::Record,
     // the filter options that will be applied
     filt_opt: GrangersFilterOpts,
-    // 
+    // the iterator over the names of the sequences 
+    // we need to extract.
     name_vec_iter: <Vec<String> as IntoIterator>::IntoIter,
-    //
+    // the "inner" iterator that iterates over the sequence 
+    // features of an individual target.
     chr_seq_iter: Option<ChrRowSeqIter<'static>>,
+    // local buffer to hold the sequence definition 
+    // string.
+    def_buffer: String,
 }
 
 use core::pin::Pin;
@@ -2638,6 +2643,7 @@ impl GrangersSeqIter {
             filt_opt,
             name_vec_iter: v.into_iter(),
             chr_seq_iter: None,
+            def_buffer: String::new()
         })
     }
 }
@@ -2673,29 +2679,32 @@ impl Iterator for GrangersSeqIter {
                 // 2. get the sequence of the features in the dataframe on that fasta record
                 // 3. yield the iterator over that data frame
                 loop {
-                    let mut buf = String::new();
+                    self.def_buffer.clear();
                     let def_bytes = self
                         .seq_reader
-                        .read_definition(&mut buf)
+                        .read_definition(&mut self.def_buffer)
                         .expect("GrangersSeqIter: could not read definition from reference file");
+
                     // if we reached the end of the file, exhaust the outer iterator
                     if def_bytes == 0 {
                         return None;
                     }
-                    //HACK
-                    let buf = buf.strip_prefix('>').unwrap_or("").split_whitespace().next().unwrap_or("");
-                    let definition = noodles::fasta::record::Definition::new(buf, None);
 
-                    let mut buf = Vec::<u8>::new();
+                    let definition = match self.def_buffer.parse() {
+                        Ok(d) => d,
+                        Err(e) => panic!("could not parse sequence definition: error {}", e)
+                    };
+
+                    let mut seq_buffer = Vec::<u8>::new();
                     let seq_bytes = self
                         .seq_reader
-                        .read_sequence(&mut buf)
+                        .read_sequence(&mut seq_buffer)
                         .expect("GrangersSeqIter: could not read sequence from reference file");
                     if seq_bytes == 0 {
                         warn!("GrangersSeqIter: was able to read record definition, but no sequence. This seems like a problem!");
                         return None;
                     }
-                    let sequence = noodles::fasta::record::sequence::Sequence::from(buf);
+                    let sequence = noodles::fasta::record::sequence::Sequence::from(seq_buffer);
 
                     // at this point we have the next sequence record
                     self.seq_record = Record::new(definition, sequence);
