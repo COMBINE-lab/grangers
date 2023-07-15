@@ -43,4 +43,4 @@ peak_alloc = "0.2.0"
 bedrs = "0.0.26"
 rust-lapper = "1.1.0"
 clap = { version = "4.3.11", features = ["derive", "cargo", "deprecated", "wrap_help", "help", "usage", "error-context"] } 
-next-gen = "0.1.1"
+lazy_static = "1.4.0"

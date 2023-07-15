@@ -5,6 +5,7 @@ use crate::options::*;
 use crate::reader;
 use crate::reader::fasta::SeqInfo;
 use anyhow::{bail, Context};
+use lazy_static::lazy_static;
 use noodles::fasta;
 pub use noodles::fasta::record::{Definition, Record, Sequence};
 use polars::{lazy::prelude::*, prelude::*, series::Series};
@@ -17,8 +18,16 @@ use std::ops::FnMut;
 use std::ops::{Add, Mul, Sub};
 use std::path::Path;
 use std::result::Result::Ok;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tracing::debug;
 use tracing::{info, warn};
+
+// we give each grangers struct a unique
+// program identifier which is the order in
+// which it was created.
+lazy_static! {
+    static ref GRANGERS_COUNTER: AtomicU32 = AtomicU32::new(0);
+}
 
 type LapperType = Lapper<u64, (usize, Vec<String>)>;
 
@@ -47,6 +56,10 @@ pub struct Grangers {
     pub interval_type: IntervalType,
     /// The name of the columns that are used to identify the genomic features
     pub field_columns: FieldColumns,
+    /// The global grangers id assigned to this frame
+    pub global_id: u32,
+    /// The "version" of this frame (how many modifications it's undergone)
+    pub version: u32,
 }
 
 // IO
@@ -131,6 +144,8 @@ impl Grangers {
             df.with_column(df.column(field_columns.end()).unwrap() - interval_type.end_offset())?;
         }
 
+        let gid = GRANGERS_COUNTER.fetch_add(1, Ordering::SeqCst);
+
         // instantiate a new Grangers struct
         let gr = Grangers {
             df,
@@ -138,6 +153,8 @@ impl Grangers {
             seqinfo,
             interval_type,
             field_columns,
+            global_id: gid,
+            version: 0,
         };
 
         // validate
@@ -182,6 +199,7 @@ impl Grangers {
                 df_vec.push(s);
             }
         }
+
         let df = DataFrame::new(df_vec)?;
         let gr = Grangers::new(
             df,
@@ -389,6 +407,13 @@ impl Grangers {
             self.field_columns().clone(),
             true,
         )
+    }
+
+    /// get the process-unique signature of this
+    /// grangers dataframe.
+    pub fn signature(&self) -> u64 {
+        let res = self.global_id as u64;
+        (res << 32) | (self.version as u64)
     }
 }
 
