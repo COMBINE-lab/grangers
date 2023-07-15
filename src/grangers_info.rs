@@ -461,6 +461,10 @@ impl Grangers {
     pub fn get_signature(&self) -> u64 {
         self.signature
     }
+
+    fn set_signature(&mut self, other_sig: u64) {
+        self.signature = other_sig;
+    }
 }
 
 impl Grangers {
@@ -1975,7 +1979,8 @@ impl Grangers {
 
         fc.fix(&df, false)?;
 
-        let essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        let mut essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        essential_gr.set_signature(self.get_signature());
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
 
@@ -2104,7 +2109,8 @@ impl Grangers {
 
         fc.fix(&df, false)?;
 
-        let essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        let mut essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        essential_gr.set_signature(self.get_signature());
 
         let seqname_s = essential_gr.get_column_name("seqname", true)?;
         let seqname = seqname_s.as_str();
@@ -2354,7 +2360,8 @@ impl Grangers {
 
         fc.fix(&df, false)?;
 
-        let essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        let mut essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        essential_gr.set_signature(self.get_signature());
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
 
@@ -2462,7 +2469,9 @@ impl Grangers {
         // we only use a subset of the columns, so fix fc
         fc.fix(&df, false)?;
 
-        let essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        let mut essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        essential_gr.set_signature(self.get_signature());
+
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
         let mut reader = std::fs::File::open(ref_path)
             .map(BufReader::new)
@@ -2589,7 +2598,9 @@ impl Grangers {
         // we only use a subset of the columns, so fix fc
         fc.fix(&df, false)?;
 
-        let essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        let mut essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        essential_gr.set_signature(self.get_signature());
+
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
         let reader = std::fs::File::open(ref_path).map(BufReader::new)?;
         let filt_opt = GrangersFilterOpts {
@@ -2728,7 +2739,7 @@ impl GrangersSeqIter {
 }
 
 impl Iterator for GrangersSeqIter {
-    type Item = (u32, Record);
+    type Item = (GrangersRecordID, Record);
 
     #[allow(clippy::question_mark)]
     fn next(&mut self) -> Option<Self::Item> {
@@ -2743,7 +2754,7 @@ impl Iterator for GrangersSeqIter {
                 ) {
                     if let Ok(sequence) = chr_seq_rec {
                         return Some((
-                            row_idx,
+                            GrangersRecordID::new(row_idx),
                             Record::new(Definition::new(feat_name, None), sequence),
                         ));
                     }
