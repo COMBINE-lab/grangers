@@ -28,11 +28,12 @@ fn test_iterator() -> anyhow::Result<()> {
 
     println!("total records collected by iterator = {}", svec.len());
 
-    let mut rvec: Vec<Record> = gr
-        .get_sequences(fa, false, Some(&gene_id_s), options::OOBOption::Truncate)?
-        .into_iter()
-        .flatten()
-        .collect();
+    let grangers::GrangersSequenceCollection {
+        records: seq_vec,
+        signature: _,
+    } = gr.get_sequences(fa, false, Some(&gene_id_s), options::OOBOption::Truncate)?;
+
+    let mut rvec: Vec<Record> = seq_vec.into_iter().map(|x| x.1).collect();
 
     println!("total records collected by get_sequences = {}", rvec.len());
 

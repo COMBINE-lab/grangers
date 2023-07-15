@@ -44,3 +44,4 @@ bedrs = "0.0.26"
 rust-lapper = "1.1.0"
 clap = { version = "4.3.11", features = ["derive", "cargo", "deprecated", "wrap_help", "help", "usage", "error-context"] } 
 lazy_static = "1.4.0"
+nutype = "0.3.1"

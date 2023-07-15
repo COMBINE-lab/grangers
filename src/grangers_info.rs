@@ -8,12 +8,14 @@ use anyhow::{bail, Context};
 use lazy_static::lazy_static;
 use noodles::fasta;
 pub use noodles::fasta::record::{Definition, Record, Sequence};
+use nutype::nutype;
 use polars::{lazy::prelude::*, prelude::*, series::Series};
 use rust_lapper::{Interval, Lapper};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::BufReader;
 use std::io::Write;
+use std::iter::IntoIterator;
 use std::ops::FnMut;
 use std::ops::{Add, Mul, Sub};
 use std::path::Path;
@@ -30,6 +32,50 @@ lazy_static! {
 }
 
 type LapperType = Lapper<u64, (usize, Vec<String>)>;
+
+#[nutype]
+#[derive(*)]
+pub struct GrangersRecordID(u32);
+
+pub struct GrangersSequenceCollection {
+    pub records: Vec<(GrangersRecordID, Record)>,
+    pub signature: u64,
+}
+
+impl GrangersSequenceCollection {
+    pub fn new_with_signature_and_capacity(signature: u64, capacity: usize) -> Self {
+        GrangersSequenceCollection {
+            records: Vec::<(GrangersRecordID, Record)>::with_capacity(capacity),
+            signature,
+        }
+    }
+
+    pub fn add_record(&mut self, rec_id: GrangersRecordID, rec: Record) {
+        self.records.push((rec_id, rec));
+    }
+
+    pub fn records_iter(&self) -> std::slice::Iter<'_, (GrangersRecordID, Record)> {
+        self.records.iter()
+    }
+
+    pub fn records_iter_mut(&mut self) -> std::slice::IterMut<'_, (GrangersRecordID, Record)> {
+        self.records.iter_mut()
+    }
+
+    /* -- this would induce a move of self, which makes the collection essentially
+     * useless afterward. If the user want's to have an IntoIter over the records, they
+     * should destructure the seq collection.
+     */
+    /*
+    pub fn records_into_iter(self) -> std::vec::IntoIter<(GrangersRecordID, Record)> {
+        self.records.into_iter()
+    }
+    */
+
+    pub fn get_signature(&self) -> u64 {
+        self.signature
+    }
+}
 
 // GTF files are 1-based with closed intervals.
 /// The Grangers struct contains the following fields:
@@ -56,10 +102,12 @@ pub struct Grangers {
     pub interval_type: IntervalType,
     /// The name of the columns that are used to identify the genomic features
     pub field_columns: FieldColumns,
-    /// The global grangers id assigned to this frame
-    pub global_id: u32,
-    /// The "version" of this frame (how many modifications it's undergone)
-    pub version: u32,
+    /// The global (process-unique) signature assigned to this
+    /// grangers struct. It is a u64 where the upper 32-bits
+    /// assign each grangers struct a distinct (sequential) number
+    /// at construction, and the lower 32-bits are a version field that
+    /// is incremented upon each mutating operation of the frame.
+    pub signature: u64,
 }
 
 // IO
@@ -144,7 +192,7 @@ impl Grangers {
             df.with_column(df.column(field_columns.end()).unwrap() - interval_type.end_offset())?;
         }
 
-        let gid = GRANGERS_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let gid = GRANGERS_COUNTER.fetch_add(1, Ordering::SeqCst) as u64;
 
         // instantiate a new Grangers struct
         let gr = Grangers {
@@ -153,8 +201,7 @@ impl Grangers {
             seqinfo,
             interval_type,
             field_columns,
-            global_id: gid,
-            version: 0,
+            signature: (gid << 32),
         };
 
         // validate
@@ -411,9 +458,8 @@ impl Grangers {
 
     /// get the process-unique signature of this
     /// grangers dataframe.
-    pub fn signature(&self) -> u64 {
-        let res = self.global_id as u64;
-        (res << 32) | (self.version as u64)
+    pub fn get_signature(&self) -> u64 {
+        self.signature
     }
 }
 
@@ -2373,7 +2419,7 @@ impl Grangers {
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
-    ) -> anyhow::Result<Vec<Option<Record>>> {
+    ) -> anyhow::Result<GrangersSequenceCollection> {
         self.validate(false, true)?;
 
         // if name is invalid, ignore
@@ -2423,7 +2469,11 @@ impl Grangers {
             .map(noodles::fasta::Reader::new)?;
         // let mut reader = noodles::fasta::Reader::new(reader);
 
-        let mut seq_vec: Vec<Option<Record>> = vec![None; essential_gr.df().height()];
+        let sig = essential_gr.get_signature();
+        let num_rec = essential_gr.df().height();
+        let mut seq_coll =
+            GrangersSequenceCollection::new_with_signature_and_capacity(sig, num_rec);
+        let mut empty_counter = 0_usize;
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
         // 1. subset the dataframe by the chromosome name
@@ -2468,7 +2518,9 @@ impl Grangers {
                     Err(e) => {
                         warn!("Failed to get sequence for feature {} at row {}. The error message was {:?}", feat_name, idx, e);
 
-                        seq_vec[idx as usize] = None;
+                        // don't add anything to the sequence
+                        // collection in this case
+                        empty_counter += 1;
                         continue;
                     }
                 };
@@ -2476,17 +2528,16 @@ impl Grangers {
                 let definition = Definition::new(feat_name, None);
                 let record = Record::new(definition, sequence);
 
-                seq_vec[idx as usize] = Some(record);
+                //seq_vec[idx as usize] = Some(record);
+                // add this to the sequence collection
+                seq_coll.add_record(GrangersRecordID::new(idx), record);
             }
         }
 
-        let empty_counter: usize = seq_vec
-            .iter()
-            .fold(0usize, |acc, s| acc + s.is_none() as usize);
         if empty_counter > 0 {
             warn!("Unable to extract sequence for {} records. They are usually caused by out of boundary features or an invalid alphabet.", empty_counter)
         }
-        Ok(seq_vec)
+        Ok(seq_coll)
     }
 
     pub fn iter_sequences<T: AsRef<Path>>(
