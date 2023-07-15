@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+use crate::grangers_info::{Grangers, GrangersSequenceCollection};
+
 pub(crate) const VALIDSTRANDS: [&str; 2] = ["+", "-"];
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -177,3 +179,25 @@ impl IntervalType {
         }
     }
 }
+
+// --- Grangers struct related utility functionality 
+
+/*
+pub struct TestIter<'a, 'b> {
+    grangers: &'a Grangers,
+    seq_coll: &'b GrangersSequenceCollection
+}
+
+impl<'a, 'b> Iterator for TestIter<'a, 'b> {
+    type Item = (polars::frame::DataFrame::)
+}
+
+impl Grangers {
+    pub fn iter_with_sequences<'a, 'b>(&'a self, seq_collection: &'b GrangersSequenceCollection) -> TestIter<'a, 'b>{
+        TestIter {
+            grangers: &self,
+            seq_coll: seq_collection
+        }
+    }
+}
+*/
