@@ -434,7 +434,7 @@ impl Grangers {
 
     /// sort the dataframe
     pub fn sort_df_by<T>(&mut self, by: &[&str], descending: Vec<bool>) -> anyhow::Result<()> {
-        self.df.sort(by, descending)?;
+        self.df.sort(by, descending, false /*force stable sort*/)?;
         Ok(())
     }
 
@@ -1207,6 +1207,7 @@ impl Grangers {
                                 .arg_sort(SortOptions {
                                     descending: false,
                                     nulls_last: false,
+                                    maintain_order: false,
                                     multithreaded,
                                 })
                                 .add(lit(1)),
@@ -1216,6 +1217,7 @@ impl Grangers {
                                 .arg_sort(SortOptions {
                                     descending: true,
                                     nulls_last: false,
+                                    maintain_order: false,
                                     multithreaded,
                                 })
                                 .add(lit(1)),
@@ -1397,7 +1399,10 @@ impl Grangers {
         df = df
             .lazy()
             // TODO: This can be replaced by select([all().sort(essentials).over(groups)]). Not sure if it is faster
-            .sort_by_exprs(&sorted_by_exprs, &sorted_by_desc, false)
+            .sort_by_exprs(&sorted_by_exprs, &sorted_by_desc, 
+                false /*nulls last*/, 
+                false /*force stable sort*/
+            )
             .groupby(by.iter().map(|s| col(s)).collect::<Vec<Expr>>())
             .agg([
                 all().exclude([start, end]).first(),
@@ -1447,7 +1452,10 @@ impl Grangers {
                 all().exclude([seqname, start, end, strand]),
             ])
             // groupby is multithreaded, so the order do not preserve
-            .sort_by_exprs(sorted_by_exprs, sorted_by_desc, false)
+            .sort_by_exprs(sorted_by_exprs, sorted_by_desc, 
+                false /*nulls last*/, 
+                false /*force stable sort*/
+            )
             .collect()?;
 
         Ok(df)
