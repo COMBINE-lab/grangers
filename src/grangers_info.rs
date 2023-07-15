@@ -110,12 +110,20 @@ pub struct Grangers {
     pub signature: u64,
 }
 
+impl Grangers {
+    #[inline(always)]
+    fn inc_signature(&mut self) {
+        self.signature += 1;
+    }
+}
+
 // IO
 impl Grangers {
     /// add or replace a column in the dataframe
     // TODO: use this in the unstranded case
     pub fn add_column<T: SeriesTrait>(&mut self, series: Series) -> anyhow::Result<()> {
         self.df.with_column(series)?;
+        self.inc_signature();
         Ok(())
     }
 
@@ -144,6 +152,10 @@ impl Grangers {
             }
         }
 
+        // TODO : @DongzeHE - what is the purpose of the below line?
+        // the `drop_nulls` function returns a new dataframe with the
+        // nulls removed, so all this does is check if we can unwrap
+        // the result of calling `drop_nulls` on this dataframe.
         df.drop_nulls(Some(&["start", "end"]))?;
         if (any_nulls) & is_bail {
             let fields_str = fields.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
@@ -289,6 +301,7 @@ impl Grangers {
         Ok(())
     }
 
+    /// returns a *copy* of the inner dataframe containing the relevant GTF information
     pub fn get_gtf_df<T: AsRef<Path>>(&self, _file_path: T) -> anyhow::Result<DataFrame> {
         // get a copy of the dataframe
         let df = self.df();
@@ -362,6 +375,8 @@ impl Grangers {
         Ok(out_df)
     }
 
+    /// Write the inner dataframe of this Grangers object to the file path
+    /// `file_path` as a GTF file.
     pub fn write_gtf<T: AsRef<Path>>(&self, file_path: T) -> anyhow::Result<()> {
         let file_path = file_path.as_ref();
 
@@ -407,7 +422,7 @@ impl Grangers {
         Ok(self.field_columns())
     }
 
-    /// get the reference of the underlying dataframe
+    /// get a shared reference to the underlying dataframe
     pub fn df(&self) -> &DataFrame {
         &self.df
     }
@@ -1399,9 +1414,11 @@ impl Grangers {
         df = df
             .lazy()
             // TODO: This can be replaced by select([all().sort(essentials).over(groups)]). Not sure if it is faster
-            .sort_by_exprs(&sorted_by_exprs, &sorted_by_desc, 
-                false /*nulls last*/, 
-                false /*force stable sort*/
+            .sort_by_exprs(
+                &sorted_by_exprs,
+                &sorted_by_desc,
+                false, /*nulls last*/
+                false, /*force stable sort*/
             )
             .groupby(by.iter().map(|s| col(s)).collect::<Vec<Expr>>())
             .agg([
@@ -1452,9 +1469,11 @@ impl Grangers {
                 all().exclude([seqname, start, end, strand]),
             ])
             // groupby is multithreaded, so the order do not preserve
-            .sort_by_exprs(sorted_by_exprs, sorted_by_desc, 
-                false /*nulls last*/, 
-                false /*force stable sort*/
+            .sort_by_exprs(
+                sorted_by_exprs,
+                sorted_by_desc,
+                false, /*nulls last*/
+                false, /*force stable sort*/
             )
             .collect()?;
 
