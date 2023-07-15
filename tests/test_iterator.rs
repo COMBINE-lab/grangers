@@ -1,12 +1,11 @@
+use anyhow;
 use grangers::{options, Grangers};
+use noodles::fasta::record::Record;
 use std::path::Path;
 use std::pin::Pin;
-use noodles::fasta::record::Record;
-use anyhow;
 
 #[test]
 fn test_iterator() -> anyhow::Result<()> {
-
     let gtf = Path::new("data/refdata-gex-GRCh38-2020-A/genes/genes_small.gtf");
     let fa = Path::new("data/refdata-gex-GRCh38-2020-A/fasta/genome.fa");
 
@@ -20,7 +19,7 @@ fn test_iterator() -> anyhow::Result<()> {
     let siter = gr.iter_sequences(fa, false, Some(&gene_id_s), options::OOBOption::Truncate)?;
 
     // Is this safe?
-    let mut svec: Vec<Record> = Pin::into_inner(siter).collect();
+    let mut svec: Vec<Record> = Pin::into_inner(siter).map(|x| x.1).collect();
 
     // could also do this
     //while let Some(r) = siter.next() {
@@ -29,18 +28,19 @@ fn test_iterator() -> anyhow::Result<()> {
 
     println!("total records collected by iterator = {}", svec.len());
 
-    let mut rvec: Vec<Record> = gr.get_sequences(fa, false, Some(&gene_id_s), options::OOBOption::Truncate)?
+    let mut rvec: Vec<Record> = gr
+        .get_sequences(fa, false, Some(&gene_id_s), options::OOBOption::Truncate)?
         .into_iter()
         .flatten()
         .collect();
 
     println!("total records collected by get_sequences = {}", rvec.len());
 
-    // the iterator version and the eager function call should return 
-    // equivalent sequences modulo order. Thus, after sorting, they 
+    // the iterator version and the eager function call should return
+    // equivalent sequences modulo order. Thus, after sorting, they
     // should compare as equal.
-    svec.sort_unstable_by_key( |x| x.name().to_owned() );
-    rvec.sort_unstable_by_key( |x| x.name().to_owned() );
+    svec.sort_unstable_by_key(|x| x.name().to_owned());
+    rvec.sort_unstable_by_key(|x| x.name().to_owned());
 
     assert_eq!(svec, rvec);
 
