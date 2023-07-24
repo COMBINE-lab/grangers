@@ -9,6 +9,7 @@ use noodles::fasta;
 pub use noodles::fasta::record::{Definition, Record, Sequence};
 use polars::{lazy::prelude::*, prelude::*, series::Series};
 use rust_lapper::{Interval, Lapper};
+// use tracing::field;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::BufReader;
@@ -51,15 +52,12 @@ pub struct Grangers {
 
 // IO
 impl Grangers {
-    /// add or replace a column in the dataframe
-    // TODO: use this in the unstranded case
-    pub fn add_column<T: SeriesTrait>(&mut self, series: Series) -> anyhow::Result<()> {
-        self.df.with_column(series)?;
-        Ok(())
-    }
-
-    /// check if the essential fields contain null values
-    /// Each value in fields should either be a column name or a field of the FieldColumns struct
+    /// check if the provided fields/columns contain null values.
+    /// Each value in fields should either be a column name or a field of the FieldColumns struct.
+    /// This function takes three arguments:
+    /// - fields: the fields/columns to be checked
+    /// - is_warn: whether to return a warning if there are null values in the provided fields
+    /// - is_bail: whether to return an error if there are null values in the provided fields
     pub fn any_nulls<T: AsRef<str>>(
         &self,
         fields: &[T],
@@ -83,7 +81,6 @@ impl Grangers {
             }
         }
 
-        df.drop_nulls(Some(&["start", "end"]))?;
         if (any_nulls) & is_bail {
             let fields_str = fields.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
             bail!("The dataframe contains null values in the given fields -- {:?}. You can drop null values by calling `df.drop_nulls(Some(&{:?}))`", fields_str,fields_str);
@@ -103,10 +100,9 @@ impl Grangers {
     /// Instantiate a new Grangers struct according to
     /// - a range dataframe that contain the ranges of the genomic features
     /// - an optional SeqInfo struct contains the reference information (usually chromosome)
-    /// - an optional HashMap<String, Vec<String>>> contains additional information.
-    /// - an optional Lapper interval tree
-    /// - an optional IntervalType representing the coordinate system and interval type of the ranges. If passing None, the default
-    /// The datafram should contain the ranges of the genomic features, and the SeqInfo struct should contain the chromosome sizes. The  
+    /// - an optional hashmap containing additional information like metadata.
+    /// - an optional IntervalType representing the coordinate system and interval type of the ranges. If passing None, the default type, 1-based inclusive, will be used.
+    /// - an optional FieldColumns struct that defines the name of the field columns in the dataframe that are used to identify the genomic features. If passing None, the default FieldColumns struct will be used.
     pub fn new(
         mut df: DataFrame,
         seqinfo: Option<SeqInfo>,
@@ -146,6 +142,8 @@ impl Grangers {
         Ok(gr)
     }
 
+    /// Build the Grangers struct from a GStruct object.
+    /// This function takes a GStruct object and an IntervalType object as input.
     pub fn from_gstruct(
         gstruct: reader::GStruct,
         interval_type: IntervalType,
@@ -219,12 +217,13 @@ impl Grangers {
     }
 
     /// add seqinfo to the Grangers struct according to a fasta file
+    // TODO: add the part about making/taking and checking the seqinfo
     pub fn add_seqinfo<T: AsRef<Path>>(&mut self, genome_file: T) -> anyhow::Result<()> {
         self.seqinfo = Some(SeqInfo::from_fasta(genome_file)?);
         Ok(())
     }
-
-    pub fn get_gtf_df<T: AsRef<Path>>(&self, _file_path: T) -> anyhow::Result<DataFrame> {
+    /// convert the Grangers struct to a dataframe that follows the GTF format. For exporting the Grangers struct to a GTF file, you can use the `GRangers::write_gtf()` method.
+    pub fn get_gtf_df(&self) -> anyhow::Result<DataFrame> {
         // get a copy of the dataframe
         let df = self.df();
         let mut fc = self.field_columns.clone();
@@ -308,7 +307,7 @@ impl Grangers {
             )
         })?)?;
 
-        let mut out_df = self.get_gtf_df(file_path)?;
+        let mut out_df = self.get_gtf_df()?;
 
         let mut file = std::fs::File::create(file_path)?;
         CsvWriter::new(&mut file)
@@ -323,16 +322,17 @@ impl Grangers {
 
 // get struct fields
 impl Grangers {
-    /// get the reference of the field_columns
+    /// get an immutable reference of the field_columns
     pub fn field_columns(&self) -> &FieldColumns {
         &self.field_columns
     }
 
-    /// get the mutable reference of the field_columns
+    /// get a mutable reference of the field_columns
     pub fn field_columns_mut(&mut self) -> &FieldColumns {
         &mut self.field_columns
     }
 
+    // check the validity of the field_columns and return a reference to it
     pub fn field_columns_checked(
         &self,
         is_warn: bool,
@@ -347,32 +347,40 @@ impl Grangers {
         &self.df
     }
 
-    /// get the interval type
+    /// get a mutable reference to the underlying dataframe
+    pub fn df_mut(&mut self) -> &mut DataFrame {
+        &mut self.df
+    }
+    
+    /// get an immutable reference to the underlying interval_type struct
     pub fn interval_type(&self) -> &IntervalType {
         &self.interval_type
     }
 
-    /// get the reference of the seqinfo
+    /// get an immutable reference to the the underlying seqinfo struct
     pub fn seqinfo(&self) -> Option<&SeqInfo> {
         self.seqinfo.as_ref()
     }
 
-    /// get the mutable reference of the underlying dataframe
-    pub fn df_mut(&mut self) -> &mut DataFrame {
-        &mut self.df
-    }
-
-    /// get the mutable reference to the seqinfo
+    /// get a mutable reference to the seqinfo
     pub fn seqinfo_mut(&mut self) -> Option<&mut SeqInfo> {
         self.seqinfo.as_mut()
     }
 
-    /// sort the dataframe
-    pub fn sort_df_by<T>(&mut self, by: &[&str], descending: Vec<bool>) -> anyhow::Result<()> {
-        self.df.sort(by, descending)?;
+
+    /// sort the dataframe by the given field/column name(s)
+    /// This function takes two arguments:
+    /// - by: the field/column name(s) to sort by. The field/column name(s) should be either a column name or a field of the FieldColumns struct.
+    /// - descending: bool values indicating whether to sort the corresponding field/column in descending order for each provided by value.
+    pub fn sort_by<T>(&mut self, by: &[&str], descending: impl IntoVec<bool>) -> anyhow::Result<()> {
+        self.df = self.df.sort(by, descending)?;
         Ok(())
     }
 
+    /// filter the records in the GRangers struct by the given field/column name according to the given values
+    /// This function takes two arguments:
+    /// - by: the field/column name to filter by. The field/column name should be either a column name or a field of the FieldColumns struct.
+    /// - values: the values to filter by. In the returned GRangers struct, only the records whose value in the given field/column matches the provided values will be kept.
     pub fn filter<T: AsRef<str>>(&self, by: T, values: &[T]) -> anyhow::Result<Grangers> {
         let column = self.get_column_name(by.as_ref(), false)?;
         let df = self
@@ -381,6 +389,10 @@ impl Grangers {
                 "values",
                 values.iter().map(|s| s.as_ref()).collect::<Vec<&str>>(),
             ))?)?;
+        
+        if df.is_empty() {
+            warn!("The filtered dataframe is empty.")
+        }
         Grangers::new(
             df,
             self.seqinfo().cloned(),
@@ -389,6 +401,56 @@ impl Grangers {
             self.field_columns().clone(),
             true,
         )
+    }
+    /// updates an existing or add a new column in the Grangers struct
+    /// ### Parameters:
+    /// - `column`: the Series object that will be used to update the Grangers struct
+    /// - `field_column`: The name of a `FieldColumns` field that this new column is associated with. If it is Some, the corresponding field in the `FieldColumns` will be updated with the name of the new column (Please make sure that the name you provided is a valid field of `FieldColumns`).  If it is None, the `FieldColumns` will not be updated, which means the column is either not associated with any field column, or its name (Series.name()) matches the value of a field in the current `FieldColumns` object of the `Grangers`. 
+    pub fn update_column(&mut self, column: Series, field_column: Option<&str>) -> anyhow::Result<()> {
+        // first we warn if there are null values in the column
+        if column.null_count() > 0 {
+            warn!("The provided Series object contains {} null values. This might cause problems when calling Grangers methods.", column.null_count());
+        }
+
+        // if a field_column is provided, we update the field_columns object
+        if let Some(field_column) = field_column {
+            self.field_columns.update(field_column.as_ref(), column.name())?;
+        }
+
+        let name = column.name().to_owned();
+        self.df.with_column(column).with_context(|| {
+            format!(
+                "Could not update Grangers with the provided Series object: {:?}", name
+            )
+        })?;
+
+        self.validate(true, false)?;
+        Ok(())
+    }
+
+    /// updates the underlying dataframe.
+    /// ### Parameters:
+    /// - `df`: the new dataframe
+    /// - `field_columns`: (Optional) the new field_columns
+    /// This function will replace the current Grnagers' dataframe with the provided one, and update the field_columns if it is provided. This function assumes that the provided dataframe has the same layout as the current dataframe but with some values updated. If the provided dataframe has a different layout, you should use `Grangers::new()` to instantiate a new Grangers struct.
+    pub fn update_dataframe(&mut self, df: DataFrame) -> anyhow::Result<()> {
+        // check if the dataframe has the same layout as the current one
+        if df.shape() != self.df.shape() {
+            bail!("The provided dataframe has a different layout as the current one. Please use Grangers::new() to instantiate a new Grangers struct.")
+        }
+
+        // check if the dataframes have the same column nake
+        let self_columns = self.df.get_column_names();
+        let new_columns = df.get_column_names();
+
+        if !self_columns.iter().all(|item: &&str| new_columns.contains(item)) {
+            bail!("The provided dataframe have different column names as the current one. Please use Grangers::new() to instantiate a new Grangers struct.")
+        }
+
+        self.df = df;
+        self.validate(true, false)?;
+        
+        Ok(())
     }
 }
 
@@ -4099,7 +4161,7 @@ mod tests {
             println!("gr1: {:?}", gr.df());
         }
 
-        let gtf_df = gr.get_gtf_df("a_fake_file").unwrap();
+        let gtf_df = gr.get_gtf_df().unwrap();
 
         if SAY {
             println!("gtf_df: {:?}", gtf_df);
@@ -4188,5 +4250,113 @@ mod tests {
 
         let chr1p_o = chr1p.find(10, 15);
         assert!(chr1p_o.count() == 1);
+    }
+
+    #[test]
+    fn test_update_column() {
+        let df = df!(
+            "seqname" => ["chr1", "chr1", "chr1", "chr2", "chr2", "chr2", "chr2"],
+            "feature_type" => ["exon", "exon", "exon", "exon", "exon", "exon", "exon"],
+            "start" => [1i64, 21, -5, 1, 51, 1, 51],
+            "end" => [10i64, 30, 5, 100, 150, 100, 150],
+            "strand"=> ["+", "+", "+", "+", "+", "-", "-"],
+            "gene_id" => ["g1", "g1", "g1", "g2", "g2", "g2", "g2"],
+        )
+        .unwrap();
+
+        // build grangers
+        let mut gr = Grangers::new(
+            df,
+            None,
+            None,
+            IntervalType::Inclusive(1),
+            FieldColumns::default(),
+            false,
+        )
+        .unwrap();
+
+        if SAY {
+            println!("gr1: {:?}", gr.df());
+        }
+
+        // update a non-field column
+        let new_col = Series::new("new_col", &[1i64, 2, 3, 4, 5, 6, 7]);
+        gr.update_column(new_col.clone(), None).unwrap();
+        assert_eq!(gr.column("new_col").unwrap(), &new_col);
+
+        // update an existing field column of the same name
+        let gene_id_col = Series::new("gene_id", &["g", "g", "g", "g", "g", "g", "g"]);
+        gr.update_column(gene_id_col.clone(), None).unwrap();
+        assert_eq!(
+            gr.column("gene_id").unwrap(),
+            &gene_id_col
+        );
+
+        // update an existing field column with a different name
+        let gene_id_col = Series::new("gene_id_new", &["g", "g", "g", "g", "g", "g", "g"]);
+
+        gr.update_column(gene_id_col.clone(), Some("gene_id")).unwrap();
+
+        assert_eq!(gr.field_columns().gene_id(), Some("gene_id_new"));
+
+        assert_eq!(gr.column(gr.field_columns().gene_id().unwrap()).unwrap(), &gene_id_col);
+    }
+
+    #[test]
+    fn test_update_dataframe() {
+        let df = df!(
+            "seqname" => ["chr1", "chr1", "chr1", "chr2", "chr2", "chr2", "chr2"],
+            "feature_type" => ["exon", "exon", "exon", "exon", "exon", "exon", "exon"],
+            "start" => [1i64, 21, -5, 1, 51, 1, 51],
+            "end" => [10i64, 30, 5, 100, 150, 100, 150],
+            "strand"=> ["+", "+", "+", "+", "+", "-", "-"],
+            "gene_id" => ["g1", "g1", "g1", "g2", "g2", "g2", "g2"],
+        )
+        .unwrap();
+
+        // build grangers
+        let mut gr: Grangers = Grangers::new(
+            df,
+            None,
+            None,
+            IntervalType::Inclusive(1),
+            FieldColumns::default(),
+            false,
+        )
+        .unwrap();
+
+        if SAY {
+            println!("gr1: {:?}", gr.df());
+        }
+
+        // first check if the dataframe can be updated
+        let df1 = df!(
+            "seqname" => ["chr1111", "chr1", "chr1", "chr2", "chr2", "chr2", "chr2"],
+            "feature_type" => ["exon", "exon", "exon", "exon", "exon", "exon", "exon"],
+            "start" => [1i64, 21, -5, 1, 51, 1, 51],
+            "end" => [10i64, 30, 5, 100, 150, 100, 150],
+            "strand"=> ["+", "+", "+", "+", "+", "-", "-"],
+            "gene_id" => ["g1", "g1", "g1", "g2", "g2", "g2", "g2"],
+        )
+        .unwrap();
+
+        gr.update_dataframe(df1.clone()).unwrap();
+        assert_eq!(gr.df(), &df1);
+        
+        // Then we check if we will get error if the new dataframe is unexpected.
+        assert!(gr.clone().update_dataframe(DataFrame::default()).is_err());
+                // first check if the dataframe can be updated
+        let df2 = df!(
+            "seqname" => ["chr1111", "chr1", "chr1", "chr2", "chr2", "chr2", "chr2"],
+            "feature_type" => ["exon", "exon", "exon", "exon", "exon", "exon", "exon"],
+            "start" => [1i64, 21, -5, 1, 51, 1, 51],
+            "end" => [10i64, 30, 5, 100, 150, 100, 150],
+            "strand"=> ["+", "+", "+", "+", "+", "-", "-"],
+            "gene_iddddddd" => ["g1", "g1", "g1", "g2", "g2", "g2", "g2"],
+        )
+        .unwrap();
+
+        assert!(gr.update_dataframe(df2).is_err());
+
     }
 }
