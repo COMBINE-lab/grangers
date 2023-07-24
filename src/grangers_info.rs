@@ -447,8 +447,10 @@ impl Grangers {
     /// This function takes two arguments:
     /// - by: the field/column name(s) to sort by. The field/column name(s) should be either a column name or a field of the FieldColumns struct.
     /// - descending: bool values indicating whether to sort the corresponding field/column in descending order for each provided by value.
-    pub fn sort_by<T>(&mut self, by: &[&str], descending: impl IntoVec<bool>) -> anyhow::Result<()> {
-        self.df = self.df.sort(by, descending)?;
+    /// - maintain_order: whether to maintain the order of the dataframe. If it is true, the order of the dataframe will be maintained if the values in the given field/column are the same. If it is false, the order of the dataframe will be arbitrary if the values in the given field/column are the same.
+    pub fn sort_by<T>(&mut self, by: &[&str], descending: impl IntoVec<bool>, maintain_order: bool) -> anyhow::Result<()> {
+        self.df = self.df.sort(by, descending, maintain_order)?;
+        self.inc_signature();
         Ok(())
     }
 
@@ -478,6 +480,16 @@ impl Grangers {
         )
     }
 
+    /// get the process-unique signature of this
+    /// grangers dataframe.
+    pub fn get_signature(&self) -> u64 {
+        self.signature
+    }
+
+    fn set_signature(&mut self, other_sig: u64) {
+        self.signature = other_sig
+    }
+
     /// updates an existing or add a new column in the Grangers struct
     /// ### Parameters:
     /// - `column`: the Series object that will be used to update the Grangers struct
@@ -501,6 +513,7 @@ impl Grangers {
         })?;
 
         self.validate(true, false)?;
+        self.inc_signature();
         Ok(())
     }
 
@@ -525,17 +538,10 @@ impl Grangers {
 
         self.df = df;
         self.validate(true, false)?;
-        
-    /// get the process-unique signature of this
-    /// grangers dataframe.
-    pub fn get_signature(&self) -> u64 {
-        self.signature
-    }
-
-    fn set_signature(&mut self, other_sig: u64) {
-        self.signature = other_sig;
+        self.inc_signature();
         Ok(())
     }
+        
 }
 
 impl Grangers {
@@ -4681,7 +4687,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update_dataframe() {
+    fn test_update_df() {
         let df = df!(
             "seqname" => ["chr1", "chr1", "chr1", "chr2", "chr2", "chr2", "chr2"],
             "feature_type" => ["exon", "exon", "exon", "exon", "exon", "exon", "exon"],
@@ -4718,11 +4724,11 @@ mod tests {
         )
         .unwrap();
 
-        gr.update_dataframe(df1.clone()).unwrap();
+        gr.update_df(df1.clone()).unwrap();
         assert_eq!(gr.df(), &df1);
         
         // Then we check if we will get error if the new dataframe is unexpected.
-        assert!(gr.clone().update_dataframe(DataFrame::default()).is_err());
+        assert!(gr.clone().update_df(DataFrame::default()).is_err());
                 // first check if the dataframe can be updated
         let df2 = df!(
             "seqname" => ["chr1111", "chr1", "chr1", "chr2", "chr2", "chr2", "chr2"],
@@ -4734,7 +4740,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(gr.update_dataframe(df2).is_err());
+        assert!(gr.update_df(df2).is_err());
 
     }
 }
