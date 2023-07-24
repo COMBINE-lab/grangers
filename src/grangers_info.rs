@@ -5,8 +5,10 @@ use crate::options::*;
 use crate::reader;
 use crate::reader::fasta::SeqInfo;
 use anyhow::{bail, Context};
+use lazy_static::lazy_static;
 use noodles::fasta;
 pub use noodles::fasta::record::{Definition, Record, Sequence};
+use nutype::nutype;
 use polars::{lazy::prelude::*, prelude::*, series::Series};
 use rust_lapper::{Interval, Lapper};
 // use tracing::field;
@@ -14,14 +16,67 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::BufReader;
 use std::io::Write;
+use std::iter::IntoIterator;
 use std::ops::FnMut;
 use std::ops::{Add, Mul, Sub};
 use std::path::Path;
 use std::result::Result::Ok;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tracing::debug;
 use tracing::{info, warn};
 
+// we give each grangers struct a unique
+// program identifier which is the order in
+// which it was created.
+lazy_static! {
+    static ref GRANGERS_COUNTER: AtomicU32 = AtomicU32::new(0);
+}
+
 type LapperType = Lapper<u64, (usize, Vec<String>)>;
+
+#[nutype]
+#[derive(*)]
+pub struct GrangersRecordID(u32);
+
+pub struct GrangersSequenceCollection {
+    pub records: Vec<(GrangersRecordID, Record)>,
+    pub signature: u64,
+}
+
+impl GrangersSequenceCollection {
+    pub fn new_with_signature_and_capacity(signature: u64, capacity: usize) -> Self {
+        GrangersSequenceCollection {
+            records: Vec::<(GrangersRecordID, Record)>::with_capacity(capacity),
+            signature,
+        }
+    }
+
+    pub fn add_record(&mut self, rec_id: GrangersRecordID, rec: Record) {
+        self.records.push((rec_id, rec));
+    }
+
+    pub fn records_iter(&self) -> std::slice::Iter<'_, (GrangersRecordID, Record)> {
+        self.records.iter()
+    }
+
+    pub fn records_iter_mut(&mut self) -> std::slice::IterMut<'_, (GrangersRecordID, Record)> {
+        self.records.iter_mut()
+    }
+
+    /* -- this would induce a move of self, which makes the collection essentially
+     * useless afterward. If the user want's to have an IntoIter over the records, they
+     * should destructure the seq collection.
+     */
+    /*
+    pub fn records_into_iter(self) -> std::vec::IntoIter<(GrangersRecordID, Record)> {
+        self.records.into_iter()
+    }
+    */
+
+    pub fn get_signature(&self) -> u64 {
+        self.signature
+    }
+}
 
 // GTF files are 1-based with closed intervals.
 /// The Grangers struct contains the following fields:
@@ -48,6 +103,19 @@ pub struct Grangers {
     pub interval_type: IntervalType,
     /// The name of the columns that are used to identify the genomic features
     pub field_columns: FieldColumns,
+    /// The global (process-unique) signature assigned to this
+    /// grangers struct. It is a u64 where the upper 32-bits
+    /// assign each grangers struct a distinct (sequential) number
+    /// at construction, and the lower 32-bits are a version field that
+    /// is incremented upon each mutating operation of the frame.
+    pub signature: u64,
+}
+
+impl Grangers {
+    #[inline(always)]
+    fn inc_signature(&mut self) {
+        self.signature += 1;
+    }
 }
 
 // IO
@@ -58,6 +126,7 @@ impl Grangers {
     /// - fields: the fields/columns to be checked
     /// - is_warn: whether to return a warning if there are null values in the provided fields
     /// - is_bail: whether to return an error if there are null values in the provided fields
+
     pub fn any_nulls<T: AsRef<str>>(
         &self,
         fields: &[T],
@@ -127,6 +196,8 @@ impl Grangers {
             df.with_column(df.column(field_columns.end()).unwrap() - interval_type.end_offset())?;
         }
 
+        let gid = GRANGERS_COUNTER.fetch_add(1, Ordering::SeqCst) as u64;
+
         // instantiate a new Grangers struct
         let gr = Grangers {
             df,
@@ -134,6 +205,7 @@ impl Grangers {
             seqinfo,
             interval_type,
             field_columns,
+            signature: (gid << 32),
         };
 
         // validate
@@ -180,6 +252,7 @@ impl Grangers {
                 df_vec.push(s);
             }
         }
+
         let df = DataFrame::new(df_vec)?;
         let gr = Grangers::new(
             df,
@@ -222,7 +295,8 @@ impl Grangers {
         self.seqinfo = Some(SeqInfo::from_fasta(genome_file)?);
         Ok(())
     }
-    /// convert the Grangers struct to a dataframe that follows the GTF format. For exporting the Grangers struct to a GTF file, you can use the `GRangers::write_gtf()` method.
+
+  /// convert the Grangers struct to a dataframe that follows the GTF format. For exporting the Grangers struct to a GTF file, you can use the `GRangers::write_gtf()` method.
     pub fn get_gtf_df(&self) -> anyhow::Result<DataFrame> {
         // get a copy of the dataframe
         let df = self.df();
@@ -296,6 +370,8 @@ impl Grangers {
         Ok(out_df)
     }
 
+    /// Write the inner dataframe of this Grangers object to the file path
+    /// `file_path` as a GTF file.
     pub fn write_gtf<T: AsRef<Path>>(&self, file_path: T) -> anyhow::Result<()> {
         let file_path = file_path.as_ref();
 
@@ -342,7 +418,7 @@ impl Grangers {
         Ok(self.field_columns())
     }
 
-    /// get the reference of the underlying dataframe
+    /// get a shared reference to the underlying dataframe
     pub fn df(&self) -> &DataFrame {
         &self.df
     }
@@ -366,7 +442,6 @@ impl Grangers {
     pub fn seqinfo_mut(&mut self) -> Option<&mut SeqInfo> {
         self.seqinfo.as_mut()
     }
-
 
     /// sort the dataframe by the given field/column name(s)
     /// This function takes two arguments:
@@ -402,6 +477,7 @@ impl Grangers {
             true,
         )
     }
+
     /// updates an existing or add a new column in the Grangers struct
     /// ### Parameters:
     /// - `column`: the Series object that will be used to update the Grangers struct
@@ -433,7 +509,7 @@ impl Grangers {
     /// - `df`: the new dataframe
     /// - `field_columns`: (Optional) the new field_columns
     /// This function will replace the current Grnagers' dataframe with the provided one, and update the field_columns if it is provided. This function assumes that the provided dataframe has the same layout as the current dataframe but with some values updated. If the provided dataframe has a different layout, you should use `Grangers::new()` to instantiate a new Grangers struct.
-    pub fn update_dataframe(&mut self, df: DataFrame) -> anyhow::Result<()> {
+    pub fn update_df(&mut self, df: DataFrame) -> anyhow::Result<()> {
         // check if the dataframe has the same layout as the current one
         if df.shape() != self.df.shape() {
             bail!("The provided dataframe has a different layout as the current one. Please use Grangers::new() to instantiate a new Grangers struct.")
@@ -450,6 +526,14 @@ impl Grangers {
         self.df = df;
         self.validate(true, false)?;
         
+    /// get the process-unique signature of this
+    /// grangers dataframe.
+    pub fn get_signature(&self) -> u64 {
+        self.signature
+    }
+
+    fn set_signature(&mut self, other_sig: u64) {
+        self.signature = other_sig;
         Ok(())
     }
 }
@@ -1194,6 +1278,7 @@ impl Grangers {
                                 .arg_sort(SortOptions {
                                     descending: false,
                                     nulls_last: false,
+                                    maintain_order: false,
                                     multithreaded,
                                 })
                                 .add(lit(1)),
@@ -1203,6 +1288,7 @@ impl Grangers {
                                 .arg_sort(SortOptions {
                                     descending: true,
                                     nulls_last: false,
+                                    maintain_order: false,
                                     multithreaded,
                                 })
                                 .add(lit(1)),
@@ -1384,7 +1470,12 @@ impl Grangers {
         df = df
             .lazy()
             // TODO: This can be replaced by select([all().sort(essentials).over(groups)]). Not sure if it is faster
-            .sort_by_exprs(&sorted_by_exprs, &sorted_by_desc, false)
+            .sort_by_exprs(
+                &sorted_by_exprs,
+                &sorted_by_desc,
+                false, /*nulls last*/
+                false, /*force stable sort*/
+            )
             .groupby(by.iter().map(|s| col(s)).collect::<Vec<Expr>>())
             .agg([
                 all().exclude([start, end]).first(),
@@ -1434,7 +1525,12 @@ impl Grangers {
                 all().exclude([seqname, start, end, strand]),
             ])
             // groupby is multithreaded, so the order do not preserve
-            .sort_by_exprs(sorted_by_exprs, sorted_by_desc, false)
+            .sort_by_exprs(
+                sorted_by_exprs,
+                sorted_by_desc,
+                false, /*nulls last*/
+                false, /*force stable sort*/
+            )
             .collect()?;
 
         Ok(df)
@@ -1966,7 +2062,8 @@ impl Grangers {
 
         fc.fix(&df, false)?;
 
-        let essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        let mut essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        essential_gr.set_signature(self.get_signature());
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
 
@@ -2095,7 +2192,8 @@ impl Grangers {
 
         fc.fix(&df, false)?;
 
-        let essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        let mut essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        essential_gr.set_signature(self.get_signature());
 
         let seqname_s = essential_gr.get_column_name("seqname", true)?;
         let seqname = seqname_s.as_str();
@@ -2345,7 +2443,8 @@ impl Grangers {
 
         fc.fix(&df, false)?;
 
-        let essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        let mut essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        essential_gr.set_signature(self.get_signature());
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
 
@@ -2410,7 +2509,7 @@ impl Grangers {
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
-    ) -> anyhow::Result<Vec<Option<Record>>> {
+    ) -> anyhow::Result<GrangersSequenceCollection> {
         self.validate(false, true)?;
 
         // if name is invalid, ignore
@@ -2453,14 +2552,20 @@ impl Grangers {
         // we only use a subset of the columns, so fix fc
         fc.fix(&df, false)?;
 
-        let essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        let mut essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        essential_gr.set_signature(self.get_signature());
+
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
         let mut reader = std::fs::File::open(ref_path)
             .map(BufReader::new)
             .map(noodles::fasta::Reader::new)?;
         // let mut reader = noodles::fasta::Reader::new(reader);
 
-        let mut seq_vec: Vec<Option<Record>> = vec![None; essential_gr.df().height()];
+        let sig = essential_gr.get_signature();
+        let num_rec = essential_gr.df().height();
+        let mut seq_coll =
+            GrangersSequenceCollection::new_with_signature_and_capacity(sig, num_rec);
+        let mut empty_counter = 0_usize;
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
         // 1. subset the dataframe by the chromosome name
@@ -2505,7 +2610,9 @@ impl Grangers {
                     Err(e) => {
                         warn!("Failed to get sequence for feature {} at row {}. The error message was {:?}", feat_name, idx, e);
 
-                        seq_vec[idx as usize] = None;
+                        // don't add anything to the sequence
+                        // collection in this case
+                        empty_counter += 1;
                         continue;
                     }
                 };
@@ -2513,17 +2620,79 @@ impl Grangers {
                 let definition = Definition::new(feat_name, None);
                 let record = Record::new(definition, sequence);
 
-                seq_vec[idx as usize] = Some(record);
+                //seq_vec[idx as usize] = Some(record);
+                // add this to the sequence collection
+                seq_coll.add_record(GrangersRecordID::new(idx), record);
             }
         }
 
-        let empty_counter: usize = seq_vec
-            .iter()
-            .fold(0usize, |acc, s| acc + s.is_none() as usize);
         if empty_counter > 0 {
             warn!("Unable to extract sequence for {} records. They are usually caused by out of boundary features or an invalid alphabet.", empty_counter)
         }
-        Ok(seq_vec)
+        Ok(seq_coll)
+    }
+
+    pub fn iter_sequences<T: AsRef<Path>>(
+        &mut self,
+        ref_path: T,
+        ignore_strand: bool,
+        name_column: Option<&str>,
+        oob_option: OOBOption,
+    ) -> anyhow::Result<Pin<Box<GrangersSeqIter>>> {
+        self.validate(false, true)?;
+
+        // if name is invalid, ignore
+        let name_column = if let Some(name_column) = name_column {
+            if self.get_column_name_str(name_column, true).is_ok() {
+                self.get_column_name(name_column, false)?
+            } else {
+                warn!("The provided name column {:?} for naming the extracted sequences is not in the dataframe. Row order will will be used instead.", name_column);
+                "row_order".to_owned()
+            }
+        } else {
+            info!("No name column is provided. The extracted sequences will be named by the row order.");
+            "row_order".to_owned()
+        };
+
+        let mut fc = self.field_columns().clone();
+        // we need to map the sequence back to the original row order of the dataframe
+        // So, we need to have a minimum copy of the dataset, which contains only the essential fields,
+        // and add one more column representing the row order of the original dataframe
+        let selection = [
+            fc.seqname(),
+            fc.start(),
+            fc.end(),
+            fc.strand(),
+            name_column.as_str(),
+        ];
+
+        let df = self
+            .df
+            .select(selection)?
+            .lazy()
+            .with_row_count("row_order", None)
+            .with_column(if ignore_strand {
+                lit("+").alias("strand")
+            } else {
+                col("strand")
+            })
+            .collect()?;
+
+        // we only use a subset of the columns, so fix fc
+        fc.fix(&df, false)?;
+
+        let mut essential_gr = Grangers::new(df, None, None, IntervalType::default(), fc, false)?;
+        essential_gr.set_signature(self.get_signature());
+
+        let seqname = essential_gr.get_column_name_str("seqname", true)?;
+        let reader = std::fs::File::open(ref_path).map(BufReader::new)?;
+        let filt_opt = GrangersFilterOpts {
+            seqname: seqname.to_owned(),
+            name_column,
+            oob_option,
+        };
+
+        Ok(GrangersSeqIter::new(reader, filt_opt, essential_gr))
     }
 
     /// Get the sequences of the intervals from one fasta record.
@@ -2585,6 +2754,215 @@ impl Grangers {
             }
         }
         Ok(seq_vec)
+    }
+}
+
+pub struct GrangersFilterOpts {
+    seqname: String,
+    name_column: String,
+    oob_option: OOBOption,
+}
+
+pub struct GrangersSeqIter {
+    // the essential grangers struct holding
+    // the required fields across *all* of the
+    // target sequences
+    essential_gr: Grangers,
+    // the filtered Grangers struct that
+    // contains only the features for the
+    // current target
+    chr_gr: Option<Grangers>,
+    // a noodles Fasta reader for reading the
+    // target sequences
+    seq_reader: noodles::fasta::Reader<std::io::BufReader<std::fs::File>>,
+    // the current seq record
+    seq_record: noodles::fasta::Record,
+    // the filter options that will be applied
+    filt_opt: GrangersFilterOpts,
+    // the iterator over the names of the sequences
+    // we need to extract.
+    name_vec_iter: <Vec<String> as IntoIterator>::IntoIter,
+    // the iterator over the row order (row indices) of
+    // the sequences we need to extract.
+    row_order_iter: <Vec<u32> as IntoIterator>::IntoIter,
+    // the "inner" iterator that iterates over the sequence
+    // features of an individual target.
+    chr_seq_iter: Option<ChrRowSeqIter<'static>>,
+    // local buffer to hold the sequence definition
+    // string.
+    def_buffer: String,
+}
+
+use core::pin::Pin;
+
+impl GrangersSeqIter {
+    pub fn new(
+        breader: std::io::BufReader<std::fs::File>,
+        filt_opt: GrangersFilterOpts,
+        essential_gr: Grangers,
+    ) -> Pin<Box<Self>> {
+        let reader = noodles::fasta::Reader::new(breader);
+        let definition = Definition::new("empty", None);
+        let sequence = Sequence::from(b"A".to_vec());
+        let curr_record = fasta::Record::new(definition, sequence);
+        let v: Vec<String> = vec![];
+        let o: Vec<u32> = vec![];
+        Box::pin(GrangersSeqIter {
+            essential_gr,
+            chr_gr: None,
+            seq_reader: reader,
+            seq_record: curr_record,
+            filt_opt,
+            name_vec_iter: v.into_iter(),
+            row_order_iter: o.into_iter(),
+            chr_seq_iter: None,
+            def_buffer: String::new(),
+        })
+    }
+}
+
+impl Iterator for GrangersSeqIter {
+    type Item = (GrangersRecordID, Record);
+
+    #[allow(clippy::question_mark)]
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // check if the inner iterator exists and, if so, if we have
+            // elements to yield from it.
+            if let Some(ref mut chr_seq_iter) = self.chr_seq_iter {
+                if let (Some(chr_seq_rec), Some(feat_name), Some(row_idx)) = (
+                    chr_seq_iter.next(),
+                    self.name_vec_iter.next(),
+                    self.row_order_iter.next(),
+                ) {
+                    if let Ok(sequence) = chr_seq_rec {
+                        return Some((
+                            GrangersRecordID::new(row_idx),
+                            Record::new(Definition::new(feat_name, None), sequence),
+                        ));
+                    }
+                    // if we don't have a sequence (this was empty), we want to go to the next
+                    // iteration of this loop immediately.
+                    continue;
+                }
+                // NOTE: we should assert somewhere that `chr_seq_iter` and `name_vec_iter` have
+                // the same size. Mostly make sense only if they have exact size hints.
+                // If we exhausted the iterator, then we want to set the chr_seq_iter to none and
+                // go to the top of the loop.
+                self.chr_seq_iter = None;
+            } else {
+                // in this branch, chr_seq_iter was None, so either we exhausted the previous
+                // inner iterator, or we haven't created it yet.
+                // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
+                // 1. subset the dataframe by the chromosome name
+                // 2. get the sequence of the features in the dataframe on that fasta record
+                // 3. yield the iterator over that data frame
+                loop {
+                    self.def_buffer.clear();
+                    let def_bytes = self
+                        .seq_reader
+                        .read_definition(&mut self.def_buffer)
+                        .expect("GrangersSeqIter: could not read definition from reference file");
+
+                    // if we reached the end of the file, exhaust the outer iterator
+                    if def_bytes == 0 {
+                        return None;
+                    }
+
+                    let definition = match self.def_buffer.parse() {
+                        Ok(d) => d,
+                        Err(e) => panic!("could not parse sequence definition: error {}", e),
+                    };
+
+                    let mut seq_buffer = Vec::<u8>::new();
+                    let seq_bytes = self
+                        .seq_reader
+                        .read_sequence(&mut seq_buffer)
+                        .expect("GrangersSeqIter: could not read sequence from reference file");
+                    if seq_bytes == 0 {
+                        warn!("GrangersSeqIter: was able to read record definition, but no sequence. This seems like a problem!");
+                        return None;
+                    }
+                    let sequence = noodles::fasta::record::sequence::Sequence::from(seq_buffer);
+
+                    // at this point we have the next sequence record
+                    self.seq_record = Record::new(definition, sequence);
+
+                    let chr_name = self
+                        .seq_record
+                        .name()
+                        .strip_suffix(' ')
+                        .unwrap_or(self.seq_record.name());
+
+                    self.chr_gr = Some(
+                        self.essential_gr
+                            .filter(self.filt_opt.seqname.clone(), &[chr_name.to_string()])
+                            .expect("GrangersSeqIter: cannot filter essential_gr"),
+                    );
+
+                    if self.chr_gr.as_ref().unwrap().df().height() == 0 {
+                        self.chr_gr = None;
+                        continue;
+                    }
+
+                    self.name_vec_iter = self
+                        .chr_gr
+                        .as_ref()
+                        .unwrap()
+                        .df()
+                        .column(self.filt_opt.name_column.as_str())
+                        .expect("GrangersSeqIter: cannot get name_column")
+                        .utf8()
+                        .expect("GrangersSeqIter: cannot convert name_vec to utf8")
+                        .into_iter()
+                        .map(|s| s.unwrap().to_owned())
+                        .collect::<Vec<_>>()
+                        .into_iter();
+
+                    self.row_order_iter = self
+                        .chr_gr
+                        .as_ref()
+                        .unwrap()
+                        .df()
+                        .column("row_order")
+                        .expect("GrangersSeqIter: cannot get row_order column")
+                        .u32()
+                        .expect("GrangerSeqIter: cannot convert row_order entries to u32")
+                        .into_iter()
+                        .map(|s| {
+                            s.expect("Could not get row order. Please report this bug on GitHub.")
+                        })
+                        .collect::<Vec<_>>()
+                        .into_iter();
+
+                    // convert the reference to a static reference
+                    // this is generally highly unsafe and can lead to
+                    // use after frees, but if chr_seq_iter is never moved out
+                    // of this struct it shold be ok
+                    // also we must use Pin on the struct so that the references
+                    // are never invalidated
+                    let ref_grangers = unsafe {
+                        core::mem::transmute::<&Grangers, &'static Grangers>(
+                            self.chr_gr.as_ref().unwrap(),
+                        )
+                    };
+                    let ref_record = unsafe {
+                        core::mem::transmute::<&Record, &'static Record>(&self.seq_record)
+                    };
+                    self.chr_seq_iter = Some(
+                        ChrRowSeqIter::new(ref_grangers, ref_record, self.filt_opt.oob_option)
+                            .expect("cannot create ChrRowSeqIter"),
+                    );
+                    break;
+                } // loop over getting the next chr_seq_iter
+
+                // if we got to this point, and we weren't able to fill in
+                // self.chr_seq_iter, then the iterator should be exhausted
+                if self.chr_seq_iter.is_none() {
+                    return None;
+                }
+            }
+        }
     }
 }
 
