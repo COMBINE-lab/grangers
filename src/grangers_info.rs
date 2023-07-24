@@ -296,7 +296,7 @@ impl Grangers {
         Ok(())
     }
 
-  /// convert the Grangers struct to a dataframe that follows the GTF format. For exporting the Grangers struct to a GTF file, you can use the `GRangers::write_gtf()` method.
+    /// convert the Grangers struct to a dataframe that follows the GTF format. For exporting the Grangers struct to a GTF file, you can use the `GRangers::write_gtf()` method.
     pub fn get_gtf_df(&self) -> anyhow::Result<DataFrame> {
         // get a copy of the dataframe
         let df = self.df();
@@ -427,7 +427,7 @@ impl Grangers {
     pub fn df_mut(&mut self) -> &mut DataFrame {
         &mut self.df
     }
-    
+
     /// get an immutable reference to the underlying interval_type struct
     pub fn interval_type(&self) -> &IntervalType {
         &self.interval_type
@@ -447,8 +447,15 @@ impl Grangers {
     /// This function takes two arguments:
     /// - by: the field/column name(s) to sort by. The field/column name(s) should be either a column name or a field of the FieldColumns struct.
     /// - descending: bool values indicating whether to sort the corresponding field/column in descending order for each provided by value.
-    pub fn sort_by<T>(&mut self, by: &[&str], descending: impl IntoVec<bool>) -> anyhow::Result<()> {
-        self.df = self.df.sort(by, descending)?;
+    /// - maintain_order: whether to maintain the order of the dataframe. If it is true, the order of the dataframe will be maintained if the values in the given field/column are the same. If it is false, the order of the dataframe will be arbitrary if the values in the given field/column are the same.
+    pub fn sort_by<T>(
+        &mut self,
+        by: &[&str],
+        descending: impl IntoVec<bool>,
+        maintain_order: bool,
+    ) -> anyhow::Result<()> {
+        self.df = self.df.sort(by, descending, maintain_order)?;
+        self.inc_signature();
         Ok(())
     }
 
@@ -464,7 +471,7 @@ impl Grangers {
                 "values",
                 values.iter().map(|s| s.as_ref()).collect::<Vec<&str>>(),
             ))?)?;
-        
+
         if df.is_empty() {
             warn!("The filtered dataframe is empty.")
         }
@@ -478,11 +485,25 @@ impl Grangers {
         )
     }
 
+    /// get the process-unique signature of this
+    /// grangers dataframe.
+    pub fn get_signature(&self) -> u64 {
+        self.signature
+    }
+
+    fn set_signature(&mut self, other_sig: u64) {
+        self.signature = other_sig
+    }
+
     /// updates an existing or add a new column in the Grangers struct
     /// ### Parameters:
     /// - `column`: the Series object that will be used to update the Grangers struct
-    /// - `field_column`: The name of a `FieldColumns` field that this new column is associated with. If it is Some, the corresponding field in the `FieldColumns` will be updated with the name of the new column (Please make sure that the name you provided is a valid field of `FieldColumns`).  If it is None, the `FieldColumns` will not be updated, which means the column is either not associated with any field column, or its name (Series.name()) matches the value of a field in the current `FieldColumns` object of the `Grangers`. 
-    pub fn update_column(&mut self, column: Series, field_column: Option<&str>) -> anyhow::Result<()> {
+    /// - `field_column`: The name of a `FieldColumns` field that this new column is associated with. If it is Some, the corresponding field in the `FieldColumns` will be updated with the name of the new column (Please make sure that the name you provided is a valid field of `FieldColumns`).  If it is None, the `FieldColumns` will not be updated, which means the column is either not associated with any field column, or its name (Series.name()) matches the value of a field in the current `FieldColumns` object of the `Grangers`.
+    pub fn update_column(
+        &mut self,
+        column: Series,
+        field_column: Option<&str>,
+    ) -> anyhow::Result<()> {
         // first we warn if there are null values in the column
         if column.null_count() > 0 {
             warn!("The provided Series object contains {} null values. This might cause problems when calling Grangers methods.", column.null_count());
@@ -490,17 +511,20 @@ impl Grangers {
 
         // if a field_column is provided, we update the field_columns object
         if let Some(field_column) = field_column {
-            self.field_columns.update(field_column.as_ref(), column.name())?;
+            self.field_columns
+                .update(field_column.as_ref(), column.name())?;
         }
 
         let name = column.name().to_owned();
         self.df.with_column(column).with_context(|| {
             format!(
-                "Could not update Grangers with the provided Series object: {:?}", name
+                "Could not update Grangers with the provided Series object: {:?}",
+                name
             )
         })?;
 
         self.validate(true, false)?;
+        self.inc_signature();
         Ok(())
     }
 
@@ -519,21 +543,16 @@ impl Grangers {
         let self_columns = self.df.get_column_names();
         let new_columns = df.get_column_names();
 
-        if !self_columns.iter().all(|item: &&str| new_columns.contains(item)) {
+        if !self_columns
+            .iter()
+            .all(|item: &&str| new_columns.contains(item))
+        {
             bail!("The provided dataframe have different column names as the current one. Please use Grangers::new() to instantiate a new Grangers struct.")
         }
 
         self.df = df;
         self.validate(true, false)?;
-        
-    /// get the process-unique signature of this
-    /// grangers dataframe.
-    pub fn get_signature(&self) -> u64 {
-        self.signature
-    }
-
-    fn set_signature(&mut self, other_sig: u64) {
-        self.signature = other_sig;
+        self.inc_signature();
         Ok(())
     }
 }
@@ -4665,23 +4684,24 @@ mod tests {
         // update an existing field column of the same name
         let gene_id_col = Series::new("gene_id", &["g", "g", "g", "g", "g", "g", "g"]);
         gr.update_column(gene_id_col.clone(), None).unwrap();
-        assert_eq!(
-            gr.column("gene_id").unwrap(),
-            &gene_id_col
-        );
+        assert_eq!(gr.column("gene_id").unwrap(), &gene_id_col);
 
         // update an existing field column with a different name
         let gene_id_col = Series::new("gene_id_new", &["g", "g", "g", "g", "g", "g", "g"]);
 
-        gr.update_column(gene_id_col.clone(), Some("gene_id")).unwrap();
+        gr.update_column(gene_id_col.clone(), Some("gene_id"))
+            .unwrap();
 
         assert_eq!(gr.field_columns().gene_id(), Some("gene_id_new"));
 
-        assert_eq!(gr.column(gr.field_columns().gene_id().unwrap()).unwrap(), &gene_id_col);
+        assert_eq!(
+            gr.column(gr.field_columns().gene_id().unwrap()).unwrap(),
+            &gene_id_col
+        );
     }
 
     #[test]
-    fn test_update_dataframe() {
+    fn test_update_df() {
         let df = df!(
             "seqname" => ["chr1", "chr1", "chr1", "chr2", "chr2", "chr2", "chr2"],
             "feature_type" => ["exon", "exon", "exon", "exon", "exon", "exon", "exon"],
@@ -4718,12 +4738,12 @@ mod tests {
         )
         .unwrap();
 
-        gr.update_dataframe(df1.clone()).unwrap();
+        gr.update_df(df1.clone()).unwrap();
         assert_eq!(gr.df(), &df1);
-        
+
         // Then we check if we will get error if the new dataframe is unexpected.
-        assert!(gr.clone().update_dataframe(DataFrame::default()).is_err());
-                // first check if the dataframe can be updated
+        assert!(gr.clone().update_df(DataFrame::default()).is_err());
+        // first check if the dataframe can be updated
         let df2 = df!(
             "seqname" => ["chr1111", "chr1", "chr1", "chr2", "chr2", "chr2", "chr2"],
             "feature_type" => ["exon", "exon", "exon", "exon", "exon", "exon", "exon"],
@@ -4734,7 +4754,6 @@ mod tests {
         )
         .unwrap();
 
-        assert!(gr.update_dataframe(df2).is_err());
-
+        assert!(gr.update_df(df2).is_err());
     }
 }

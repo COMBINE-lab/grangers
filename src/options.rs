@@ -1,8 +1,8 @@
+use crate::grangers_utils::FIELDCOLUMNS;
 use anyhow::bail;
 use polars::prelude::DataFrame;
 use std::collections::HashSet;
 use tracing::warn;
-use crate::grangers_utils::FIELDCOLUMNS;
 
 /// Inclusive interval used in Grangers
 pub struct InclusiveInterval {
@@ -181,7 +181,6 @@ pub struct FieldColumns {
     /// If this column is missing, the exons will be sorted by their start positions.
     pub exon_number: Option<String>,
 }
-
 
 impl FieldColumns {
     /// get a reference to the seqname field
@@ -671,8 +670,7 @@ impl FieldColumns {
         }
     }
 
-    pub fn all_fields() -> [&'static str;12] {
+    pub fn all_fields() -> [&'static str; 12] {
         FIELDCOLUMNS
     }
 }
-
