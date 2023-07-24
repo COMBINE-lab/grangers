@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/COMBINE-lab/grangers/compare/v0.2.1...v0.3.0) (2023-07-24)
+
+
+### Features
+
+* add update_column and update_dataframe ([de48312](https://github.com/COMBINE-lab/grangers/commit/de4831270f4def5696c0c3b853ea67435757e1ad))
+
 ## [0.2.1](https://github.com/COMBINE-lab/grangers/compare/v0.2.0...v0.2.1) (2023-07-10)
 
 
