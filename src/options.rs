@@ -2,6 +2,7 @@ use anyhow::bail;
 use polars::prelude::DataFrame;
 use std::collections::HashSet;
 use tracing::warn;
+use crate::grangers_utils::FIELDCOLUMNS;
 
 /// Inclusive interval used in Grangers
 pub struct InclusiveInterval {
@@ -161,7 +162,7 @@ pub struct FieldColumns {
     /// The column name of the strand column, usually it is called "strand".
     /// This is the seventh column in a GTF/GFF file.\
     /// This field is required, and the corresponding column should not contain missing values (nulls) for calling most Grangers methods.\
-    /// If this field is missing, you can add one by calling `df.add_column("strand", vec!['.'; df.height()])`.\
+    /// If this field is missing, you can add one by calling `df.update_column("strand", vec!['.'; df.height()])`.\
     /// If it contains missing values, you can fill them by calling `df.fill_none("strand", '.')`.
     pub strand: String,
     /// The column name of the phase column, usually it is called "frame" or "phase".
@@ -180,6 +181,7 @@ pub struct FieldColumns {
     /// If this column is missing, the exons will be sorted by their start positions.
     pub exon_number: Option<String>,
 }
+
 
 impl FieldColumns {
     /// get a reference to the seqname field
@@ -305,7 +307,7 @@ impl FieldColumns {
             is_valid = false;
             if is_warn {
                 warn!(
-                    "The dataframe does not contain the specified seqname column {}; Cannot proceed. You can add one by calling `df.add_column(\"seqname\", vec!['.'; df.height()])`",
+                    "The dataframe does not contain the specified seqname column {}; Cannot proceed. You can add one by calling `df.update_column(\"seqname\", vec!['.'; df.height()])`",
                     self.seqname()
                 )
             }
@@ -314,7 +316,7 @@ impl FieldColumns {
             is_valid = false;
             if is_warn {
                 warn!(
-                    "The dataframe does not contain the specified start column {}; Cannot proceed. You can add one by calling `df.add_column(\"start\", vec!['.'; df.height()])`",
+                    "The dataframe does not contain the specified start column {}; Cannot proceed. You can add one by calling `df.update_column(\"start\", vec!['.'; df.height()])`",
                     self.start()
                 )
             }
@@ -323,7 +325,7 @@ impl FieldColumns {
             is_valid = false;
             if is_warn {
                 warn!(
-                    "The dataframe does not contain the specified end column {}; Cannot proceed. You can add one by calling `df.add_column(\"end\", vec!['.'; df.height()])`",
+                    "The dataframe does not contain the specified end column {}; Cannot proceed. You can add one by calling `df.update_column(\"end\", vec!['.'; df.height()])`",
                     self.end()
                 )
             }
@@ -332,7 +334,7 @@ impl FieldColumns {
             is_valid = false;
             if is_warn {
                 warn!(
-                    "The dataframe does not contain the specified strand column {}; Cannot proceed. You can add one by calling `df.add_column(\"strand\", vec!['.'; df.height()])`",
+                    "The dataframe does not contain the specified strand column {}; Cannot proceed. You can add one by calling `df.update_column(\"strand\", vec!['.'; df.height()])`",
                     self.strand()
                 )
             }
@@ -473,7 +475,7 @@ impl FieldColumns {
             if df.column("strand").is_ok() {
                 self.strand = "strand".to_string();
             } else {
-                bail!("The dataframe does not contain the specified strand column {} or a column named \"strand\"; Cannot fix. If this is desired, you can add a dummy strand column by calling `df.add_column(\"strand\", vec!['.'; df.height()])`", self.strand());
+                bail!("The dataframe does not contain the specified strand column {} or a column named \"strand\"; Cannot fix. If this is desired, you can add a dummy strand column by calling `df.update_column(\"strand\", vec!['.'; df.height()])`", self.strand());
             }
         }
 
@@ -668,4 +670,9 @@ impl FieldColumns {
             }
         }
     }
+
+    pub fn all_fields() -> [&'static str;12] {
+        FIELDCOLUMNS
+    }
 }
+

@@ -180,6 +180,21 @@ impl IntervalType {
     }
 }
 
+pub static FIELDCOLUMNS: [&str;12] = [
+    "seqname",
+    "source",
+    "feature_type",
+    "start",
+    "end",
+    "score",
+    "strand",
+    "phase",
+    "gene_id",
+    "gene_name",
+    "transcript_id",
+    "exon_number"
+];
+
 // --- Grangers struct related utility functionality
 
 /*
@@ -201,3 +216,4 @@ impl Grangers {
     }
 }
 */
+
