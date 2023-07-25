@@ -4745,11 +4745,11 @@ mod tests {
         )
         .unwrap();
 
-        gr.update_df(df1.clone()).unwrap();
+        gr.update_df(df1.clone(), false, false).unwrap();
         assert_eq!(gr.df(), &df1);
 
         // Then we check if we will get error if the new dataframe is unexpected.
-        assert!(gr.clone().update_df(DataFrame::default()).is_err());
+        assert!(gr.clone().update_df(DataFrame::default(), false, false).is_err());
         // first check if the dataframe can be updated
         let df2 = df!(
             "seqname" => ["chr1111", "chr1", "chr1", "chr2", "chr2", "chr2", "chr2"],
@@ -4761,6 +4761,6 @@ mod tests {
         )
         .unwrap();
 
-        assert!(gr.update_df(df2).is_err());
+        assert!(gr.update_df(df2, false, false).is_err());
     }
 }
