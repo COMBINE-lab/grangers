@@ -523,7 +523,9 @@ impl Grangers {
             )
         })?;
 
-        self.validate(true, false)?;
+        // we don't want to do validation here because it might 
+        // complain about some existing nulls before the update
+        // self.validate(false, false)?;
         self.inc_signature();
         Ok(())
     }
@@ -532,8 +534,10 @@ impl Grangers {
     /// ### Parameters:
     /// - `df`: the new dataframe
     /// - `field_columns`: (Optional) the new field_columns
+    /// - `is_warn`: whether to return a warning if the dataframe contains null values
+    /// - `is_bail`: whether to return an error if the dataframe contains null values in the essential fields: seqname, start, end, strand
     /// This function will replace the current Grnagers' dataframe with the provided one, and update the field_columns if it is provided. This function assumes that the provided dataframe has the same layout as the current dataframe but with some values updated. If the provided dataframe has a different layout, you should use `Grangers::new()` to instantiate a new Grangers struct.
-    pub fn update_df(&mut self, df: DataFrame) -> anyhow::Result<()> {
+    pub fn update_df(&mut self, df: DataFrame, is_warn: bool, is_bail: bool) -> anyhow::Result<()> {
         // check if the dataframe has the same layout as the current one
         if df.shape() != self.df.shape() {
             bail!("The provided dataframe has a different layout as the current one. Please use Grangers::new() to instantiate a new Grangers struct.")
@@ -551,7 +555,7 @@ impl Grangers {
         }
 
         self.df = df;
-        self.validate(true, false)?;
+        self.validate(is_warn, is_bail)?;
         self.inc_signature();
         Ok(())
     }
@@ -711,6 +715,9 @@ impl Grangers {
             if is_bail {
                 bail!("The dataframe is empty. Cannot proceed.")
             } else {
+                if is_warn {
+                    warn!("The dataframe is empty.")
+                }
                 return Ok(false);
             }
         }
