@@ -853,7 +853,7 @@ impl Grangers {
                     .alias("seqname_any"),
                 col(strand).unique().count().neq(lit(1)).alias("strand_any"),
             ])
-            .select([col("seqname_any").any(), col("strand_any").any()])
+            .select([col("seqname_any").any(true), col("strand_any").any(true)]) // true: drop nulls 
             .collect()?
             .get_row(0)?
             .0
