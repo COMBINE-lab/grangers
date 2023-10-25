@@ -2547,7 +2547,7 @@ impl Grangers {
 
     pub fn get_sequences_from_read<R: Read>(
         &mut self,
-        read: R,
+        reader: R,
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
@@ -2598,7 +2598,7 @@ impl Grangers {
         essential_gr.set_signature(self.get_signature());
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
-        let mut reader = noodles::fasta::Reader::new(BufReader::new(read));
+        let mut reader = noodles::fasta::Reader::new(BufReader::new(reader));
         // let mut reader = noodles::fasta::Reader::new(reader);
 
         let sig = essential_gr.get_signature();
@@ -2674,7 +2674,7 @@ impl Grangers {
 
     pub fn iter_sequences_from_reader<R: Read>(
         &mut self,
-        read: R,
+        reader: R,
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
@@ -2725,7 +2725,7 @@ impl Grangers {
         essential_gr.set_signature(self.get_signature());
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
-        let reader = BufReader::new(read);
+        let reader = BufReader::new(reader);
 
         let filt_opt = GrangersFilterOpts {
             seqname: seqname.to_owned(),
