@@ -15,6 +15,7 @@ use rust_lapper::{Interval, Lapper};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::BufReader;
+use std::io::Read;
 use std::io::Write;
 use std::iter::IntoIterator;
 use std::ops::FnMut;
@@ -523,7 +524,7 @@ impl Grangers {
             )
         })?;
 
-        // we don't want to do validation here because it might 
+        // we don't want to do validation here because it might
         // complain about some existing nulls before the update
         // self.validate(false, false)?;
         self.inc_signature();
@@ -853,7 +854,7 @@ impl Grangers {
                     .alias("seqname_any"),
                 col(strand).unique().count().neq(lit(1)).alias("strand_any"),
             ])
-            .select([col("seqname_any").any(true), col("strand_any").any(true)]) // true: drop nulls 
+            .select([col("seqname_any").any(true), col("strand_any").any(true)]) // true: drop nulls
             .collect()?
             .get_row(0)?
             .0
@@ -2536,6 +2537,21 @@ impl Grangers {
         name_column: Option<&str>,
         oob_option: OOBOption,
     ) -> anyhow::Result<GrangersSequenceCollection> {
+        self.get_sequences_from_read(
+            std::fs::File::open(ref_path)?,
+            ignore_strand,
+            name_column,
+            oob_option,
+        )
+    }
+
+    pub fn get_sequences_from_read<R: Read>(
+        &mut self,
+        read: R,
+        ignore_strand: bool,
+        name_column: Option<&str>,
+        oob_option: OOBOption,
+    ) -> anyhow::Result<GrangersSequenceCollection> {
         self.validate(false, true)?;
 
         // if name is invalid, ignore
@@ -2582,9 +2598,7 @@ impl Grangers {
         essential_gr.set_signature(self.get_signature());
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
-        let mut reader = std::fs::File::open(ref_path)
-            .map(BufReader::new)
-            .map(noodles::fasta::Reader::new)?;
+        let mut reader = noodles::fasta::Reader::new(BufReader::new(read));
         // let mut reader = noodles::fasta::Reader::new(reader);
 
         let sig = essential_gr.get_signature();
@@ -2658,13 +2672,13 @@ impl Grangers {
         Ok(seq_coll)
     }
 
-    pub fn iter_sequences<T: AsRef<Path>>(
+    pub fn iter_sequences_from_reader<R: Read>(
         &mut self,
-        ref_path: T,
+        read: R,
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
-    ) -> anyhow::Result<Pin<Box<GrangersSeqIter>>> {
+    ) -> anyhow::Result<Pin<Box<GrangersSeqIter<R>>>> {
         self.validate(false, true)?;
 
         // if name is invalid, ignore
@@ -2711,7 +2725,8 @@ impl Grangers {
         essential_gr.set_signature(self.get_signature());
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
-        let reader = std::fs::File::open(ref_path).map(BufReader::new)?;
+        let reader = BufReader::new(read);
+
         let filt_opt = GrangersFilterOpts {
             seqname: seqname.to_owned(),
             name_column,
@@ -2719,6 +2734,17 @@ impl Grangers {
         };
 
         Ok(GrangersSeqIter::new(reader, filt_opt, essential_gr))
+    }
+
+    pub fn iter_sequences<T: AsRef<Path>>(
+        &mut self,
+        ref_path: T,
+        ignore_strand: bool,
+        name_column: Option<&str>,
+        oob_option: OOBOption,
+    ) -> anyhow::Result<Pin<Box<GrangersSeqIter<std::fs::File>>>> {
+        let reader = std::fs::File::open(ref_path)?;
+        self.iter_sequences_from_reader(reader, ignore_strand, name_column, oob_option)
     }
 
     /// Get the sequences of the intervals from one fasta record.
@@ -2789,7 +2815,7 @@ pub struct GrangersFilterOpts {
     oob_option: OOBOption,
 }
 
-pub struct GrangersSeqIter {
+pub struct GrangersSeqIter<R: Read> {
     // the essential grangers struct holding
     // the required fields across *all* of the
     // target sequences
@@ -2800,7 +2826,7 @@ pub struct GrangersSeqIter {
     chr_gr: Option<Grangers>,
     // a noodles Fasta reader for reading the
     // target sequences
-    seq_reader: noodles::fasta::Reader<std::io::BufReader<std::fs::File>>,
+    seq_reader: noodles::fasta::Reader<std::io::BufReader<R>>,
     // the current seq record
     seq_record: noodles::fasta::Record,
     // the filter options that will be applied
@@ -2821,9 +2847,9 @@ pub struct GrangersSeqIter {
 
 use core::pin::Pin;
 
-impl GrangersSeqIter {
+impl<R: Read> GrangersSeqIter<R> {
     pub fn new(
-        breader: std::io::BufReader<std::fs::File>,
+        breader: std::io::BufReader<R>,
         filt_opt: GrangersFilterOpts,
         essential_gr: Grangers,
     ) -> Pin<Box<Self>> {
@@ -2847,7 +2873,7 @@ impl GrangersSeqIter {
     }
 }
 
-impl Iterator for GrangersSeqIter {
+impl<R: Read> Iterator for GrangersSeqIter<R> {
     type Item = (GrangersRecordID, Record);
 
     #[allow(clippy::question_mark)]
@@ -4749,7 +4775,10 @@ mod tests {
         assert_eq!(gr.df(), &df1);
 
         // Then we check if we will get error if the new dataframe is unexpected.
-        assert!(gr.clone().update_df(DataFrame::default(), false, false).is_err());
+        assert!(gr
+            .clone()
+            .update_df(DataFrame::default(), false, false)
+            .is_err());
         // first check if the dataframe can be updated
         let df2 = df!(
             "seqname" => ["chr1111", "chr1", "chr1", "chr2", "chr2", "chr2", "chr2"],
