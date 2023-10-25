@@ -2743,8 +2743,7 @@ impl Grangers {
         name_column: Option<&str>,
         oob_option: OOBOption,
     ) -> anyhow::Result<Pin<Box<GrangersSeqIter<std::fs::File>>>> {
-        let reader = std::fs::File::open(ref_path)?;
-        self.iter_sequences_from_reader(reader, ignore_strand, name_column, oob_option)
+        self.iter_sequences_from_reader(std::fs::File::open(ref_path)?, ignore_strand, name_column, oob_option)
     }
 
     /// Get the sequences of the intervals from one fasta record.
