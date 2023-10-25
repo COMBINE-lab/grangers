@@ -273,8 +273,10 @@ impl GStruct {
                             gff::record::attributes::field::value::Value::String(val) => {
                                 rec_attr_hm.insert(attrk.to_string(), val.clone());
                             },
-                            gff::record::attributes::field::value::Value::Array(_) => {
-                                anyhow::bail!("Currently, having multiple values associated with a single GFF attributed is not supported.");
+                            gff::record::attributes::field::value::Value::Array(a) => {
+                                rec_attr_hm.insert(attrk.to_string(), a.join(","));
+
+                                // anyhow::bail!("Currently, having multiple values associated with a single GFF attributed is not supported.");
                             }
                         }
                     }
