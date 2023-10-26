@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.1](https://github.com/COMBINE-lab/grangers/compare/v0.3.0...v0.3.1) (2023-07-24)
+
+
+### Bug Fixes
+
+* fix bugs in update_df ([142792e](https://github.com/COMBINE-lab/grangers/commit/142792e8bc02d62b79a7aca954f2fcac2bbdccbb))
+* fix outdated function name update_dataframe to update_df ([5f7a66e](https://github.com/COMBINE-lab/grangers/commit/5f7a66e73a82aa162a83dccf625cdf84787ac7a5))
+* Merge pull request [#37](https://github.com/COMBINE-lab/grangers/issues/37) from COMBINE-lab/dev ([5f7a66e](https://github.com/COMBINE-lab/grangers/commit/5f7a66e73a82aa162a83dccf625cdf84787ac7a5))
+
+## [0.3.0](https://github.com/COMBINE-lab/grangers/compare/v0.2.1...v0.3.0) (2023-07-24)
+
+
+### Features
+
+* add update_column and update_dataframe ([de48312](https://github.com/COMBINE-lab/grangers/commit/de4831270f4def5696c0c3b853ea67435757e1ad))
+
 ## [0.2.1](https://github.com/COMBINE-lab/grangers/compare/v0.2.0...v0.2.1) (2023-07-10)
 
 
