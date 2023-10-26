@@ -34,13 +34,13 @@ categories = ["science", "data-structures"]
 
 [dependencies]
 anyhow = "1.0"
-flate2 = { version = "1.0.27", features = ["zlib"], default-features = false }
-noodles = { version = "0.50.0", features = ["gtf","gff","fasta", "core"] }
-tracing = "0.1.37"
+flate2 = { version = "1.0.28", features = ["zlib"], default-features = false }
+noodles = { version = "0.55.0", features = ["gtf","gff","fasta", "core"] }
+tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.17", default-features = true, features = ["env-filter"] }
-polars = { version = "0.32", features = ["lazy","dataframe_arithmetic","sort_multiple", "checked_arithmetic","rows","dtype-struct", "dtype-categorical", "list_eval","concat_str", "strings"]}
+polars = { version = "0.34", features = ["lazy","dataframe_arithmetic","sort_multiple", "checked_arithmetic","rows","dtype-struct", "dtype-categorical", "list_eval","concat_str", "strings", "is_in", "abs"]}
 peak_alloc = "0.2.0"
 rust-lapper = "1.1.0"
-clap = { version = "4.4.3", features = ["derive", "cargo", "deprecated", "wrap_help", "help", "usage", "error-context"] } 
+clap = { version = "4.4.7", features = ["derive", "cargo", "deprecated", "wrap_help", "help", "usage", "error-context"] } 
 lazy_static = "1.4.0"
 nutype = "0.3.1"

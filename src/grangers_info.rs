@@ -389,7 +389,7 @@ impl Grangers {
         let mut file = std::fs::File::create(file_path)?;
         CsvWriter::new(&mut file)
             .has_header(false)
-            .with_delimiter(b'\t')
+            .with_separator(b'\t')
             .with_null_value(".".to_string())
             .finish(&mut out_df)?;
 
@@ -472,7 +472,13 @@ impl Grangers {
                 "values",
                 values.iter().map(|s| s.as_ref()).collect::<Vec<&str>>(),
             ))?)?;
-
+        /* NOTE @DongzeHe: the updated version should start something like 
+        * below, but I haven't figured it all out yet.
+           .filter(col(&column).is_in(&Series::new(
+                "values",
+                values.iter().map(|s| s.as_ref()).collect::<Vec<&str>>(),
+            ))?)?;
+        */
         if df.is_empty() {
             warn!("The filtered dataframe is empty.")
         }
@@ -845,7 +851,7 @@ impl Grangers {
             .df()
             .select([seqname, strand, by])?
             .lazy()
-            .groupby([by])
+            .group_by([by])
             .agg([
                 col(seqname)
                     .unique()
@@ -868,7 +874,7 @@ impl Grangers {
         exon_gr.df = exon_gr
             .df
             .lazy()
-            .groupby([seqname, by, strand])
+            .group_by([seqname, by, strand])
             .agg([col(start).min(), col(end).max()])
             .collect()?;
 
@@ -948,7 +954,7 @@ impl Grangers {
             .df()
             .select([seqname, transcript_id, strand])?
             .lazy()
-            .groupby([seqname, transcript_id])
+            .group_by([seqname, transcript_id])
             .agg([col(strand).unique().count().gt(lit(1)).alias("is_solo")])
             .collect()?;
         if tx_strand.column("is_solo")?.bool()?.any() {
@@ -1503,12 +1509,12 @@ impl Grangers {
                 false, /*nulls last*/
                 false, /*force stable sort*/
             )
-            .groupby(by.iter().map(|s| col(s)).collect::<Vec<Expr>>())
+            .group_by(by.iter().map(|s| col(s)).collect::<Vec<Expr>>())
             .agg([
                 all().exclude([start, end]).first(),
                 // process two columns at once
                 // Notice the df is sorted
-                as_struct(&[col(start), col(end)])
+                as_struct([col(start), col(end)].to_vec())
                     .apply(
                         move |s| apply_fn(s, slack),
                         GetOutput::from_type(DataType::List((DataType::Int64).into())),
