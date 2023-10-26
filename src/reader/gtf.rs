@@ -265,16 +265,18 @@ impl GStruct {
                     // parse attributes
                     rec_attr_hm.clear();
                     for (attrk, attrv) in r.attributes().iter() {
-                        // TODO: the updated parser properly handles multiple values associated 
+                        // TODO: the updated parser properly handles multiple values associated
                         // with a tag, but here, we are putting them in a 1 <-> 1 map. What should
                         // we do with the value is a Vec<String> instead of a String?  For now
                         // assume we have a single string.
                         match attrv {
                             gff::record::attributes::field::value::Value::String(val) => {
                                 rec_attr_hm.insert(attrk.to_string(), val.clone());
-                            },
-                            gff::record::attributes::field::value::Value::Array(_) => {
-                                anyhow::bail!("Currently, having multiple values associated with a single GFF attributed is not supported.");
+                            }
+                            gff::record::attributes::field::value::Value::Array(a) => {
+                                rec_attr_hm.insert(attrk.to_string(), a.join(","));
+
+                                // anyhow::bail!("Currently, having multiple values associated with a single GFF attributed is not supported.");
                             }
                         }
                     }
