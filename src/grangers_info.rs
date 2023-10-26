@@ -466,24 +466,15 @@ impl Grangers {
     /// - values: the values to filter by. In the returned GRangers struct, only the records whose value in the given field/column matches the provided values will be kept.
     pub fn filter<T: AsRef<str>>(&self, by: T, values: &[T]) -> anyhow::Result<Grangers> {
         let column = self.get_column_name(by.as_ref(), false)?;
-        
-        let df = self
-            .df()
-            .filter(
-                &is_in(
-                    self.df().column(&column)?,
-                    &Series::new(
-                        "values",
-                        values.iter().map(|s| s.as_ref()).collect::<Vec<&str>>(),
-                    ))?
-                )?;
-        /* NOTE @DongzeHe: the updated version should start something like 
-        * below, but I haven't figured it all out yet.
-           .filter(col(&column).is_in(&Series::new(
+
+        let df = self.df().filter(&is_in(
+            self.df().column(&column)?,
+            &Series::new(
                 "values",
                 values.iter().map(|s| s.as_ref()).collect::<Vec<&str>>(),
-            ))?)?;
-        */
+            ),
+        )?)?;
+
         if df.is_empty() {
             warn!("The filtered dataframe is empty.")
         }
@@ -944,11 +935,10 @@ impl Grangers {
 
         // make sure that strand is valid
         if !is_in(
-                &exon_gr
-                .column(strand)?
-                .unique()?,
-                &Series::new("valid strands", ["+", "-"])
-            )?.all()
+            &exon_gr.column(strand)?.unique()?,
+            &Series::new("valid strands", ["+", "-"]),
+        )?
+        .all()
         {
             bail!("Found exons that do not have a valid strand (+ or -). Cannot proceed.")
         }
@@ -1059,8 +1049,9 @@ impl Grangers {
             && self.column(strand)?.is_null().any()
                 | !is_in(
                     &self.column(strand)?.unique()?,
-                    &Series::new("valid stands", VALIDSTRANDS)
-                )?.all()
+                    &Series::new("valid stands", VALIDSTRANDS),
+                )?
+                .all()
         {
             bail!("The strand column contains values other than {:?}. Please remove them first or set ignore_strand to true.", VALIDSTRANDS)
         }
@@ -2754,7 +2745,12 @@ impl Grangers {
         name_column: Option<&str>,
         oob_option: OOBOption,
     ) -> anyhow::Result<Pin<Box<GrangersSeqIter<std::fs::File>>>> {
-        self.iter_sequences_from_reader(std::fs::File::open(ref_path)?, ignore_strand, name_column, oob_option)
+        self.iter_sequences_from_reader(
+            std::fs::File::open(ref_path)?,
+            ignore_strand,
+            name_column,
+            oob_option,
+        )
     }
 
     /// Get the sequences of the intervals from one fasta record.
