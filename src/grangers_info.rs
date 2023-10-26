@@ -466,12 +466,17 @@ impl Grangers {
     /// - values: the values to filter by. In the returned GRangers struct, only the records whose value in the given field/column matches the provided values will be kept.
     pub fn filter<T: AsRef<str>>(&self, by: T, values: &[T]) -> anyhow::Result<Grangers> {
         let column = self.get_column_name(by.as_ref(), false)?;
+        
         let df = self
             .df()
-            .filter(&self.df().column(&column)?.is_in(&Series::new(
-                "values",
-                values.iter().map(|s| s.as_ref()).collect::<Vec<&str>>(),
-            ))?)?;
+            .filter(
+                &is_in(
+                    self.df().column(&column)?,
+                    &Series::new(
+                        "values",
+                        values.iter().map(|s| s.as_ref()).collect::<Vec<&str>>(),
+                    ))?
+                )?;
         /* NOTE @DongzeHe: the updated version should start something like 
         * below, but I haven't figured it all out yet.
            .filter(col(&column).is_in(&Series::new(
@@ -938,11 +943,12 @@ impl Grangers {
         }
 
         // make sure that strand is valid
-        if !exon_gr
-            .column(strand)?
-            .unique()?
-            .is_in(&Series::new("valid strands", ["+", "-"]))?
-            .all()
+        if !is_in(
+                &exon_gr
+                .column(strand)?
+                .unique()?,
+                &Series::new("valid strands", ["+", "-"])
+            )?.all()
         {
             bail!("Found exons that do not have a valid strand (+ or -). Cannot proceed.")
         }
@@ -1051,11 +1057,10 @@ impl Grangers {
         // if contains null value in strand, we cannot do strand-specific extension
         if (!ignore_strand) & (extend_option != &ExtendOption::Both)
             && self.column(strand)?.is_null().any()
-                | (!self
-                    .column(strand)?
-                    .unique()?
-                    .is_in(&Series::new("valid stands", VALIDSTRANDS))?
-                    .all())
+                | !is_in(
+                    &self.column(strand)?.unique()?,
+                    &Series::new("valid stands", VALIDSTRANDS)
+                )?.all()
         {
             bail!("The strand column contains values other than {:?}. Please remove them first or set ignore_strand to true.", VALIDSTRANDS)
         }
