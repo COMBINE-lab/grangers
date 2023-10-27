@@ -59,7 +59,9 @@ impl GrangersSequenceCollection {
         self.records.iter()
     }
 
-    pub fn records_iter_mut(&mut self) -> std::slice::IterMut<'_, (GrangersRecordID, noodles::fasta::Record)> {
+    pub fn records_iter_mut(
+        &mut self,
+    ) -> std::slice::IterMut<'_, (GrangersRecordID, noodles::fasta::Record)> {
         self.records.iter_mut()
     }
 
@@ -2479,7 +2481,8 @@ impl Grangers {
         let reader = std::fs::File::open(fasta_path).map(BufReader::new)?;
         let mut reader = noodles::fasta::Reader::new(reader);
 
-        let mut seq_vec: Vec<Option<noodles::fasta::Record>> = vec![None; essential_gr.df().height()];
+        let mut seq_vec: Vec<Option<noodles::fasta::Record>> =
+            vec![None; essential_gr.df().height()];
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
         // 1. subset the dataframe by the chromosome name
         // 2. get the sequence of the features in the dataframe on that fasta record
@@ -3004,7 +3007,10 @@ impl<R: Read> Iterator for GrangersSeqIter<R> {
                         )
                     };
                     let ref_record = unsafe {
-                        core::mem::transmute::<&noodles::fasta::Record, &'static noodles::fasta::Record>(&self.seq_record)
+                        core::mem::transmute::<
+                            &noodles::fasta::Record,
+                            &'static noodles::fasta::Record,
+                        >(&self.seq_record)
                     };
                     self.chr_seq_iter = Some(
                         ChrRowSeqIter::new(ref_grangers, ref_record, self.filt_opt.oob_option)
