@@ -6,8 +6,7 @@ use crate::reader;
 use crate::reader::fasta::SeqInfo;
 use anyhow::{bail, Context};
 use lazy_static::lazy_static;
-use noodles::fasta;
-pub use noodles::fasta::record::{Definition, Record, Sequence};
+pub(crate) use noodles::fasta::record::{Definition, Sequence};
 use nutype::nutype;
 use polars::{lazy::prelude::*, prelude::*, series::Series};
 use rust_lapper::{Interval, Lapper};
@@ -40,27 +39,27 @@ type LapperType = Lapper<u64, (usize, Vec<String>)>;
 pub struct GrangersRecordID(u32);
 
 pub struct GrangersSequenceCollection {
-    pub records: Vec<(GrangersRecordID, Record)>,
+    pub records: Vec<(GrangersRecordID, noodles::fasta::Record)>,
     pub signature: u64,
 }
 
 impl GrangersSequenceCollection {
     pub fn new_with_signature_and_capacity(signature: u64, capacity: usize) -> Self {
         GrangersSequenceCollection {
-            records: Vec::<(GrangersRecordID, Record)>::with_capacity(capacity),
+            records: Vec::<(GrangersRecordID, noodles::fasta::Record)>::with_capacity(capacity),
             signature,
         }
     }
 
-    pub fn add_record(&mut self, rec_id: GrangersRecordID, rec: Record) {
+    pub fn add_record(&mut self, rec_id: GrangersRecordID, rec: noodles::fasta::Record) {
         self.records.push((rec_id, rec));
     }
 
-    pub fn records_iter(&self) -> std::slice::Iter<'_, (GrangersRecordID, Record)> {
+    pub fn records_iter(&self) -> std::slice::Iter<'_, (GrangersRecordID, noodles::fasta::Record)> {
         self.records.iter()
     }
 
-    pub fn records_iter_mut(&mut self) -> std::slice::IterMut<'_, (GrangersRecordID, Record)> {
+    pub fn records_iter_mut(&mut self) -> std::slice::IterMut<'_, (GrangersRecordID, noodles::fasta::Record)> {
         self.records.iter_mut()
     }
 
@@ -69,7 +68,7 @@ impl GrangersSequenceCollection {
      * should destructure the seq collection.
      */
     /*
-    pub fn records_into_iter(self) -> std::vec::IntoIter<(GrangersRecordID, Record)> {
+    pub fn records_into_iter(self) -> std::vec::IntoIter<(GrangersRecordID, noodles::fasta::Record)> {
         self.records.into_iter()
     }
     */
@@ -1964,7 +1963,7 @@ impl Grangers {
                         // // if it is not the same, we create a Sequence and push it to seq_vec
                         let definition = Definition::new(curr_tx.clone(), None);
                         let sequence = Sequence::from_iter(exon_u8_vec.clone());
-                        let rec = &Record::new(definition, sequence);
+                        let rec = &noodles::fasta::Record::new(definition, sequence);
 
                         let write_record: bool;
                         // call the callback if we have one
@@ -1999,7 +1998,7 @@ impl Grangers {
             // // if it is not the same, we create a Sequence and push it to seq_vec
             let definition = Definition::new(curr_tx.clone(), None);
             let sequence = Sequence::from_iter(exon_u8_vec.clone());
-            let rec = &Record::new(definition, sequence);
+            let rec = &noodles::fasta::Record::new(definition, sequence);
 
             let write_record: bool;
             // call the callback if we have one
@@ -2130,7 +2129,7 @@ impl Grangers {
                 let definition = Definition::new(name, None);
                 if let Some(sequence) = sequence {
                     writer
-                        .write_record(&Record::new(definition, sequence))
+                        .write_record(&noodles::fasta::Record::new(definition, sequence))
                         .with_context(|| {
                             format!(
                                 "Could not write sequence {} to the output file; Cannot proceed.",
@@ -2260,7 +2259,7 @@ impl Grangers {
             for (feat_name, chrsi_rec) in name_vec.into_iter().zip(chrsi) {
                 if let Ok(sequence) = chrsi_rec {
                     let definition = Definition::new(feat_name, None);
-                    let rec = &Record::new(definition, sequence);
+                    let rec = &noodles::fasta::Record::new(definition, sequence);
 
                     let write_record: bool;
                     // call the callback if we have one
@@ -2335,7 +2334,7 @@ impl Grangers {
         let reader = std::fs::File::open(fasta_path).map(BufReader::new)?;
         let mut reader = noodles::fasta::Reader::new(reader);
         // let mut seq_vec: Vec<Option<Sequence>> = vec![None; exon_gr.df().height()];
-        let mut transcript_seq_vec: Vec<Record> =
+        let mut transcript_seq_vec: Vec<noodles::fasta::Record> =
             Vec::with_capacity(self.df().column(transcript_id)?.unique()?.len());
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
@@ -2409,7 +2408,7 @@ impl Grangers {
                         // if it is not the same, we create a Sequence and push it to seq_vec
                         let definition = Definition::new(curr_tx.clone(), None);
                         let sequence = Sequence::from_iter(exon_u8_vec.clone());
-                        transcript_seq_vec.push(Record::new(definition, sequence));
+                        transcript_seq_vec.push(noodles::fasta::Record::new(definition, sequence));
                         exon_u8_vec.clear();
                         exon_u8_vec.extend(seq.as_ref().iter());
                         // update the current transcript id
@@ -2436,7 +2435,7 @@ impl Grangers {
         ignore_strand: bool,
         name: Option<&str>,
         oob_option: &OOBOption,
-    ) -> anyhow::Result<Vec<Option<Record>>>
+    ) -> anyhow::Result<Vec<Option<noodles::fasta::Record>>>
 // anyhow::Result<Vec<fasta::record::Sequence>>
     {
         self.validate(false, true)?;
@@ -2480,7 +2479,7 @@ impl Grangers {
         let reader = std::fs::File::open(fasta_path).map(BufReader::new)?;
         let mut reader = noodles::fasta::Reader::new(reader);
 
-        let mut seq_vec: Vec<Option<Record>> = vec![None; essential_gr.df().height()];
+        let mut seq_vec: Vec<Option<noodles::fasta::Record>> = vec![None; essential_gr.df().height()];
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
         // 1. subset the dataframe by the chromosome name
         // 2. get the sequence of the features in the dataframe on that fasta record
@@ -2525,7 +2524,7 @@ impl Grangers {
 
                 let definition = Definition::new(seq_name, None);
 
-                seq_vec[idx] = seq.map(|seq| Record::new(definition, seq));
+                seq_vec[idx] = seq.map(|seq| noodles::fasta::Record::new(definition, seq));
             }
         }
 
@@ -2660,7 +2659,7 @@ impl Grangers {
                 };
 
                 let definition = Definition::new(feat_name, None);
-                let record = Record::new(definition, sequence);
+                let record = noodles::fasta::Record::new(definition, sequence);
 
                 //seq_vec[idx as usize] = Some(record);
                 // add this to the sequence collection
@@ -2762,7 +2761,7 @@ impl Grangers {
     /// If the position less than 1 or exceeds the length of the sequence, it will return None.
     pub(crate) fn get_sequences_fasta_record(
         &self,
-        record: &fasta::record::Record,
+        record: &noodles::fasta::Record,
         oob_option: &OOBOption,
     ) -> anyhow::Result<Vec<Option<Sequence>>> {
         self.validate(true, true)?;
@@ -2862,7 +2861,7 @@ impl<R: Read> GrangersSeqIter<R> {
         let reader = noodles::fasta::Reader::new(breader);
         let definition = Definition::new("empty", None);
         let sequence = Sequence::from(b"A".to_vec());
-        let curr_record = fasta::Record::new(definition, sequence);
+        let curr_record = noodles::fasta::Record::new(definition, sequence);
         let v: Vec<String> = vec![];
         let o: Vec<u32> = vec![];
         Box::pin(GrangersSeqIter {
@@ -2880,7 +2879,7 @@ impl<R: Read> GrangersSeqIter<R> {
 }
 
 impl<R: Read> Iterator for GrangersSeqIter<R> {
-    type Item = (GrangersRecordID, Record);
+    type Item = (GrangersRecordID, noodles::fasta::Record);
 
     #[allow(clippy::question_mark)]
     fn next(&mut self) -> Option<Self::Item> {
@@ -2896,7 +2895,7 @@ impl<R: Read> Iterator for GrangersSeqIter<R> {
                     if let Ok(sequence) = chr_seq_rec {
                         return Some((
                             GrangersRecordID::new(row_idx),
-                            Record::new(Definition::new(feat_name, None), sequence),
+                            noodles::fasta::Record::new(Definition::new(feat_name, None), sequence),
                         ));
                     }
                     // if we don't have a sequence (this was empty), we want to go to the next
@@ -2941,10 +2940,10 @@ impl<R: Read> Iterator for GrangersSeqIter<R> {
                         warn!("GrangersSeqIter: was able to read record definition, but no sequence. This seems like a problem!");
                         return None;
                     }
-                    let sequence = noodles::fasta::record::sequence::Sequence::from(seq_buffer);
+                    let sequence = Sequence::from(seq_buffer);
 
                     // at this point we have the next sequence record
-                    self.seq_record = Record::new(definition, sequence);
+                    self.seq_record = noodles::fasta::Record::new(definition, sequence);
 
                     let chr_name = self
                         .seq_record
@@ -3005,7 +3004,7 @@ impl<R: Read> Iterator for GrangersSeqIter<R> {
                         )
                     };
                     let ref_record = unsafe {
-                        core::mem::transmute::<&Record, &'static Record>(&self.seq_record)
+                        core::mem::transmute::<&noodles::fasta::Record, &'static noodles::fasta::Record>(&self.seq_record)
                     };
                     self.chr_seq_iter = Some(
                         ChrRowSeqIter::new(ref_grangers, ref_record, self.filt_opt.oob_option)
@@ -3026,7 +3025,7 @@ impl<R: Read> Iterator for GrangersSeqIter<R> {
 
 struct ChrRowSeqIter<'a> {
     iters: Vec<polars::series::SeriesIter<'a>>,
-    record: &'a Record,
+    record: &'a noodles::fasta::Record,
     oob_option: OOBOption,
     seqlen: usize,
 }
@@ -3034,7 +3033,7 @@ struct ChrRowSeqIter<'a> {
 impl<'a> ChrRowSeqIter<'a> {
     pub fn new(
         grangers: &'a Grangers,
-        record: &'a Record,
+        record: &'a noodles::fasta::Record,
         oob_option: OOBOption,
     ) -> anyhow::Result<Self> {
         let fc = grangers.field_columns();
@@ -4501,7 +4500,7 @@ mod tests {
         let sequence = Sequence::from(
             b"GTAGTTCTCTGGGACCTGCAAGATTAGGCAGGGACATGTGAGAGGTGACAGGGACCTGCA".to_vec(),
         );
-        let record = Record::new(definition, sequence.clone());
+        let record = noodles::fasta::Record::new(definition, sequence.clone());
 
         let seq_vec = gr
             .get_sequences_fasta_record(&record, &OOBOption::Skip)
@@ -4547,7 +4546,7 @@ mod tests {
         let sequence = Sequence::from(
             b"GTAGTTCTCTGGGACCTGCAAGATTAGGCAGGGACATGTGAGAGGTGACAGGGACCTGCA".to_vec(),
         );
-        let record = Record::new(definition, sequence.clone());
+        let record = noodles::fasta::Record::new(definition, sequence.clone());
 
         let mut chrsi = ChrRowSeqIter::new(&gr, &record, OOBOption::Skip).unwrap();
 
