@@ -35,7 +35,7 @@ categories = ["science", "data-structures"]
 [dependencies]
 anyhow = "1.0"
 flate2 = { version = "1.0.28", features = ["zlib"], default-features = false }
-noodles = { version = "0.55.0", features = ["gtf","gff","fasta", "core"] }
+noodles = { version = "0.56.0", features = ["gtf","gff","fasta", "core"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.17", default-features = true, features = ["env-filter"] }
 polars = { version = "0.34", features = ["lazy","dataframe_arithmetic","sort_multiple", "checked_arithmetic","rows","dtype-struct", "dtype-categorical", "list_eval","concat_str", "strings", "is_in", "abs"]}
