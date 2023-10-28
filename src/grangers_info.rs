@@ -6,8 +6,7 @@ use crate::reader;
 use crate::reader::fasta::SeqInfo;
 use anyhow::{bail, Context};
 use lazy_static::lazy_static;
-use noodles::fasta;
-pub use noodles::fasta::record::{Definition, Record, Sequence};
+pub(crate) use noodles::fasta::record::{Definition, Sequence};
 use nutype::nutype;
 use polars::{lazy::prelude::*, prelude::*, series::Series};
 use rust_lapper::{Interval, Lapper};
@@ -15,6 +14,7 @@ use rust_lapper::{Interval, Lapper};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::BufReader;
+use std::io::Read;
 use std::io::Write;
 use std::iter::IntoIterator;
 use std::ops::FnMut;
@@ -39,27 +39,29 @@ type LapperType = Lapper<u64, (usize, Vec<String>)>;
 pub struct GrangersRecordID(u32);
 
 pub struct GrangersSequenceCollection {
-    pub records: Vec<(GrangersRecordID, Record)>,
+    pub records: Vec<(GrangersRecordID, noodles::fasta::Record)>,
     pub signature: u64,
 }
 
 impl GrangersSequenceCollection {
     pub fn new_with_signature_and_capacity(signature: u64, capacity: usize) -> Self {
         GrangersSequenceCollection {
-            records: Vec::<(GrangersRecordID, Record)>::with_capacity(capacity),
+            records: Vec::<(GrangersRecordID, noodles::fasta::Record)>::with_capacity(capacity),
             signature,
         }
     }
 
-    pub fn add_record(&mut self, rec_id: GrangersRecordID, rec: Record) {
+    pub fn add_record(&mut self, rec_id: GrangersRecordID, rec: noodles::fasta::Record) {
         self.records.push((rec_id, rec));
     }
 
-    pub fn records_iter(&self) -> std::slice::Iter<'_, (GrangersRecordID, Record)> {
+    pub fn records_iter(&self) -> std::slice::Iter<'_, (GrangersRecordID, noodles::fasta::Record)> {
         self.records.iter()
     }
 
-    pub fn records_iter_mut(&mut self) -> std::slice::IterMut<'_, (GrangersRecordID, Record)> {
+    pub fn records_iter_mut(
+        &mut self,
+    ) -> std::slice::IterMut<'_, (GrangersRecordID, noodles::fasta::Record)> {
         self.records.iter_mut()
     }
 
@@ -68,7 +70,7 @@ impl GrangersSequenceCollection {
      * should destructure the seq collection.
      */
     /*
-    pub fn records_into_iter(self) -> std::vec::IntoIter<(GrangersRecordID, Record)> {
+    pub fn records_into_iter(self) -> std::vec::IntoIter<(GrangersRecordID, noodles::fasta::Record)> {
         self.records.into_iter()
     }
     */
@@ -388,7 +390,7 @@ impl Grangers {
         let mut file = std::fs::File::create(file_path)?;
         CsvWriter::new(&mut file)
             .has_header(false)
-            .with_delimiter(b'\t')
+            .with_separator(b'\t')
             .with_null_value(".".to_string())
             .finish(&mut out_df)?;
 
@@ -465,12 +467,14 @@ impl Grangers {
     /// - values: the values to filter by. In the returned GRangers struct, only the records whose value in the given field/column matches the provided values will be kept.
     pub fn filter<T: AsRef<str>>(&self, by: T, values: &[T]) -> anyhow::Result<Grangers> {
         let column = self.get_column_name(by.as_ref(), false)?;
-        let df = self
-            .df()
-            .filter(&self.df().column(&column)?.is_in(&Series::new(
+
+        let df = self.df().filter(&is_in(
+            self.df().column(&column)?,
+            &Series::new(
                 "values",
                 values.iter().map(|s| s.as_ref()).collect::<Vec<&str>>(),
-            ))?)?;
+            ),
+        )?)?;
 
         if df.is_empty() {
             warn!("The filtered dataframe is empty.")
@@ -523,7 +527,9 @@ impl Grangers {
             )
         })?;
 
-        self.validate(true, false)?;
+        // we don't want to do validation here because it might
+        // complain about some existing nulls before the update
+        // self.validate(false, false)?;
         self.inc_signature();
         Ok(())
     }
@@ -532,8 +538,10 @@ impl Grangers {
     /// ### Parameters:
     /// - `df`: the new dataframe
     /// - `field_columns`: (Optional) the new field_columns
+    /// - `is_warn`: whether to return a warning if the dataframe contains null values
+    /// - `is_bail`: whether to return an error if the dataframe contains null values in the essential fields: seqname, start, end, strand
     /// This function will replace the current Grnagers' dataframe with the provided one, and update the field_columns if it is provided. This function assumes that the provided dataframe has the same layout as the current dataframe but with some values updated. If the provided dataframe has a different layout, you should use `Grangers::new()` to instantiate a new Grangers struct.
-    pub fn update_df(&mut self, df: DataFrame) -> anyhow::Result<()> {
+    pub fn update_df(&mut self, df: DataFrame, is_warn: bool, is_bail: bool) -> anyhow::Result<()> {
         // check if the dataframe has the same layout as the current one
         if df.shape() != self.df.shape() {
             bail!("The provided dataframe has a different layout as the current one. Please use Grangers::new() to instantiate a new Grangers struct.")
@@ -551,7 +559,7 @@ impl Grangers {
         }
 
         self.df = df;
-        self.validate(true, false)?;
+        self.validate(is_warn, is_bail)?;
         self.inc_signature();
         Ok(())
     }
@@ -711,6 +719,9 @@ impl Grangers {
             if is_bail {
                 bail!("The dataframe is empty. Cannot proceed.")
             } else {
+                if is_warn {
+                    warn!("The dataframe is empty.")
+                }
                 return Ok(false);
             }
         }
@@ -837,7 +848,7 @@ impl Grangers {
             .df()
             .select([seqname, strand, by])?
             .lazy()
-            .groupby([by])
+            .group_by([by])
             .agg([
                 col(seqname)
                     .unique()
@@ -846,7 +857,7 @@ impl Grangers {
                     .alias("seqname_any"),
                 col(strand).unique().count().neq(lit(1)).alias("strand_any"),
             ])
-            .select([col("seqname_any").any(), col("strand_any").any()])
+            .select([col("seqname_any").any(true), col("strand_any").any(true)]) // true: drop nulls
             .collect()?
             .get_row(0)?
             .0
@@ -860,7 +871,7 @@ impl Grangers {
         exon_gr.df = exon_gr
             .df
             .lazy()
-            .groupby([seqname, by, strand])
+            .group_by([seqname, by, strand])
             .agg([col(start).min(), col(end).max()])
             .collect()?;
 
@@ -924,11 +935,11 @@ impl Grangers {
         }
 
         // make sure that strand is valid
-        if !exon_gr
-            .column(strand)?
-            .unique()?
-            .is_in(&Series::new("valid strands", ["+", "-"]))?
-            .all()
+        if !is_in(
+            &exon_gr.column(strand)?.unique()?,
+            &Series::new("valid strands", ["+", "-"]),
+        )?
+        .all()
         {
             bail!("Found exons that do not have a valid strand (+ or -). Cannot proceed.")
         }
@@ -940,7 +951,7 @@ impl Grangers {
             .df()
             .select([seqname, transcript_id, strand])?
             .lazy()
-            .groupby([seqname, transcript_id])
+            .group_by([seqname, transcript_id])
             .agg([col(strand).unique().count().gt(lit(1)).alias("is_solo")])
             .collect()?;
         if tx_strand.column("is_solo")?.bool()?.any() {
@@ -1037,11 +1048,11 @@ impl Grangers {
         // if contains null value in strand, we cannot do strand-specific extension
         if (!ignore_strand) & (extend_option != &ExtendOption::Both)
             && self.column(strand)?.is_null().any()
-                | (!self
-                    .column(strand)?
-                    .unique()?
-                    .is_in(&Series::new("valid stands", VALIDSTRANDS))?
-                    .all())
+                | !is_in(
+                    &self.column(strand)?.unique()?,
+                    &Series::new("valid stands", VALIDSTRANDS),
+                )?
+                .all()
         {
             bail!("The strand column contains values other than {:?}. Please remove them first or set ignore_strand to true.", VALIDSTRANDS)
         }
@@ -1495,12 +1506,12 @@ impl Grangers {
                 false, /*nulls last*/
                 false, /*force stable sort*/
             )
-            .groupby(by.iter().map(|s| col(s)).collect::<Vec<Expr>>())
+            .group_by(by.iter().map(|s| col(s)).collect::<Vec<Expr>>())
             .agg([
                 all().exclude([start, end]).first(),
                 // process two columns at once
                 // Notice the df is sorted
-                as_struct(&[col(start), col(end)])
+                as_struct([col(start), col(end)].to_vec())
                     .apply(
                         move |s| apply_fn(s, slack),
                         GetOutput::from_type(DataType::List((DataType::Int64).into())),
@@ -1954,7 +1965,7 @@ impl Grangers {
                         // // if it is not the same, we create a Sequence and push it to seq_vec
                         let definition = Definition::new(curr_tx.clone(), None);
                         let sequence = Sequence::from_iter(exon_u8_vec.clone());
-                        let rec = &Record::new(definition, sequence);
+                        let rec = &noodles::fasta::Record::new(definition, sequence);
 
                         let write_record: bool;
                         // call the callback if we have one
@@ -1989,7 +2000,7 @@ impl Grangers {
             // // if it is not the same, we create a Sequence and push it to seq_vec
             let definition = Definition::new(curr_tx.clone(), None);
             let sequence = Sequence::from_iter(exon_u8_vec.clone());
-            let rec = &Record::new(definition, sequence);
+            let rec = &noodles::fasta::Record::new(definition, sequence);
 
             let write_record: bool;
             // call the callback if we have one
@@ -2120,7 +2131,7 @@ impl Grangers {
                 let definition = Definition::new(name, None);
                 if let Some(sequence) = sequence {
                     writer
-                        .write_record(&Record::new(definition, sequence))
+                        .write_record(&noodles::fasta::Record::new(definition, sequence))
                         .with_context(|| {
                             format!(
                                 "Could not write sequence {} to the output file; Cannot proceed.",
@@ -2250,7 +2261,7 @@ impl Grangers {
             for (feat_name, chrsi_rec) in name_vec.into_iter().zip(chrsi) {
                 if let Ok(sequence) = chrsi_rec {
                     let definition = Definition::new(feat_name, None);
-                    let rec = &Record::new(definition, sequence);
+                    let rec = &noodles::fasta::Record::new(definition, sequence);
 
                     let write_record: bool;
                     // call the callback if we have one
@@ -2325,7 +2336,7 @@ impl Grangers {
         let reader = std::fs::File::open(fasta_path).map(BufReader::new)?;
         let mut reader = noodles::fasta::Reader::new(reader);
         // let mut seq_vec: Vec<Option<Sequence>> = vec![None; exon_gr.df().height()];
-        let mut transcript_seq_vec: Vec<Record> =
+        let mut transcript_seq_vec: Vec<noodles::fasta::Record> =
             Vec::with_capacity(self.df().column(transcript_id)?.unique()?.len());
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
@@ -2399,7 +2410,7 @@ impl Grangers {
                         // if it is not the same, we create a Sequence and push it to seq_vec
                         let definition = Definition::new(curr_tx.clone(), None);
                         let sequence = Sequence::from_iter(exon_u8_vec.clone());
-                        transcript_seq_vec.push(Record::new(definition, sequence));
+                        transcript_seq_vec.push(noodles::fasta::Record::new(definition, sequence));
                         exon_u8_vec.clear();
                         exon_u8_vec.extend(seq.as_ref().iter());
                         // update the current transcript id
@@ -2426,7 +2437,7 @@ impl Grangers {
         ignore_strand: bool,
         name: Option<&str>,
         oob_option: &OOBOption,
-    ) -> anyhow::Result<Vec<Option<Record>>>
+    ) -> anyhow::Result<Vec<Option<noodles::fasta::Record>>>
 // anyhow::Result<Vec<fasta::record::Sequence>>
     {
         self.validate(false, true)?;
@@ -2470,7 +2481,8 @@ impl Grangers {
         let reader = std::fs::File::open(fasta_path).map(BufReader::new)?;
         let mut reader = noodles::fasta::Reader::new(reader);
 
-        let mut seq_vec: Vec<Option<Record>> = vec![None; essential_gr.df().height()];
+        let mut seq_vec: Vec<Option<noodles::fasta::Record>> =
+            vec![None; essential_gr.df().height()];
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
         // 1. subset the dataframe by the chromosome name
         // 2. get the sequence of the features in the dataframe on that fasta record
@@ -2515,7 +2527,7 @@ impl Grangers {
 
                 let definition = Definition::new(seq_name, None);
 
-                seq_vec[idx] = seq.map(|seq| Record::new(definition, seq));
+                seq_vec[idx] = seq.map(|seq| noodles::fasta::Record::new(definition, seq));
             }
         }
 
@@ -2525,6 +2537,21 @@ impl Grangers {
     pub fn get_sequences<T: AsRef<Path>>(
         &mut self,
         ref_path: T,
+        ignore_strand: bool,
+        name_column: Option<&str>,
+        oob_option: OOBOption,
+    ) -> anyhow::Result<GrangersSequenceCollection> {
+        self.get_sequences_from_read(
+            std::fs::File::open(ref_path)?,
+            ignore_strand,
+            name_column,
+            oob_option,
+        )
+    }
+
+    pub fn get_sequences_from_read<R: Read>(
+        &mut self,
+        reader: R,
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
@@ -2575,9 +2602,7 @@ impl Grangers {
         essential_gr.set_signature(self.get_signature());
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
-        let mut reader = std::fs::File::open(ref_path)
-            .map(BufReader::new)
-            .map(noodles::fasta::Reader::new)?;
+        let mut reader = noodles::fasta::Reader::new(BufReader::new(reader));
         // let mut reader = noodles::fasta::Reader::new(reader);
 
         let sig = essential_gr.get_signature();
@@ -2637,7 +2662,7 @@ impl Grangers {
                 };
 
                 let definition = Definition::new(feat_name, None);
-                let record = Record::new(definition, sequence);
+                let record = noodles::fasta::Record::new(definition, sequence);
 
                 //seq_vec[idx as usize] = Some(record);
                 // add this to the sequence collection
@@ -2651,13 +2676,13 @@ impl Grangers {
         Ok(seq_coll)
     }
 
-    pub fn iter_sequences<T: AsRef<Path>>(
+    pub fn iter_sequences_from_reader<R: Read>(
         &mut self,
-        ref_path: T,
+        reader: R,
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
-    ) -> anyhow::Result<Pin<Box<GrangersSeqIter>>> {
+    ) -> anyhow::Result<Pin<Box<GrangersSeqIter<R>>>> {
         self.validate(false, true)?;
 
         // if name is invalid, ignore
@@ -2704,7 +2729,8 @@ impl Grangers {
         essential_gr.set_signature(self.get_signature());
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
-        let reader = std::fs::File::open(ref_path).map(BufReader::new)?;
+        let reader = BufReader::new(reader);
+
         let filt_opt = GrangersFilterOpts {
             seqname: seqname.to_owned(),
             name_column,
@@ -2712,6 +2738,21 @@ impl Grangers {
         };
 
         Ok(GrangersSeqIter::new(reader, filt_opt, essential_gr))
+    }
+
+    pub fn iter_sequences<T: AsRef<Path>>(
+        &mut self,
+        ref_path: T,
+        ignore_strand: bool,
+        name_column: Option<&str>,
+        oob_option: OOBOption,
+    ) -> anyhow::Result<Pin<Box<GrangersSeqIter<std::fs::File>>>> {
+        self.iter_sequences_from_reader(
+            std::fs::File::open(ref_path)?,
+            ignore_strand,
+            name_column,
+            oob_option,
+        )
     }
 
     /// Get the sequences of the intervals from one fasta record.
@@ -2723,7 +2764,7 @@ impl Grangers {
     /// If the position less than 1 or exceeds the length of the sequence, it will return None.
     pub(crate) fn get_sequences_fasta_record(
         &self,
-        record: &fasta::record::Record,
+        record: &noodles::fasta::Record,
         oob_option: &OOBOption,
     ) -> anyhow::Result<Vec<Option<Sequence>>> {
         self.validate(true, true)?;
@@ -2782,7 +2823,7 @@ pub struct GrangersFilterOpts {
     oob_option: OOBOption,
 }
 
-pub struct GrangersSeqIter {
+pub struct GrangersSeqIter<R: Read> {
     // the essential grangers struct holding
     // the required fields across *all* of the
     // target sequences
@@ -2793,7 +2834,7 @@ pub struct GrangersSeqIter {
     chr_gr: Option<Grangers>,
     // a noodles Fasta reader for reading the
     // target sequences
-    seq_reader: noodles::fasta::Reader<std::io::BufReader<std::fs::File>>,
+    seq_reader: noodles::fasta::Reader<std::io::BufReader<R>>,
     // the current seq record
     seq_record: noodles::fasta::Record,
     // the filter options that will be applied
@@ -2814,16 +2855,16 @@ pub struct GrangersSeqIter {
 
 use core::pin::Pin;
 
-impl GrangersSeqIter {
+impl<R: Read> GrangersSeqIter<R> {
     pub fn new(
-        breader: std::io::BufReader<std::fs::File>,
+        breader: std::io::BufReader<R>,
         filt_opt: GrangersFilterOpts,
         essential_gr: Grangers,
     ) -> Pin<Box<Self>> {
         let reader = noodles::fasta::Reader::new(breader);
         let definition = Definition::new("empty", None);
         let sequence = Sequence::from(b"A".to_vec());
-        let curr_record = fasta::Record::new(definition, sequence);
+        let curr_record = noodles::fasta::Record::new(definition, sequence);
         let v: Vec<String> = vec![];
         let o: Vec<u32> = vec![];
         Box::pin(GrangersSeqIter {
@@ -2840,8 +2881,8 @@ impl GrangersSeqIter {
     }
 }
 
-impl Iterator for GrangersSeqIter {
-    type Item = (GrangersRecordID, Record);
+impl<R: Read> Iterator for GrangersSeqIter<R> {
+    type Item = (GrangersRecordID, noodles::fasta::Record);
 
     #[allow(clippy::question_mark)]
     fn next(&mut self) -> Option<Self::Item> {
@@ -2857,7 +2898,7 @@ impl Iterator for GrangersSeqIter {
                     if let Ok(sequence) = chr_seq_rec {
                         return Some((
                             GrangersRecordID::new(row_idx),
-                            Record::new(Definition::new(feat_name, None), sequence),
+                            noodles::fasta::Record::new(Definition::new(feat_name, None), sequence),
                         ));
                     }
                     // if we don't have a sequence (this was empty), we want to go to the next
@@ -2902,10 +2943,10 @@ impl Iterator for GrangersSeqIter {
                         warn!("GrangersSeqIter: was able to read record definition, but no sequence. This seems like a problem!");
                         return None;
                     }
-                    let sequence = noodles::fasta::record::sequence::Sequence::from(seq_buffer);
+                    let sequence = Sequence::from(seq_buffer);
 
                     // at this point we have the next sequence record
-                    self.seq_record = Record::new(definition, sequence);
+                    self.seq_record = noodles::fasta::Record::new(definition, sequence);
 
                     let chr_name = self
                         .seq_record
@@ -2966,7 +3007,10 @@ impl Iterator for GrangersSeqIter {
                         )
                     };
                     let ref_record = unsafe {
-                        core::mem::transmute::<&Record, &'static Record>(&self.seq_record)
+                        core::mem::transmute::<
+                            &noodles::fasta::Record,
+                            &'static noodles::fasta::Record,
+                        >(&self.seq_record)
                     };
                     self.chr_seq_iter = Some(
                         ChrRowSeqIter::new(ref_grangers, ref_record, self.filt_opt.oob_option)
@@ -2987,7 +3031,7 @@ impl Iterator for GrangersSeqIter {
 
 struct ChrRowSeqIter<'a> {
     iters: Vec<polars::series::SeriesIter<'a>>,
-    record: &'a Record,
+    record: &'a noodles::fasta::Record,
     oob_option: OOBOption,
     seqlen: usize,
 }
@@ -2995,7 +3039,7 @@ struct ChrRowSeqIter<'a> {
 impl<'a> ChrRowSeqIter<'a> {
     pub fn new(
         grangers: &'a Grangers,
-        record: &'a Record,
+        record: &'a noodles::fasta::Record,
         oob_option: OOBOption,
     ) -> anyhow::Result<Self> {
         let fc = grangers.field_columns();
@@ -4462,7 +4506,7 @@ mod tests {
         let sequence = Sequence::from(
             b"GTAGTTCTCTGGGACCTGCAAGATTAGGCAGGGACATGTGAGAGGTGACAGGGACCTGCA".to_vec(),
         );
-        let record = Record::new(definition, sequence.clone());
+        let record = noodles::fasta::Record::new(definition, sequence.clone());
 
         let seq_vec = gr
             .get_sequences_fasta_record(&record, &OOBOption::Skip)
@@ -4508,7 +4552,7 @@ mod tests {
         let sequence = Sequence::from(
             b"GTAGTTCTCTGGGACCTGCAAGATTAGGCAGGGACATGTGAGAGGTGACAGGGACCTGCA".to_vec(),
         );
-        let record = Record::new(definition, sequence.clone());
+        let record = noodles::fasta::Record::new(definition, sequence.clone());
 
         let mut chrsi = ChrRowSeqIter::new(&gr, &record, OOBOption::Skip).unwrap();
 
@@ -4738,11 +4782,14 @@ mod tests {
         )
         .unwrap();
 
-        gr.update_df(df1.clone()).unwrap();
+        gr.update_df(df1.clone(), false, false).unwrap();
         assert_eq!(gr.df(), &df1);
 
         // Then we check if we will get error if the new dataframe is unexpected.
-        assert!(gr.clone().update_df(DataFrame::default()).is_err());
+        assert!(gr
+            .clone()
+            .update_df(DataFrame::default(), false, false)
+            .is_err());
         // first check if the dataframe can be updated
         let df2 = df!(
             "seqname" => ["chr1111", "chr1", "chr1", "chr2", "chr2", "chr2", "chr2"],
@@ -4754,6 +4801,6 @@ mod tests {
         )
         .unwrap();
 
-        assert!(gr.update_df(df2).is_err());
+        assert!(gr.update_df(df2, false, false).is_err());
     }
 }
