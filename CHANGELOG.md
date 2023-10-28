@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/COMBINE-lab/grangers/compare/v0.3.1...v0.4.0) (2023-10-28)
+
+
+### Features
+
+* bump noodles version ([0c93e50](https://github.com/COMBINE-lab/grangers/commit/0c93e50e46a6f8a2aa11bb2d101d8bcb9ba8652d))
+
+
+### Bug Fixes
+
+* be pendantic about polars version ([2e33395](https://github.com/COMBINE-lab/grangers/commit/2e33395ee7b4a508481d47e04ae21863dcc6c32f))
+
 ## [0.3.1](https://github.com/COMBINE-lab/grangers/compare/v0.3.0...v0.3.1) (2023-07-24)
 
 
