@@ -89,7 +89,7 @@ pub fn _file_line_count<T: AsRef<Path>>(file_path: T) -> anyhow::Result<usize> {
     Ok(num_lines)
 }
 
-pub fn equal_length<T, R>(vec1: &Vec<T>, vec2: &Vec<R>) -> bool {
+pub fn equal_length<T, R>(vec1: &[T], vec2: &[R]) -> bool {
     vec1.len() == vec2.len()
 }
 

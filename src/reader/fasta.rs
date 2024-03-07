@@ -53,18 +53,18 @@ impl SeqInfo {
         extra: Option<HashMap<String, Vec<String>>>,
     ) -> anyhow::Result<SeqInfo> {
         if let Some(v) = &seqlengths {
-            if equal_length(&seqname, v) {
+            if equal_length(&seqname[..], &v[..]) {
                 bail!("seqname and seqlengths have different length; Could not create SeqInfo")
             }
         }
         if let Some(v) = &is_circular {
-            if equal_length(&seqname, v) {
+            if equal_length(&seqname[..], &v[..]) {
                 bail!("seqname and is_circular have different length; Could not create SeqInfo")
             }
         }
         if let Some(hm) = &extra {
             for (k, v) in hm.iter() {
-                if equal_length(&seqname, v) {
+                if equal_length(&seqname[..], &v[..]) {
                     bail!(
                         "seqname and {} have different length; Could not create SeqInfo",
                         k
@@ -128,11 +128,13 @@ fn _get_chromsize<T: BufRead>(
 
     for result in rdr.records() {
         let record = result?;
+
+        let record_name = std::str::from_utf8(record.name())?;
+
         seqname.push(
-            record
-                .name()
+            record_name
                 .split_once(' ')
-                .unwrap_or((record.name(), ""))
+                .unwrap_or((record_name, ""))
                 .0
                 .to_string(),
         );

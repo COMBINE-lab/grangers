@@ -35,12 +35,12 @@ categories = ["science", "data-structures"]
 [dependencies]
 anyhow = "1.0"
 flate2 = { version = "1.0.28", features = ["zlib"], default-features = false }
-noodles = { version = "0.56.0", features = ["gtf","gff","fasta", "core"] }
+noodles = { version = "0.65.0", features = ["gtf","gff","fasta", "core"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.17", default-features = true, features = ["env-filter"] }
-polars = { version = "0.34.2", features = ["lazy","dataframe_arithmetic","sort_multiple", "checked_arithmetic","rows","dtype-struct", "dtype-categorical", "list_eval","concat_str", "strings", "is_in", "abs"]}
+polars = { version = "0.38.1", features = ["lazy","dataframe_arithmetic", "checked_arithmetic","rows","dtype-struct", "dtype-categorical", "list_eval","concat_str", "strings", "is_in", "abs"]}
 peak_alloc = "0.2.0"
 rust-lapper = "1.1.0"
 clap = { version = "4.4.7", features = ["derive", "cargo", "deprecated", "wrap_help", "help", "usage", "error-context"] } 
 lazy_static = "1.4.0"
-nutype = "0.3.1"
+nutype = "0.4.0"

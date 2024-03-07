@@ -34,8 +34,7 @@ lazy_static! {
 
 type LapperType = Lapper<u64, (usize, Vec<String>)>;
 
-#[nutype]
-#[derive(*)]
+#[nutype(derive(Debug, Clone, AsRef))]
 pub struct GrangersRecordID(u32);
 
 pub struct GrangersSequenceCollection {
@@ -343,12 +342,14 @@ impl Grangers {
         // for attribute columns, we concat the name with its value
         expr_vec.extend(attr_cols.iter().map(|&col_name| {
             (when(col(col_name).is_not_null())
-                .then(lit(col_name) + lit(" \"") + col(col_name).cast(DataType::Utf8) + lit("\";"))
+                .then(
+                    lit(col_name) + lit(" \"") + col(col_name).cast(DataType::String) + lit("\";"),
+                )
                 .otherwise(lit("")))
             .alias(col_name)
         }));
 
-        // then, we prepare the final datafram for polar csv writer
+        // then, we prepare the final dataframe for polar csv writer
         let out_df = self.df().clone()
             .lazy()
             .select(
@@ -363,7 +364,7 @@ impl Grangers {
                 col(fc.field("score").expect("Could not get the score field. Please report this issue in our GitHub repo.")),
                 col(fc.field("strand").expect("Could not get the strand field. Please report this issue in our GitHub repo.")),
                 col(fc.field("phase").expect("Could not get the phase field. Please report this issue in our GitHub repo.")),
-                concat_str(attr_cols.iter().map(|&c| col(c)).collect::<Vec<_>>(), "").alias("attributes"),
+                concat_str(attr_cols.iter().map(|&c| col(c)).collect::<Vec<_>>(), "",false).alias("attributes"),
             ])
             .fill_nan(lit("."))
             .fill_null(lit("."))
@@ -389,7 +390,7 @@ impl Grangers {
 
         let mut file = std::fs::File::create(file_path)?;
         CsvWriter::new(&mut file)
-            .has_header(false)
+            .include_header(false)
             .with_separator(b'\t')
             .with_null_value(".".to_string())
             .finish(&mut out_df)?;
@@ -1015,9 +1016,10 @@ impl Grangers {
             .with_column(col(exon_number.as_str()).cast(DataType::UInt32))
             .select([all().sort_by(
                 [
-                    col(seqname).cast(DataType::Categorical(None)),
-                    col(strand).cast(DataType::Categorical(None)),
-                    col(transcript_id).cast(DataType::Categorical(None)),
+                    col(seqname).cast(DataType::Categorical(None, CategoricalOrdering::Lexical)),
+                    col(strand).cast(DataType::Categorical(None, CategoricalOrdering::Lexical)),
+                    col(transcript_id)
+                        .cast(DataType::Categorical(None, CategoricalOrdering::Lexical)),
                     col(exon_number.as_str()),
                 ],
                 [false],
@@ -1324,12 +1326,12 @@ impl Grangers {
                                 .add(lit(1)),
                         )
                         .over(by)
-                        .cast(DataType::Utf8)
+                        .cast(DataType::String)
                         .alias(name),
                 )
                 .collect()?;
         } else {
-            self.df = self.df.with_row_count(name, offset)?;
+            self.df = self.df.with_row_index(name, offset)?;
         }
         Ok(())
     }
@@ -1539,7 +1541,7 @@ impl Grangers {
             .drop_nulls(Some(vec![cols([start, end])]))
             .with_column(
                 lit(".")
-                    .cast(DataType::Utf8)
+                    .cast(DataType::String)
                     .alias("ignore_strand-temp-nobody-will-use-this-name-right"),
             )
             .select([all().exclude([
@@ -1692,19 +1694,19 @@ impl Grangers {
             let s = ess_iters[0]
                 .next()
                 .expect("should have as many iterations as rows")
-                .cast(&DataType::Int64)?
+                .cast(&DataType::Int64)
                 .try_extract::<i64>()? as u64;
 
             // we add 1 to the end because rust-lappers uses right-exclusive intervals
             let e = ess_iters[1]
                 .next()
                 .expect("should have as many iterations as rows")
-                .cast(&DataType::Int64)?
+                .cast(&DataType::Int64)
                 .try_extract::<i64>()? as u64
                 + 1;
 
             // we take the seqname and strand
-            let seqn = if let AnyValue::Utf8(t) = ess_iters[2]
+            let seqn = if let AnyValue::String(t) = ess_iters[2]
                 .next()
                 .expect("should have as many iterations as rows")
             {
@@ -1715,7 +1717,7 @@ impl Grangers {
 
             let strd = if ignore_strand {
                 String::from(".")
-            } else if let AnyValue::Utf8(t) = ess_iters[3]
+            } else if let AnyValue::String(t) = ess_iters[3]
                 .next()
                 .expect("should have as many iterations as rows")
             {
@@ -1727,7 +1729,7 @@ impl Grangers {
             // we take the by columns
             let mut by_vec = Vec::new();
             for it in by_iters.iter_mut() {
-                let v = if let AnyValue::Utf8(t) =
+                let v = if let AnyValue::String(t) =
                     it.next().expect("should have as many iterations as rows")
                 {
                     t.to_string()
@@ -1899,8 +1901,9 @@ impl Grangers {
         // 3. for each transcript, we join the transcripts' exon sequences to get the sequence of the transcript
         for result in reader.records() {
             let record = result?;
+            let record_name = std::str::from_utf8(record.name())?;
 
-            let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
+            let chr_name = record_name.strip_suffix(' ').unwrap_or(record_name);
 
             let chr_gr = exon_gr.filter(seqname, &[chr_name])?;
 
@@ -1938,7 +1941,7 @@ impl Grangers {
             let mut tx_id_iter = chr_gr
                 .df()
                 .column(transcript_id)?
-                .utf8()?
+                .str()?
                 .into_iter()
                 .peekable();
             let mut curr_tx = if let Some(id) = tx_id_iter
@@ -2109,8 +2112,9 @@ impl Grangers {
         // 3. insert the sequence into the sequence vector according to the row order
         for result in reader.records() {
             let record = result?;
+            let record_name = std::str::from_utf8(record.name())?;
 
-            let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
+            let chr_name = record_name.strip_suffix(' ').unwrap_or(record_name);
             let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
 
             if chr_gr.df().height() == 0 {
@@ -2119,7 +2123,7 @@ impl Grangers {
             let name_vec = chr_gr
                 .df()
                 .column(name_column.as_str())?
-                .utf8()?
+                .str()?
                 .into_iter()
                 .map(|s| s.unwrap())
                 .collect::<Vec<_>>();
@@ -2209,7 +2213,7 @@ impl Grangers {
 
         let mut df = if name_column.as_str() == "row_order" {
             self.df
-                .with_row_count("row_order", None)?
+                .with_row_index("row_order", None)?
                 .select(selection)?
         } else {
             self.df.select(selection)?
@@ -2240,8 +2244,9 @@ impl Grangers {
         // 3. insert the sequence into the sequence vector according to the row order
         for result in reader.records() {
             let record = result?;
+            let record_name = std::str::from_utf8(record.name())?;
 
-            let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
+            let chr_name = record_name.strip_suffix(' ').unwrap_or(record_name);
             let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
 
             if chr_gr.df().height() == 0 {
@@ -2251,7 +2256,7 @@ impl Grangers {
             let name_vec = chr_gr
                 .df()
                 .column(name_column.as_str())?
-                .utf8()?
+                .str()?
                 .into_iter()
                 .map(|s| s.unwrap())
                 .collect::<Vec<_>>();
@@ -2345,8 +2350,9 @@ impl Grangers {
         // 3. for each transcript, we join the transcripts' exon sequences to get the sequence of the transcript
         for result in reader.records() {
             let record = result?;
+            let record_name = std::str::from_utf8(record.name())?;
 
-            let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
+            let chr_name = record_name.strip_suffix(' ').unwrap_or(record_name);
             let chr_gr = exon_gr.filter(seqname, &[chr_name])?;
 
             if chr_gr.df().height() == 0 {
@@ -2383,7 +2389,7 @@ impl Grangers {
             let mut tx_id_iter = chr_gr
                 .df()
                 .column(transcript_id)?
-                .utf8()?
+                .str()?
                 .into_iter()
                 .peekable();
             let mut curr_tx = if let Some(id) = tx_id_iter
@@ -2463,7 +2469,7 @@ impl Grangers {
             .df
             .select(selection)?
             .lazy()
-            .with_row_count("row_order", None)
+            .with_row_index("row_order", None)
             .with_column(if ignore_strand {
                 lit("+").alias("strand")
             } else {
@@ -2489,8 +2495,9 @@ impl Grangers {
         // 3. insert the sequence into the sequence vector according to the row order
         for result in reader.records() {
             let record = result?;
+            let record_name = std::str::from_utf8(record.name())?;
 
-            let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
+            let chr_name = record_name.strip_suffix(' ').unwrap_or(record_name);
             let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
 
             if chr_gr.df().height() == 0 {
@@ -2500,7 +2507,7 @@ impl Grangers {
                 chr_gr
                     .df()
                     .column(name)?
-                    .utf8()?
+                    .str()?
                     .into_iter()
                     .map(|s| s.unwrap())
                     .collect::<Vec<_>>()
@@ -2587,7 +2594,7 @@ impl Grangers {
             .df
             .select(selection)?
             .lazy()
-            .with_row_count("row_order", None)
+            .with_row_index("row_order", None)
             .with_column(if ignore_strand {
                 lit("+").alias("strand")
             } else {
@@ -2617,8 +2624,9 @@ impl Grangers {
         // 3. insert the sequence into the sequence vector according to the row order
         for result in reader.records() {
             let record = result?;
+            let record_name = std::str::from_utf8(record.name())?;
 
-            let chr_name = record.name().strip_suffix(' ').unwrap_or(record.name());
+            let chr_name = record_name.strip_suffix(' ').unwrap_or(record_name);
             let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
 
             if chr_gr.df().height() == 0 {
@@ -2628,8 +2636,8 @@ impl Grangers {
             let name_vec_iter = chr_gr
                 .df()
                 .column(name_column.as_str())?
-                .cast(&DataType::Utf8)?
-                .utf8()?
+                .cast(&DataType::String)?
+                .str()?
                 .into_iter()
                 .map(|s| {
                     s.expect(
@@ -2714,7 +2722,7 @@ impl Grangers {
             .df
             .select(selection)?
             .lazy()
-            .with_row_count("row_order", None)
+            .with_row_index("row_order", None)
             .with_column(if ignore_strand {
                 lit("+").alias("strand")
             } else {
@@ -2785,7 +2793,7 @@ impl Grangers {
             .i64()?
             .into_iter()
             .zip(ses[1].i64()?.into_iter())
-            .zip(ses[2].utf8()?.into_iter())
+            .zip(ses[2].str()?.into_iter())
         {
             if let (Some(start), Some(end)) = (start, end) {
                 let (start, end) = if oob_option == &OOBOption::Truncate {
@@ -2947,12 +2955,10 @@ impl<R: Read> Iterator for GrangersSeqIter<R> {
 
                     // at this point we have the next sequence record
                     self.seq_record = noodles::fasta::Record::new(definition, sequence);
+                    let record_name = std::str::from_utf8(self.seq_record.name())
+                        .expect("GrangersSeqIter: could not convert record name to utf8");
 
-                    let chr_name = self
-                        .seq_record
-                        .name()
-                        .strip_suffix(' ')
-                        .unwrap_or(self.seq_record.name());
+                    let chr_name = record_name.strip_suffix(' ').unwrap_or(record_name);
 
                     self.chr_gr = Some(
                         self.essential_gr
@@ -2972,8 +2978,8 @@ impl<R: Read> Iterator for GrangersSeqIter<R> {
                         .df()
                         .column(self.filt_opt.name_column.as_str())
                         .expect("GrangersSeqIter: cannot get name_column")
-                        .utf8()
-                        .expect("GrangersSeqIter: cannot convert name_vec to utf8")
+                        .str()
+                        .expect("GrangersSeqIter: cannot convert name_vec to str")
                         .into_iter()
                         .map(|s| s.unwrap().to_owned())
                         .collect::<Vec<_>>()
@@ -3071,7 +3077,7 @@ impl<'a> Iterator for ChrRowSeqIter<'a> {
             let sequence = if let (
                 AnyValue::Int64(start),
                 AnyValue::Int64(end),
-                AnyValue::Utf8(strand),
+                AnyValue::String(strand),
             ) = (start, end, strand)
             {
                 // we need to convert the start and end to trunacated one if oob_option is Truncate
@@ -4472,7 +4478,7 @@ mod tests {
         assert_eq!(
             gr1.column("transcript_id")
                 .unwrap()
-                .utf8()
+                .str()
                 .unwrap()
                 .into_iter()
                 .map(|x| x.unwrap().to_string())
@@ -4612,7 +4618,7 @@ mod tests {
         let gtf_df_attributes = gtf_df
             .column("attributes")
             .unwrap()
-            .utf8()
+            .str()
             .unwrap()
             .into_iter()
             .map(|x| x.unwrap())
@@ -4627,7 +4633,7 @@ mod tests {
             gtf_df
                 .column("source")
                 .unwrap()
-                .utf8()
+                .str()
                 .unwrap()
                 .into_iter()
                 .map(|x| x.unwrap())
