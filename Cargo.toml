@@ -31,7 +31,8 @@ keywords = [
   "genome-annotation",
 ]
 categories = ["science", "data-structures"]
-
+[lib]
+doctest = false
 [dependencies]
 anyhow = "1.0"
 flate2 = { version = "1.0.28", features = ["zlib"], default-features = false }

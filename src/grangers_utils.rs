@@ -6,6 +6,26 @@ use std::path::Path;
 pub(crate) const VALIDSTRANDS: [&str; 2] = ["+", "-"];
 
 #[derive(Copy, Clone, PartialEq, Eq)]
+/// Represents supported genomic file formats.
+///
+/// This enumeration includes various file formats commonly used in bioinformatics and genomic data processing,
+/// such as GTF, GFF, BED, SAM, BAM, FASTA, and FASTQ.
+///
+/// # Variants
+///
+/// * `GTF` - Gene Transfer Format, commonly used for annotation and gene information.
+/// * `GFF` - General Feature Format, used for describing genes and other features of DNA, RNA, and protein sequences.
+/// * `BED` - Browser Extensible Data, a format for describing genomic regions.
+/// * `SAM` - Sequence Alignment/Map format, used for storing sequence alignments.
+/// * `BAM` - Binary version of the SAM format, more efficient for storage and analysis.
+/// * `FASTA` - Text-based format for representing nucleotide or peptide sequences.
+/// * `FASTQ` - Similar to FASTA but also includes quality information for each sequence.
+///
+/// # Methods
+///
+/// * `get_essential`: Returns a slice of essential attribute names specific to GTF or GFF formats.
+/// * `is_gtf`: Checks if the file format is GTF.
+///
 pub enum FileFormat {
     GTF,
     GFF,
@@ -17,6 +37,36 @@ pub enum FileFormat {
 }
 
 impl FileFormat {
+    /// Retrieves the essential attributes associated with the file format.
+    ///
+    /// This method provides a convenient way to access a predefined list of essential attributes
+    /// for genomic file formats that have structured attributes, such as GTF and GFF. These attributes
+    /// are crucial for the correct parsing and handling of these file formats in genomic analyses.
+    ///
+    /// # Returns
+    ///
+    /// A slice of string slices (`&[&str]`):
+    /// * For `FileFormat::GTF` and `FileFormat::GFF`, it returns a reference to an array containing the names
+    ///   of essential attributes defined in `GXFESSENTIALATTRIBUTES`.
+    /// * For all other file formats, it returns an empty slice, as they do not have a predefined set of
+    ///   essential attributes.
+    ///
+    /// # Examples
+    ///
+    /// Getting essential attributes for GTF and GFF formats:
+    ///
+    /// ```rust
+    /// let gtf_format = FileFormat::GTF;
+    /// let gtf_essentials = gtf_format.get_essential();
+    /// assert_eq!(gtf_essentials, ["gene_id", "transcript_id"]); // Assuming these are the essential attributes for GTF/GFF.
+    ///
+    /// let bed_format = FileFormat::BED;
+    /// let bed_essentials = bed_format.get_essential();
+    /// assert!(bed_essentials.is_empty());
+    /// ```
+    ///
+    /// This method is particularly useful when working with genomic data parsers or validators that require
+    /// knowledge of essential fields for correct processing.
     pub fn get_essential(&self) -> &[&str] {
         match self {
             FileFormat::GTF => GXFESSENTIALATTRIBUTES.as_ref(),
@@ -30,7 +80,30 @@ impl FileFormat {
 }
 impl std::str::FromStr for FileFormat {
     type Err = anyhow::Error;
-
+    /// Checks if the file format is GTF (Gene Transfer Format).
+    ///
+    /// This method allows for a quick verification to determine whether the current instance
+    /// of the `FileFormat` enum is set to the GTF format, which is commonly used for gene annotations.
+    ///
+    /// # Returns
+    ///
+    /// * `true`: If the `FileFormat` instance is `FileFormat::GTF`.
+    /// * `false`: Otherwise.
+    ///
+    /// # Examples
+    ///
+    /// Checking the file format:
+    ///
+    /// ```rust
+    /// let format = FileFormat::GTF;
+    /// assert!(format.is_gtf()); // Returns true because the format is GTF.
+    ///
+    /// let another_format = FileFormat::FASTA;
+    /// assert!(!another_format.is_gtf()); // Returns false because the format is not GTF.
+    /// ```
+    ///
+    /// This method is particularly useful for conditional processing based on the file format, such as applying
+    /// GTF-specific parsing logic or validation checks.
     fn from_str(s: &str) -> anyhow::Result<FileFormat> {
         let ft = match s.to_lowercase().as_str() {
             "gtf" => FileFormat::GTF,
@@ -130,9 +203,51 @@ pub fn is_gzipped<T: BufRead>(reader: &mut T) -> std::io::Result<bool> {
 }
 
 #[derive(Clone, Copy)]
-/// This enum is used for specifying the interval type of the input ranges.\
-/// Each variant takes a `i64` to represent the coordinate system.\
-/// For example, `Inclusive(1)` means 1-based [start,end]. This is also the format used in Grangers.\
+/// Represents types of intervals used in various genomic file formats.
+///
+/// This enum allows distinguishing between different conventions for handling interval start and end
+/// points, which can vary between inclusive and exclusive, and can impact genomic data interpretation.
+///
+/// # Variants
+///
+/// * `Inclusive(i64)`: Represents intervals that include both start and end points (e.g., GTF, GFF formats).
+/// * `Exclusive(i64)`: Represents intervals that exclude both start and end points (e.g., VCF format).
+/// * `LeftInclusive(i64)`: Represents intervals that include the start point but exclude the end point.
+/// * `RightInclusive(i64)`: Represents intervals that exclude the start point but include the end point (e.g., BED format).
+///
+/// The `i64` value represents an offset that might be applied to the interval (commonly 0 or 1 depending on the format).
+///
+/// # Default
+///
+/// Implements the `Default` trait, providing a default value:
+///
+/// * `Inclusive(1)`: Used as a safe default for most genomic formats that include both start and end points.
+///
+/// # Methods
+///
+/// * `from`: Creates an `IntervalType` based on the given file format, handling common formats like GTF, GFF, BED, SAM, and BAM.
+/// * `start_offset`: Calculates the offset to be applied to the start coordinate based on the interval type.
+/// * `end_offset`: Calculates the offset to be applied to the end coordinate based on the interval type.
+///
+/// # Examples
+///
+/// Determining interval type based on file format:
+///
+/// ```rust
+/// let interval_type = IntervalType::from("BED");
+/// assert_eq!(interval_type, IntervalType::RightInclusive(0));
+/// ```
+///
+/// Calculating coordinate adjustments for interval types:
+///
+/// ```rust
+/// let interval_type = IntervalType::Inclusive(1);
+/// assert_eq!(interval_type.start_offset(), 0); // No adjustment needed for inclusive start
+/// assert_eq!(interval_type.end_offset(), 0);   // No adjustment needed for inclusive end
+/// ```
+///
+/// This enum is particularly useful when converting between genomic coordinate systems used in different file formats
+/// or when implementing algorithms that require precise handling of sequence intervals.
 pub enum IntervalType {
     /// Inclusive interval, e.g. [start, end]. GTF and GFF use this.
     Inclusive(i64),
@@ -145,19 +260,111 @@ pub enum IntervalType {
 }
 
 impl Default for IntervalType {
+    /// Provides a default interval type.
+    ///
+    /// This method returns a default value for the `IntervalType` enum. The default is set to
+    /// `IntervalType::Inclusive(1)`, which is a common setting for many genomic formats like GTF, GFF, and SAM,
+    /// where intervals are typically inclusive, meaning they include both the start and end positions.
+    ///
+    /// # Returns
+    ///
+    /// Returns `IntervalType::Inclusive(1)`, representing an inclusive interval with an offset of 1.
+    /// This offset reflects the 1-based indexing common to certain genomic data formats.
+    ///
+    /// # Examples
+    ///
+    /// Getting a default interval type:
+    ///
+    /// ```rust
+    /// let default_interval = IntervalType::default();
+    /// assert_eq!(default_interval, IntervalType::Inclusive(1));
+    /// ```
+    ///
+    /// This default method simplifies the initialization of interval types for common scenarios in genomic data processing,
+    /// ensuring consistency and reducing the need for repetitive specification of the same interval type.
+
     fn default() -> Self {
         IntervalType::Inclusive(1)
     }
 }
 
 impl IntervalType {
+    /// Creates an interval type based on a genomic file format.
+    ///
+    /// This method converts a string representing a genomic file format into an `IntervalType` instance,
+    /// applying conventional interval settings for that format. This allows users to handle genomic data
+    /// correctly according to the conventions used by different file formats.
+    ///
+    /// # Note
+    ///
+    /// Currently, only "GTF", "GFF", "SAM", "BAM", and "BED" formats are supported. Other formats will cause the method
+    /// to panic. It is recommended to handle this potential panic in your code or ensure the format is supported
+    /// before calling this method.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `T`: A type that implements the `ToString` trait, which allows passing string literals,
+    ///   `String` objects, or any other type that can be converted to a string representation of the file format.
+    ///
+    /// # Arguments
+    ///
+    /// * `file_type`: The file format for which to create the corresponding `IntervalType`.
+    ///
+    /// # Returns
+    ///
+    /// Returns an instance of `IntervalType` corresponding to the given file format:
+    /// * `IntervalType::Inclusive(1)`: For "GTF", "GFF", or "SAM" formats, which typically use inclusive intervals.
+    /// * `IntervalType::RightInclusive(0)`: For "BAM" or "BED" formats, which use right-inclusive (0-based) intervals.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an unsupported file format is provided. It's important to ensure that the file format
+    /// is one of the supported types to prevent runtime errors.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// let interval_type_gtf = IntervalType::from("GTF");
+    /// assert_eq!(interval_type_gtf, IntervalType::Inclusive(1));
+    ///
+    /// let interval_type_bed = IntervalType::from("BED");
+    /// assert_eq!(interval_type_bed, IntervalType::RightInclusive(0));
+    /// ```
     pub fn from<T: ToString>(file_type: T) -> Self {
         match file_type.to_string().to_lowercase().as_str() {
-            "gtf" | "gff" | "bam" | "sam" => IntervalType::Inclusive(1),
-            "bed" => IntervalType::RightInclusive(0),
+            "gtf" | "gff" | "sam" => IntervalType::Inclusive(1),
+            "bam" | "bed" => IntervalType::RightInclusive(0),
             _ => panic!("The file type is not supported"),
         }
     }
+    /// Calculates the start position offset based on the interval type.
+    ///
+    /// This method determines how much to adjust the start coordinate of a genomic interval
+    /// to convert between different interval notations used in various file formats. The adjustment
+    /// depends on the specific type of interval (inclusive, exclusive, etc.) and its inherent offset.
+    ///
+    /// # Returns
+    ///
+    /// Returns an `i64` value representing the offset to be applied to the start coordinate:
+    /// * For `IntervalType::Inclusive` and `IntervalType::LeftInclusive`, returns `1 - c`, adjusting for 1-based inclusive coordinates.
+    /// * For `IntervalType::RightInclusive` and `IntervalType::Exclusive`, returns `2 - c`, adjusting for exclusive start points or 0-based coordinates.
+    ///
+    /// Here, `c` is the custom offset associated with the interval type, typically reflecting
+    /// differences in how different genomic file formats treat interval start points.
+    ///
+    /// # Examples
+    ///
+    /// Calculating start offsets for different interval types:
+    ///
+    /// ```rust
+    /// assert_eq!(IntervalType::Inclusive(1).start_offset(), 0); // No adjustment needed for 1-based inclusive start
+    /// assert_eq!(IntervalType::Exclusive(1).start_offset(), 2); // Adjusting for exclusive start, typically 0-based
+    /// assert_eq!(IntervalType::RightInclusive(0).start_offset(), 2); // Same adjustment as exclusive but for right inclusive
+    /// assert_eq!(IntervalType::LeftInclusive(1).start_offset(), 0); // Similar to inclusive, maintains 1-based start
+    /// ```
+    ///
+    /// The `start_offset` method aids in the proper conversion and interpretation of genomic intervals,
+    /// ensuring compatibility and correctness across different data formats and analysis workflows.
     pub fn start_offset(&self) -> i64 {
         // 1 - c is for coordinate
         // the other 1 is for exclusive
@@ -168,6 +375,35 @@ impl IntervalType {
             IntervalType::Exclusive(c) => 1 + 1 - c,
         }
     }
+    /// Calculates the end position offset based on the interval type.
+    ///
+    /// This method determines the necessary adjustment to the end coordinate of a genomic interval
+    /// to accommodate differences in interval notations (inclusive vs exclusive) across various genomic data formats.
+    /// The offset is calculated based on whether the end position is considered part of the interval (inclusive)
+    /// or not (exclusive).
+    ///
+    /// # Returns
+    ///
+    /// Returns an `i64` value representing the offset to be applied to the end coordinate:
+    /// * For `IntervalType::Inclusive` and `IntervalType::RightInclusive`, returns `1 - c`, maintaining the end position for inclusive coordinates.
+    /// * For `IntervalType::LeftInclusive` and `IntervalType::Exclusive`, returns `0 - c`, adjusting for exclusive end points or converting from 1-based to 0-based end coordinates.
+    ///
+    /// Here, `c` is the custom offset associated with the interval type, typically used to adapt
+    /// to the differences in indexing conventions between genomic file formats.
+    ///
+    /// # Examples
+    ///
+    /// Calculating end offsets for different interval types:
+    ///
+    /// ```rust
+    /// assert_eq!(IntervalType::Inclusive(1).end_offset(), 0); // No adjustment needed for 1-based inclusive end
+    /// assert_eq!(IntervalType::Exclusive(1).end_offset(), 0); // Adjusting for exclusive end, typically reflecting removal of last position
+    /// assert_eq!(IntervalType::RightInclusive(1).end_offset(), 0); // No adjustment, as end is included (typical for BED format)
+    /// assert_eq!(IntervalType::LeftInclusive(1).end_offset(), 0); // Adjusting as end is exclusive, moving from 1-based to 0-based system
+    /// ```
+    ///
+    /// The `end_offset` method is crucial for correctly handling genomic intervals during conversion
+    /// and processing tasks, ensuring accurate representation and analysis of genomic data across different formats.
     pub fn end_offset(&self) -> i64 {
         // 1 - c is for coordinate
         // -1 is for exclusive
