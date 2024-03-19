@@ -190,7 +190,7 @@ pub fn _setdiff<T: Eq + Clone>(vec1: &[T], vec2: &[T]) -> Vec<T> {
 /// returns the relevant std::io::Error.
 ///
 /// Notes: implementation taken from
-/// https://github.com/zaeleus/noodles/blob/ba1b34ce22e72c2df277b20ce4c5c7b75d75a199/noodles-util/src/variant/reader/builder.rs#L131
+/// <https://github.com/zaeleus/noodles/blob/ba1b34ce22e72c2df277b20ce4c5c7b75d75a199/noodles-util/src/variant/reader/builder.rs#L131>
 pub fn is_gzipped<T: BufRead>(reader: &mut T) -> std::io::Result<bool> {
     const GZIP_MAGIC_NUMBER: [u8; 2] = [0x1f, 0x8b];
 

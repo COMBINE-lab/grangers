@@ -357,7 +357,7 @@ pub enum OOBOption {
 /// The fields in this struct are utilized by various Grangers methods to interpret the genomic feature information correctly.
 ///
 /// It is designed according to the GTF/GFF format.
-/// https://useast.ensembl.org/info/website/upload/gff.html
+/// <https://useast.ensembl.org/info/website/upload/gff.html>
 /// The default values are the column names used in GTF/GFF files.
 /// This will be used in almost all Grangers methods.
 /// # Fields

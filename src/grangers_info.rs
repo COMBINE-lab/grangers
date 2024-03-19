@@ -8,7 +8,7 @@ use anyhow::{bail, Context};
 use lazy_static::lazy_static;
 pub(crate) use noodles::fasta::record::{Definition, Sequence};
 use nutype::nutype;
-use polars::{lazy::prelude::*, prelude::*, series::Series};
+use polars::{frame::DataFrame, lazy::prelude::*, prelude::*, series::Series};
 use rust_lapper::{Interval, Lapper};
 // use tracing::field;
 use std::collections::{HashMap, HashSet};
@@ -46,13 +46,14 @@ pub struct GrangersRecordID(u32);
 ///
 /// ### Fields
 ///
-/// * `records` - A vector of tuples, each containing a `GrangersRecordID` and a `noodles::fasta::Record`.
-///    The `GrangersRecordID` serves as a unique identifier for each genomic sequence, while the
-///    `noodles::fasta::Record` contains the actual sequence data and related metadata as defined by
+/// * `records` - A vector of tuples, each containing a [`GrangersRecordID`] and a [`noodles::fasta::Record`].
+///    The [`GrangersRecordID`] serves as a unique identifier for each genomic sequence, while the
+///    [`noodles::fasta::Record`] contains the actual sequence data and related metadata as defined by
 ///    the `noodles` crate, a Rust library for handling bioinformatics formats.
 ///
 /// * `signature` - A 64-bit unsigned integer used as a unique signature for the entire collection.
 ///    This can be used to verify the integrity of the data or to quickly compare this collection with others.
+///
 pub struct GrangersSequenceCollection {
     pub records: Vec<(GrangersRecordID, noodles::fasta::Record)>,
     pub signature: u64,
@@ -205,10 +206,10 @@ impl GrangersSequenceCollection {
 ///
 /// ### Fields
 ///
-/// * `df`: The underlying [`DataFrame`] from the Polars library, recording all annotations
+/// * `df`: The underlying [DataFrame](polars::frame::DataFrame) from the Polars library, recording all annotations
 ///   and genomic data. This serves as the primary container for the genomic information.
 ///
-/// * `misc`: An optional `HashMap<String, Vec<String>>` for storing additional information
+/// * `misc`: An optional [`HashMap<String, Vec<String>>`] for storing additional information
 ///   or metadata related to the genomic data. Each key represents a metadata category with
 ///   an associated list of string values.
 ///
@@ -342,7 +343,7 @@ impl Grangers {
     ///
     /// * `df`: The primary [`DataFrame`] containing the genomic annotations and data.
     /// * `seqinfo`: Optional [`SeqInfo`] providing reference genome information.
-    /// * `misc`: Optional `HashMap<String, Vec<String>>` for storing additional metadata.
+    /// * `misc`: Optional [`HashMap<String, Vec<String>>`] for storing additional metadata.
     /// * `interval_type`: The [`IntervalType`] dictating how genomic intervals should be interpreted.
     /// * `field_columns`: [`FieldColumns`] specifying the names of essential columns in the data frame.
     /// * `verbose`: A boolean flag that, if set to true, enables verbose logging.
@@ -403,9 +404,9 @@ impl Grangers {
         Ok(gr)
     }
 
-    /// Constructs a [`Grangers`] instance from a [`GStruct`] object, typically representing parsed genomic data.
+    /// Constructs a [`Grangers`] instance from a [`reader::GStruct`] object, typically representing parsed genomic data.
     ///
-    /// This function converts genomic data contained within a [`GStruct`] (a common data structure for holding
+    /// This function converts genomic data contained within a [`reader::GStruct`] (a common data structure for holding
     /// genomic information) into a [`Grangers`] instance, suitable for further analysis and processing. It involves
     /// transforming genomic attributes into a Polars `DataFrame`, setting appropriate data types, and ensuring the
     /// data aligns with the expected [`Grangers`] structure.
@@ -2836,7 +2837,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<()>`. If successful, transcript sequences are written to the output file; otherwise, an error is returned.
+    /// Returns an [`anyhow::Result<()>`]. If successful, transcript sequences are written to the output file; otherwise, an error is returned.
     ///
     /// ### Example
     ///
