@@ -206,7 +206,7 @@ impl GrangersSequenceCollection {
 ///
 /// ### Fields
 ///
-/// * `df`: The underlying [DataFrame](polars::frame::DataFrame) from the Polars library, recording all annotations
+/// * `df`: The underlying [DataFrame] from the Polars library, recording all annotations
 ///   and genomic data. This serves as the primary container for the genomic information.
 ///
 /// * `misc`: An optional [`HashMap<String, Vec<String>>`] for storing additional information
@@ -270,7 +270,7 @@ impl Grangers {
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<str>`, allowing for flexible string references as field names.
+    /// * `T`: A type that implements [`AsRef<str>`], allowing for flexible string references as field names.
     ///
     /// ### Arguments
     ///
@@ -280,10 +280,10 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<bool>`:
-    /// * `Ok(true)` if any null values are found in the specified fields.
-    /// * `Ok(false)` if no null values are found in the specified fields.
-    /// * `Err(...)` if there is an error during the validation process or if `is_bail` is true and null values are found.
+    /// Returns an [`anyhow::Result<bool>`]:
+    /// * [`Ok`]`(true)` if any null values are found in the specified fields.
+    /// * [`Ok`]`(false)` if no null values are found in the specified fields.
+    /// * [`Err`] if there is an error during the validation process or if `is_bail` is true and null values are found.
     ///
     /// ### Example
     ///
@@ -350,9 +350,9 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `Result<Grangers>`:
-    /// * `Ok(Grangers)`: A new [`Grangers`] instance if all validations pass and no critical errors occur.
-    /// * `Err(...)`: An error encapsulated within an `Error` if validations fail or if adjustments
+    /// Returns an [`Result<Grangers>`]:
+    /// * [Ok]`(Grangers)`: A new [`Grangers`] instance if all validations pass and no critical errors occur.
+    /// * [Err]`(...)`: An error encapsulated within an [`anyhow::Error`] if validations fail or if adjustments
     ///    to the data frame encounter issues.
     ///
     /// ### Example
@@ -753,7 +753,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns a reference to the `FieldColumns` struct.
+    /// Returns a reference to the [`FieldColumns`] struct.
     ///
     /// ### Example
     ///
@@ -773,7 +773,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns a mutable reference to the `FieldColumns` struct.
+    /// Returns a mutable reference to the [`FieldColumns`] struct.
     ///
     /// ### Example
     ///
@@ -798,7 +798,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns a `Result` containing a reference to the `FieldColumns` struct or an error if validation fails and `is_bail` is `true`.
+    /// Returns a [`Result`] containing a reference to the [`FieldColumns`] struct or an error if validation fails and `is_bail` is `true`.
     ///
     /// ### Example
     ///
@@ -817,13 +817,13 @@ impl Grangers {
         self.field_columns().is_valid(self.df(), is_warn, is_bail)?;
         Ok(self.field_columns())
     }
-    /// Provides a reference to the `DataFrame` stored within the Grangers instance.
+    /// Provides a reference to the [`DataFrame`] stored within the Grangers instance.
     ///
     /// This method returns a read-only reference to the genomic data `DataFrame` held by the Grangers instance.
     ///
     /// ### Returns
     ///
-    /// Returns a reference to the `DataFrame`.
+    /// Returns a reference to the [`DataFrame`].
     ///
     /// ### Example
     ///
@@ -836,13 +836,13 @@ impl Grangers {
         &self.df
     }
 
-    /// Provides a mutable reference to the `DataFrame` stored within the Grangers instance.
+    /// Provides a mutable reference to the [`DataFrame`] stored within the Grangers instance.
     ///
     /// This method allows for modifications to the genomic data `DataFrame` held by the Grangers instance.
     ///
     /// ### Returns
     ///
-    /// Returns a mutable reference to the `DataFrame`.
+    /// Returns a mutable reference to the [`DataFrame`].
     ///
     /// ### Example
     ///
@@ -855,14 +855,14 @@ impl Grangers {
         &mut self.df
     }
 
-    /// Provides a reference to the `IntervalType` used by the Grangers instance.
+    /// Provides a reference to the [`IntervalType`] used by the Grangers instance.
     ///
-    /// This method returns a read-only reference to the `IntervalType`, which defines how genomic intervals are interpreted
+    /// This method returns a read-only reference to the [`IntervalType`], which defines how genomic intervals are interpreted
     /// within the Grangers instance.
     ///
     /// ### Returns
     ///
-    /// Returns a reference to the `IntervalType`.
+    /// Returns a reference to the [`IntervalType`].
     ///
     /// ### Example
     ///
@@ -948,7 +948,7 @@ impl Grangers {
         Ok(())
     }
 
-    /// Filters the `DataFrame` within the Grangers instance based on specified values in a column.
+    /// Filters the [`DataFrame`] within the Grangers instance based on specified values in a column.
     ///
     /// This method creates a new Grangers instance containing rows from the internal `DataFrame` where values in the specified column match any of the provided values.
     ///
@@ -959,7 +959,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns a new `Grangers` instance containing only the filtered rows.
+    /// Returns a new [`Grangers`] instance containing only the filtered rows.
     ///
     /// ### Example
     ///
@@ -1026,14 +1026,14 @@ impl Grangers {
         self.signature = other_sig
     }
 
-    /// Updates a specific column in the Grangers instance's DataFrame.
+    /// Updates a specific column in the Grangers instance's [`DataFrame`].
     ///
-    /// This method updates the internal `DataFrame` by replacing or adding the specified column.
+    /// This method updates the internal [`DataFrame`] by replacing or adding the specified column.
     /// It can also update the internal mapping of field columns if a field column name is provided.
     ///
     /// ### Arguments
     ///
-    /// * `column`: The new `Series` to be inserted or used to replace an existing column in the `DataFrame`.
+    /// * `column`: The new `Series` to be inserted or used to replace an existing column in the [`DataFrame`].
     /// * `field_column`: An optional string reference indicating the field column to be updated with the new column's name.
     ///
     /// ### Returns
@@ -1077,13 +1077,13 @@ impl Grangers {
         Ok(())
     }
 
-    /// Updates the DataFrame of the Grangers instance.
+    /// Updates the [`DataFrame`] of the [`Grangers`] instance.
     ///
-    /// This method allows replacing the current `DataFrame` with a new one. It checks for compatibility in terms of shape and column names.
+    /// This method allows replacing the current [`DataFrame`] with a new one. It checks for compatibility in terms of shape and column names.
     ///
     /// ### Arguments
     ///
-    /// * `df`: The new `DataFrame` to set.
+    /// * `df`: The new [`DataFrame`] to set.
     /// * `is_warn`: A boolean flag to indicate whether to issue warnings for any discrepancies found.
     /// * `is_bail`: A boolean flag to indicate whether to halt the operation if discrepancies are found.
     ///
@@ -1122,9 +1122,9 @@ impl Grangers {
 }
 
 impl Grangers {
-    /// Retrieves the column name from the Grangers instance's DataFrame or FieldColumns.
+    /// Retrieves the column name from the Grangers instance's [`DataFrame`] or [`FieldColumns`].
     ///
-    /// This method checks whether the provided name corresponds to a column in the DataFrame or an entry in the FieldColumns.
+    /// This method checks whether the provided name corresponds to a column in the [`DataFrame`] or an entry in the [`FieldColumns`].
     /// It validates against null values if `bail_null` is set to true. If the name is not a recognized column or field, the method will return an error.
     ///
     /// ### Generics
@@ -1171,7 +1171,7 @@ impl Grangers {
         Ok(name)
     }
 
-    /// Retrieves the column name from the Grangers instance's DataFrame or FieldColumns.
+    /// Retrieves the column name from the Grangers instance's [`DataFrame`] or [`FieldColumns`].
     ///
     /// Similar to `get_column_name_str`, this method returns the column name as a `String`. It performs checks to ensure the column exists
     /// and optionally verifies the absence of null values depending on `bail_null`.
@@ -1220,9 +1220,9 @@ impl Grangers {
         Ok(name.to_string())
     }
 
-    /// Retrieves a reference to a Series from the Grangers instance's DataFrame based on the column name.
+    /// Retrieves a reference to a Series from the Grangers instance's [`DataFrame`] based on the column name.
     ///
-    /// This method attempts to find a Series in the DataFrame directly or through the FieldColumns mapping.
+    /// This method attempts to find a Series in the [`DataFrame`] directly or through the [`FieldColumns`] mapping.
     /// If the column is not found directly, it checks FieldColumns for a corresponding entry.
     ///
     /// ### Generics
@@ -1231,7 +1231,7 @@ impl Grangers {
     ///
     /// ### Arguments
     ///
-    /// * `name`: The name of the column to retrieve. This could be an actual DataFrame column name or a key from FieldColumns.
+    /// * `name`: The name of the column to retrieve. This could be an actual [`DataFrame`] column name or a key from FieldColumns.
     ///
     /// ### Returns
     ///
@@ -1259,7 +1259,7 @@ impl Grangers {
         Ok(col)
     }
 
-    /// Retrieves a list of Series from the Grangers instance's DataFrame for the specified columns.
+    /// Retrieves a list of Series from the Grangers instance's [`DataFrame`] for the specified columns.
     ///
     /// This method collects references to Series for each column name provided in the `names` array.
     /// It returns an error if any specified column name does not exist or if there is a problem retrieving the Series.
@@ -1291,14 +1291,14 @@ impl Grangers {
         Ok(cols)
     }
 
-    /// Retrieves the 'seqname' Series from the Grangers instance's DataFrame.
+    /// Retrieves the 'seqname' Series from the Grangers instance's [`DataFrame`].
     ///
     /// This method accesses the 'seqname' column defined in the FieldColumns of the Grangers instance,
     /// returning an error if the column does not exist or cannot be retrieved.
     ///
     /// ### Returns
     ///
-    /// Returns a reference to the 'seqname' Series from the DataFrame.
+    /// Returns a reference to the 'seqname' Series from the [`DataFrame`].
     ///
     /// ### Example
     ///
@@ -1311,14 +1311,14 @@ impl Grangers {
         self.column(self.field_columns.seqname())
     }
 
-    /// Retrieves the 'start' Series from the Grangers instance's DataFrame.
+    /// Retrieves the 'start' Series from the Grangers instance's [`DataFrame`].
     ///
     /// This method accesses the 'start' column defined in the FieldColumns of the Grangers instance,
     /// returning an error if the column does not exist or cannot be retrieved.
     ///
     /// ### Returns
     ///
-    /// Returns a reference to the 'start' Series from the DataFrame.
+    /// Returns a reference to the 'start' Series from the [`DataFrame`].
     ///
     /// ### Example
     ///
@@ -1331,14 +1331,14 @@ impl Grangers {
         self.column(self.field_columns.start())
     }
 
-    /// Retrieves the 'end' Series from the Grangers instance's DataFrame.
+    /// Retrieves the 'end' Series from the Grangers instance's [`DataFrame`].
     ///
     /// This method accesses the 'end' column defined in the FieldColumns of the Grangers instance,
     /// returning an error if the column does not exist or cannot be retrieved.
     ///
     /// ### Returns
     ///
-    /// Returns a reference to the 'end' Series from the DataFrame.
+    /// Returns a reference to the 'end' Series from the [`DataFrame`].
     ///
     /// ### Example
     ///
@@ -1351,14 +1351,14 @@ impl Grangers {
         self.column(self.field_columns.end())
     }
 
-    /// Retrieves the 'strand' Series from the Grangers instance's DataFrame.
+    /// Retrieves the 'strand' Series from the Grangers instance's [`DataFrame`].
     ///
     /// This method accesses the 'strand' column defined in the FieldColumns of the Grangers instance,
     /// returning an error if the column does not exist or cannot be retrieved.
     ///
     /// ### Returns
     ///
-    /// Returns a reference to the 'strand' Series from the DataFrame.
+    /// Returns a reference to the 'strand' [`Series`] from the [`DataFrame`].
     ///
     /// ### Example
     ///
@@ -1370,14 +1370,14 @@ impl Grangers {
     pub fn strand(&self) -> anyhow::Result<&Series> {
         self.column(self.field_columns.strand())
     }
-    /// Retrieves the 'score' Series from the Grangers instance's DataFrame.
+    /// Retrieves the 'score' [`Series`] from the [Grangers] instance's [DataFrame].
     ///
-    /// This method accesses the 'score' column defined in the FieldColumns of the Grangers instance.
-    /// It returns an error if the 'score' column does not exist or cannot be retrieved from the DataFrame.
+    /// This method accesses the 'score' column defined in the [FieldColumns] of the [Grangers] instance.
+    /// It returns an error if the 'score' column does not exist or cannot be retrieved from the [DataFrame].
     ///
     /// ### Returns
     ///
-    /// Returns a reference to the 'score' Series from the DataFrame.
+    /// Returns a reference to the 'score' [Series] from the [DataFrame].
     ///
     /// ### Example
     ///
@@ -1394,14 +1394,14 @@ impl Grangers {
         )
     }
 
-    /// Retrieves the 'phase' Series from the Grangers instance's DataFrame.
+    /// Retrieves the 'phase' Series from the [Grangers] instance's [DataFrame].
     ///
     /// This method accesses the 'phase' column defined in the FieldColumns of the Grangers instance.
-    /// It returns an error if the 'phase' column does not exist or cannot be retrieved from the DataFrame.
+    /// It returns an error if the 'phase' column does not exist or cannot be retrieved from the [DataFrame].
     ///
     /// ### Returns
     ///
-    /// Returns a reference to the 'phase' Series from the DataFrame.
+    /// Returns a reference to the 'phase' Series from the [DataFrame].
     ///
     /// ### Example
     ///
@@ -1418,14 +1418,14 @@ impl Grangers {
         )
     }
 
-    /// Retrieves the 'feature_type' Series from the Grangers instance's DataFrame.
+    /// Retrieves the 'feature_type' [Series] from the [Grangers] instance's [DataFrame].
     ///
-    /// This method accesses the 'feature_type' column defined in the FieldColumns of the Grangers instance.
-    /// It returns an error if the 'feature_type' column does not exist or cannot be retrieved from the DataFrame.
+    /// This method accesses the 'feature_type' column defined in the [FieldColumns] of the [Grangers] instance.
+    /// It returns an error if the 'feature_type' column does not exist or cannot be retrieved from the [DataFrame].
     ///
     /// ### Returns
     ///
-    /// Returns a reference to the 'feature_type' Series from the DataFrame.
+    /// Returns a reference to the 'feature_type' [Series] from the [DataFrame].
     ///
     /// ### Example
     ///
@@ -1442,14 +1442,14 @@ impl Grangers {
         )
     }
 
-    /// Retrieves a DataFrame representing the genomic range from the Grangers instance.
+    /// Retrieves a [DataFrame] representing the genomic range from the [Grangers] instance.
     ///
-    /// This method selects the 'start', 'end', and 'strand' columns from the Grangers instance's DataFrame
-    /// to construct a new DataFrame that represents the range of genomic features.
+    /// This method selects the 'start', 'end', and 'strand' columns from the [Grangers] instance's [DataFrame]
+    /// to construct a new [DataFrame] that represents the range of genomic features.
     ///
     /// ### Returns
     ///
-    /// Returns a new DataFrame containing only the 'start', 'end', and 'strand' columns.
+    /// Returns a new [DataFrame] containing only the 'start', 'end', and 'strand' columns.
     ///
     /// ### Example
     ///
@@ -1467,13 +1467,13 @@ impl Grangers {
         Ok(range)
     }
 
-    /// Checks if a column exists in the Grangers instance's DataFrame.
+    /// Checks if a column exists in the [Grangers] instance's [DataFrame].
     ///
-    /// This method verifies whether a column with the specified name exists within the DataFrame.
+    /// This method verifies whether a column with the specified name exists within the [DataFrame].
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<str>`, allowing for different string input types.
+    /// * `T`: A type that implements [`AsRef<str>`], allowing for different string input types.
     ///
     /// ### Arguments
     ///
@@ -1497,9 +1497,9 @@ impl Grangers {
 
 // validate Grangers
 impl Grangers {
-    /// Validates the Grangers instance's DataFrame and field columns.
+    /// Validates the [Grangers] instance's [DataFrame] and field columns.
     ///
-    /// This method performs several checks: it ensures the DataFrame is not empty, validates the field columns, and checks for null values in essential fields.
+    /// This method performs several checks: it ensures the [DataFrame] is not empty, validates the field columns, and checks for null values in essential fields.
     /// It issues warnings or errors based on the `is_warn` and `is_bail` flags.
     ///
     /// ### Arguments
@@ -1509,7 +1509,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns `Ok(true)` if the DataFrame and field columns pass all validation checks. Returns `Ok(false)` if there are validation issues but `is_bail` is set to false.
+    /// Returns `Ok(true)` if the [DataFrame] and field columns pass all validation checks. Returns [Ok]`(false)` if there are validation issues but `is_bail` is set to false.
     /// Returns an error if `is_bail` is set to true and there are validation issues.
     ///
     /// ### Example
@@ -1554,10 +1554,10 @@ impl Grangers {
         Ok(true)
     }
 
-    /// Fixes the field columns in the Grangers instance based on the current DataFrame.
+    /// Fixes the field columns in the [Grangers] instance based on the current [DataFrame].
     ///
-    /// This method attempts to repair issues with the field columns, such as missing or incorrect column names, by adjusting them to match the current DataFrame structure.
-    /// It will issue warnings if `is_warn` is set to true and if there are discrepancies between the field columns and the DataFrame.
+    /// This method attempts to repair issues with the field columns, such as missing or incorrect column names, by adjusting them to match the current [DataFrame] structure.
+    /// It will issue warnings if `is_warn` is set to true and if there are discrepancies between the field columns and the [DataFrame].
     ///
     /// ### Arguments
     ///
@@ -4269,7 +4269,7 @@ pub struct GrangersSeqIter<R: Read> {
 use core::pin::Pin;
 
 impl<R: Read> GrangersSeqIter<R> {
-    /// Creates a new instance of the GrangersSeqIter.
+    /// Creates a new instance of the [GrangersSeqIter].
     ///
     /// This constructor initializes a new sequence iterator for processing genomic data.
     /// It sets up the necessary internal state, including a FASTA reader for reading sequences,
@@ -4277,19 +4277,19 @@ impl<R: Read> GrangersSeqIter<R> {
     ///
     /// # Arguments
     ///
-    /// * `breader`: A `BufReader<R>` wrapping a data source implementing the `Read` trait. This reader is used
+    /// * `breader`: A [`BufReader<R>`] wrapping a data source implementing the [`Read`] trait. This reader is used
     ///   to stream genomic sequence data from FASTA-formatted files or other readable sources.
     ///
-    /// * `filt_opt`: Filter options encapsulated within a `GrangersFilterOpts` structure. These options
+    /// * `filt_opt`: Filter options encapsulated within a [GrangersFilterOpts] structure. These options
     ///   dictate how sequences should be filtered and processed during iteration, including which sequences
     ///   to include and how to handle sequences that extend beyond reference boundaries (OOB).
     ///
-    /// * `essential_gr`: A `Grangers` instance that holds the essential fields and dataset needed for sequence extraction.
+    /// * `essential_gr`: A [Grangers] instance that holds the essential fields and dataset needed for sequence extraction.
     ///   This provides the context in which sequence data will be interpreted and processed.
     ///
     /// # Returns
     ///
-    /// Returns a `Pin<Box<GrangersSeqIter<R>>>`: a pinned, heap-allocated instance of the iterator.
+    /// Returns a [`Pin<Box<GrangersSeqIter<R>>>`]: a pinned, heap-allocated instance of the iterator.
     /// This pinning is necessary to ensure the stability of the internal references due to the self-referential nature
     /// of streaming iterators.
     ///
