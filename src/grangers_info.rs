@@ -12,6 +12,7 @@ use polars::{frame::DataFrame, lazy::prelude::*, prelude::*, series::Series};
 use rust_lapper::{Interval, Lapper};
 // use tracing::field;
 use std::collections::{HashMap, HashSet};
+use std::convert::AsRef;
 use std::fs;
 use std::io::BufReader;
 use std::io::Read;
@@ -75,7 +76,7 @@ impl GrangersSequenceCollection {
     ///
     /// ### Returns
     ///
-    /// A new instance of `GrangersSequenceCollection` with the specified signature and initial capacity.
+    /// A new instance of [GrangersSequenceCollection] with the specified signature and initial capacity.
     ///
     /// ### Example
     ///
@@ -94,8 +95,8 @@ impl GrangersSequenceCollection {
 
     /// Adds a new genomic sequence record to the collection.
     ///
-    /// This method appends a new sequence record, consisting of a unique identifier (`GrangersRecordID`)
-    /// and a FASTA sequence record (`noodles::fasta::Record`), to the end of the collection. It allows
+    /// This method appends a new sequence record, consisting of a unique identifier ([GrangersRecordID])
+    /// and a FASTA sequence record ([noodles::fasta::Record]), to the end of the collection. It allows
     /// populating the collection with genomic sequence data for analysis or processing.
     ///
     /// ### Arguments
@@ -128,7 +129,7 @@ impl GrangersSequenceCollection {
     ///
     /// ### Returns
     ///
-    /// A non-mutable iterator (`std::slice::Iter`) over the sequence records in the collection. Each
+    /// A non-mutable iterator ([std::slice::Iter]) over the sequence records in the collection. Each
     /// item in the iterator is a reference to a tuple containing a [`GrangersRecordID`] and a
     /// [`noodles::fasta::Record`].
     ///
@@ -153,7 +154,7 @@ impl GrangersSequenceCollection {
     ///
     /// ### Returns
     ///
-    /// A mutable iterator (`std::slice::IterMut`) over the sequence records in the collection. Each
+    /// A mutable iterator ([std::slice::IterMut]) over the sequence records in the collection. Each
     /// item in the iterator is a mutable reference to a tuple containing a [`GrangersRecordID`] and a
     /// [`noodles::fasta::Record`].
     ///
@@ -191,8 +192,8 @@ impl GrangersSequenceCollection {
     ///
     /// ### Returns
     ///
-    /// A 64-bit unsigned integer (`u64
-
+    /// A 64-bit unsigned integer (`u64') representing the signature of this
+    /// [GrangersSequenceCollection]
     pub fn get_signature(&self) -> u64 {
         self.signature
     }
@@ -418,9 +419,9 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `Result<Grangers>`:
-    /// * `Ok(Grangers)`: A new [`Grangers`] instance created from the `GStruct` data.
-    /// * `Err(...)`: An error encapsulated within an `Error` if the data frame creation or [`Grangers`] initialization fails.
+    /// Returns an [`Result<Grangers>`]:
+    /// * [Ok]`(Grangers)`: A new [`Grangers`] instance created from the [reader::GStruct] data.
+    /// * [Err]`(...)`: An error encapsulated within an `Error` if the data frame creation or [`Grangers`] initialization fails.
     ///
     /// ### Example
     ///
@@ -478,23 +479,23 @@ impl Grangers {
         Ok(gr)
     }
 
-    /// Constructs a `Grangers` instance from a GTF (GFF2) file.
+    /// Constructs a [Grangers] instance from a GTF (GFF2) file.
     ///
-    /// This function reads genomic data from a GTF (Gene Transfer Format) file, converts it into a `GStruct` object,
-    /// and then transforms this data into a `Grangers` instance. The function allows for the exclusion of non-essential
+    /// This function reads genomic data from a GTF (Gene Transfer Format) file, converts it into a [reader::GStruct] object,
+    /// and then transforms this data into a [Grangers] instance. The function allows for the exclusion of non-essential
     /// attributes from the final data structure based on the `only_essential` flag.
     ///
     /// ### Arguments
     ///
-    /// * `file_path`: A reference to a `std::path::Path` specifying the location of the GTF file to be read.
-    /// * `only_essential`: A boolean flag indicating whether only essential attributes should be included in the final `Grangers` object.
+    /// * `file_path`: An [`AsRef<std::path::Path>`] specifying the location of the GTF file to be read.
+    /// * `only_essential`: A boolean flag indicating whether only essential attributes should be included in the final [Grangers] object.
     ///    If `true`, only essential genomic attributes are included, reducing memory usage and potentially improving performance.
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<Grangers>`:
-    /// * `Ok(Grangers)`: A `Grangers` instance created from the specified GTF file.
-    /// * `Err(...)`: An error encapsulated within an `anyhow::Error` if there are issues reading the file or constructing the `Grangers` instance.
+    /// Returns an [`anyhow::Result<Grangers>`]:
+    /// * [Ok]`(Grangers)`: A [Grangers] instance created from the specified GTF file.
+    /// * [Err]`(...)`: An error encapsulated within an [anyhow::Error] if there are issues reading the file or constructing the [Grangers] instance.
     ///
     /// ### Example
     ///
@@ -507,63 +508,34 @@ impl Grangers {
     ///
     /// This function may return an error if:
     /// * There is an issue reading or parsing the GTF file.
-    /// * The conversion process from `GStruct` to `Grangers` fails, such as due to data inconsistencies or internal validation errors.
-
-    pub fn from_gtf(file_path: &std::path::Path, only_essential: bool) -> anyhow::Result<Grangers> {
+    /// * The conversion process from [reader::GStruct] to [Grangers] fails, such as due to data inconsistencies or internal validation errors.
+    pub fn from_gtf<P: AsRef<std::path::Path>>(
+        file_path: P,
+        only_essential: bool,
+    ) -> anyhow::Result<Grangers> {
         let am = reader::AttributeMode::from(!only_essential);
-        let gstruct = reader::GStruct::from_gtf(file_path, am)?;
+        let gstruct = reader::GStruct::from_gtf(file_path.as_ref(), am)?;
         let gr = Grangers::from_gstruct(gstruct, IntervalType::Inclusive(1))?;
         Ok(gr)
     }
 
-    /// Constructs a `Grangers` instance from a GFF3 file.
+    /// Constructs a [Grangers] instance from a GFF3 file.
     ///
-    /// This function reads genomic data from a GFF3 (General Feature Format) file, converts it into a `GStruct` object,
-    /// and then transforms this data into a `Grangers` instance. The function allows for the exclusion of non-essential
+    /// This function reads genomic data from a GFF3 (General Feature Format) file, converts it into a [reader::GStruct] object,
+    /// and then transforms this data into a [Grangers] instance. The function allows for the exclusion of non-essential
     /// attributes from the final data structure based on the `only_essential` flag.
     ///
     /// ### Arguments
     ///
-    /// * `file_path`: A reference to a `std::path::Path` specifying the location of the GFF file to be read.
-    /// * `only_essential`: A boolean flag indicating whether only essential attributes should be included in the final `Grangers` object.
-    ///    If `true`, only essential genomic attributes are included, reducing memory usage and potentially improving performance.
+    /// * `file_path`: An [`AsRef<std::path::Path>`] specifying the location of the GTF file to be read.
+    /// * `only_essential`: A boolean flag indicating whether only essential attributes should be included in the final [Grangers] object.
+    ///    If `true`, only essential genomic attributes are included, reducing memory usage and potentially improving peformance.
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<Grangers>`:
-    /// * `Ok(Grangers)`: A `Grangers` instance created from the specified GFF file.
-    /// * `Err(...)`: An error encapsulated within an `anyhow::Error` if there are issues reading the file or constructing the `Grangers` instance.
-    ///
-    /// ### Errors
-    ///
-    /// This function may return an error if:
-    /// * There is an issue reading or parsing the GFF file.
-    /// * The conversion process from `GStruct` to `Grangers` fails, such as due to data inconsistencies or internal validation errors.
-    pub fn from_gff(file_path: &std::path::Path, only_essential: bool) -> anyhow::Result<Grangers> {
-        let am = reader::AttributeMode::from(!only_essential);
-        let gstruct = reader::GStruct::from_gff(file_path, am)?;
-        let gr = Grangers::from_gstruct(gstruct, IntervalType::Inclusive(1))?;
-        Ok(gr)
-    }
-
-    /// Constructs a `Grangers` instance from a GFF3 file.
-    ///
-    /// This function reads genomic data from a GFF3 (General Feature Format) file, converts it into a `GStruct` object,
-    /// and then transforms this data into a `Grangers` instance. The function allows for the exclusion of non-essential
-    /// attributes from the final data structure based on the `only_essential` flag.
-    ///
-    /// ### Arguments
-    ///
-    /// * `file_path`: A reference to a `std::path::Path` specifying the location of the GFF file to be read.
-    /// * `only_essential`: A boolean flag indicating whether only essential attributes should be included in the final `Grangers` object.
-    ///    If `true`, only essential genomic attributes are included, reducing memory usage and potentially improving performance.
-    ///
-    /// ### Returns
-    ///
-    /// Returns an `anyhow::Result<Grangers>`:
-    /// * `Ok(Grangers)`: A `Grangers` instance created from the specified GFF file.
-    /// * `Err(...)`: An error encapsulated within an `anyhow::Error` if there are issues reading the file or constructing the `Grangers` instance.
-    ///
+    /// Returns an [`anyhow::Result<Grangers>`]:
+    /// * [Ok]`(Grangers)`: A `Grangers` instance created from the specified GFF file.
+    /// * [Err]`(...)`: An error encapsulated within an `anyhow::Error` if there are issues reading the file or constructing the [Grangers] instance.
     /// ### Example
     ///
     /// ```rust
@@ -575,7 +547,16 @@ impl Grangers {
     ///
     /// This function may return an error if:
     /// * There is an issue reading or parsing the GFF file.
-    /// * The conversion process from `GStruct` to `Grangers` fails, such as due to data inconsistencies or internal validation errors.
+    /// * The conversion process from [reader::GStruct] to [Grangers] fails, such as due to data inconsistencies or internal validation errors.
+    pub fn from_gff<P: AsRef<std::path::Path>>(
+        file_path: P,
+        only_essential: bool,
+    ) -> anyhow::Result<Grangers> {
+        let am = reader::AttributeMode::from(!only_essential);
+        let gstruct = reader::GStruct::from_gff(file_path, am)?;
+        let gr = Grangers::from_gstruct(gstruct, IntervalType::Inclusive(1))?;
+        Ok(gr)
+    }
 
     // TODO: add the part about making/taking and checking the seqinfo
     pub fn add_seqinfo<T: AsRef<Path>>(&mut self, genome_file: T) -> anyhow::Result<()> {
@@ -583,18 +564,18 @@ impl Grangers {
         Ok(())
     }
 
-    /// Generates a DataFrame in GTF format from the Grangers instance's current data.
+    /// Generates a [DataFrame] in GTF format from the [Grangers] instance's current data.
     ///
-    /// This method processes the internal DataFrame, organizing and formatting it to adhere to the GTF (Gene Transfer Format) specification.
+    /// This method processes the internal [DataFrame], organizing and formatting it to adhere to the GTF (Gene Transfer Format) specification.
     /// It involves categorizing and handling different types of columns: existing fields, missing fields, and attribute columns.
     /// Existing fields are directly transferred, missing fields are filled with default values, and attribute columns are merged into
     /// a single 'attributes' column in GTF format.
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<DataFrame>`:
-    /// * `Ok(DataFrame)`: A new DataFrame formatted according to the GTF specifications, ready for export or further processing.
-    /// * `Err(...)`: An error occurred during the DataFrame transformation process.
+    /// Returns an [`anyhow::Result<DataFrame>`]:
+    /// * [Ok]`(DataFrame)`: A new DataFrame formatted according to the GTF specifications, ready for export or further processing.
+    /// * [Err]`(...)`: An error occurred during the DataFrame transformation process.
     ///
     /// ### Example
     ///
@@ -608,7 +589,6 @@ impl Grangers {
     /// This function may return an error if:
     /// * There is an issue retrieving or updating column names based on the GTF specification.
     /// * There is a failure in transforming the DataFrame, such as during column selection, null filling, or data type casting.
-
     pub fn get_gtf_df(&self) -> anyhow::Result<DataFrame> {
         // get a copy of the dataframe
         let df = self.df();
@@ -661,21 +641,42 @@ impl Grangers {
         }));
 
         // then, we prepare the final dataframe for polar csv writer
-        let out_df = self.df().clone()
+        let out_df = self
+            .df()
+            .clone()
             .lazy()
-            .select(
-                expr_vec
-            )
+            .select(expr_vec)
             .select([
-                col(fc.field("seqname").expect("Could not get the seqname field. Please report this issue in our GitHub repo.")),
-                col(fc.field("source").expect("Could not get the source field. Please report this issue in our GitHub repo.")),
-                col(fc.field("feature_type").expect("Could not get the feature_type field. Please report this issue in our GitHub repo.")),
-                col(fc.field("start").expect("Could not get the start field. Please report this issue in our GitHub repo.")),
-                col(fc.field("end").expect("Could not get the end field. Please report this issue in our GitHub repo.")),
-                col(fc.field("score").expect("Could not get the score field. Please report this issue in our GitHub repo.")),
-                col(fc.field("strand").expect("Could not get the strand field. Please report this issue in our GitHub repo.")),
-                col(fc.field("phase").expect("Could not get the phase field. Please report this issue in our GitHub repo.")),
-                concat_str(attr_cols.iter().map(|&c| col(c)).collect::<Vec<_>>(), "",false).alias("attributes"),
+                col(fc.field("seqname").expect(
+                    "Could not get the seqname field. Please report this issue via GitHub.",
+                )),
+                col(fc.field("source").expect(
+                    "Could not get the source field. Please report this issue via GitHub.",
+                )),
+                col(fc.field("feature_type").expect(
+                    "Could not get the feature_type field. Please report this issue via GitHub.",
+                )),
+                col(fc
+                    .field("start")
+                    .expect("Could not get the start field. Please report this issue via GitHub.")),
+                col(fc
+                    .field("end")
+                    .expect("Could not get the end field. Please report this issue via GitHub.")),
+                col(fc
+                    .field("score")
+                    .expect("Could not get the score field. Please report this issue via GitHub.")),
+                col(fc.field("strand").expect(
+                    "Could not get the strand field. Please report this issue via GitHub.",
+                )),
+                col(fc
+                    .field("phase")
+                    .expect("Could not get the phase field. Please report this issue via GitHub.")),
+                concat_str(
+                    attr_cols.iter().map(|&c| col(c)).collect::<Vec<_>>(),
+                    "",
+                    false,
+                )
+                .alias("attributes"),
             ])
             .fill_nan(lit("."))
             .fill_null(lit("."))
@@ -684,25 +685,25 @@ impl Grangers {
         Ok(out_df)
     }
 
-    /// Writes the Grangers instance's data as a GTF formatted file to the specified path.
+    /// Writes the [Grangers] instance's data as a GTF formatted file to the specified path.
     ///
-    /// This method exports the genomic data contained within the Grangers instance into a GTF (Gene Transfer Format) file.
+    /// This method exports the genomic data contained within the [Grangers] instance into a GTF (Gene Transfer Format) file.
     /// It first ensures that the output directory exists, then retrieves the internal DataFrame formatted according to GTF standards,
     /// and finally writes this data to the specified file path without including the header and using tab as the separator.
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<Path>`, allowing for flexible path references to the output file.
+    /// * `T`: A type that implements [`AsRef<Path>`], allowing for flexible path references to the output file.
     ///
     /// ### Arguments
     ///
-    /// * `file_path`: The path where the GTF file will be written. This can be any type that implements the `AsRef<Path>` trait, such as `&str`, `String`, `Path`, or `PathBuf`.
+    /// * `file_path`: The path where the GTF file will be written. This can be any type that implements the [`AsRef<Path>`] trait, such as `&str`, `String`, `Path`, or `PathBuf`.
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<()>` indicating the outcome of the file writing operation:
-    /// * `Ok(())`: Successfully wrote the GTF file.
-    /// * `Err(...)`: An error occurred during the file creation or data writing process.
+    /// Returns an [`anyhow::Result<()>`] indicating the outcome of the file writing operation:
+    /// * [Ok]`(())`: Successfully wrote the GTF file.
+    /// * [Err]`(...)`: An error occurred during the file creation or data writing process.
     ///
     /// ### Example
     ///
@@ -718,7 +719,6 @@ impl Grangers {
     /// * The specified output directory cannot be created or accessed.
     /// * There is an issue converting the internal DataFrame to GTF format.
     /// * There is a problem opening or writing to the specified file path.
-
     pub fn write_gtf<T: AsRef<Path>>(&self, file_path: T) -> anyhow::Result<()> {
         let file_path = file_path.as_ref();
 
@@ -745,10 +745,10 @@ impl Grangers {
 
 // get struct fields
 impl Grangers {
-    /// Provides a reference to the `FieldColumns` of the Grangers instance.
+    /// Provides a reference to the [FieldColumns] of the Grangers instance.
     ///
-    /// This method allows access to the `FieldColumns` struct, which specifies the names of essential columns
-    /// in the genomic data `DataFrame` stored within the Grangers instance. It enables read-only operations
+    /// This method allows access to the [FieldColumns] struct, which specifies the names of essential columns
+    /// in the genomic data [DataFrame] stored within the [Grangers] instance. It enables read-only operations
     /// to inspect column names and configurations.
     ///
     /// ### Returns
@@ -761,14 +761,14 @@ impl Grangers {
     /// let field_columns = grangers.field_columns();
     /// println!("Current field columns: {:?}", field_columns);
     /// ```
-
     pub fn field_columns(&self) -> &FieldColumns {
         &self.field_columns
     }
-    /// Provides a mutable reference to the `FieldColumns` of the Grangers instance.
+
+    /// Provides a mutable reference to the [FieldColumns] of the Grangers instance.
     ///
-    /// This method allows for the modification of the `FieldColumns` struct, which specifies the names of essential columns
-    /// in the genomic data `DataFrame` stored within the Grangers instance. This enables changing column names and configurations
+    /// This method allows for the modification of the [FieldColumns] struct, which specifies the names of essential columns
+    /// in the genomic data [DataFrame] stored within the [Grangers] instance. This enables changing column names and configurations
     /// directly.
     ///
     /// ### Returns
@@ -781,14 +781,13 @@ impl Grangers {
     /// let field_columns = grangers.field_columns_mut();
     /// field_columns.seqname = "chromosome".to_string();
     /// ```
-
     pub fn field_columns_mut(&mut self) -> &FieldColumns {
         &mut self.field_columns
     }
 
-    /// Validates and provides a reference to the `FieldColumns` of the Grangers instance.
+    /// Validates and provides a reference to the [FieldColumns] of the [Grangers] instance.
     ///
-    /// This method validates the current `FieldColumns` against the `DataFrame` and provides a reference to it if valid.
+    /// This method validates the current [FieldColumns] against the [DataFrame] and provides a reference to it if valid.
     /// If the columns are invalid, depending on the `is_warn` and `is_bail` flags, it either warns the user or stops the execution.
     ///
     /// ### Arguments
@@ -808,7 +807,6 @@ impl Grangers {
     ///     Err(e) => println!("Error validating field columns: {}", e),
     /// }
     /// ```
-
     pub fn field_columns_checked(
         &self,
         is_warn: bool,
@@ -817,9 +815,10 @@ impl Grangers {
         self.field_columns().is_valid(self.df(), is_warn, is_bail)?;
         Ok(self.field_columns())
     }
-    /// Provides a reference to the [`DataFrame`] stored within the Grangers instance.
+
+    /// Provides a reference to the [`DataFrame`] stored within the [Grangers] instance.
     ///
-    /// This method returns a read-only reference to the genomic data `DataFrame` held by the Grangers instance.
+    /// This method returns a read-only reference to the genomic data [DataFrame] held by the [Grangers] instance.
     ///
     /// ### Returns
     ///
@@ -831,14 +830,13 @@ impl Grangers {
     /// let dataframe = grangers.df();
     /// println!("Number of rows in DataFrame: {}", dataframe.height());
     /// ```
-
     pub fn df(&self) -> &DataFrame {
         &self.df
     }
 
-    /// Provides a mutable reference to the [`DataFrame`] stored within the Grangers instance.
+    /// Provides a mutable reference to the [`DataFrame`] stored within the [Grangers] instance.
     ///
-    /// This method allows for modifications to the genomic data `DataFrame` held by the Grangers instance.
+    /// This method allows for modifications to the genomic data [DataFrame] held by the [Grangers] instance.
     ///
     /// ### Returns
     ///
@@ -850,7 +848,6 @@ impl Grangers {
     /// let dataframe_mut = grangers.df_mut();
     /// dataframe_mut.sort_in_place("seqname", Default::default());
     /// ```
-
     pub fn df_mut(&mut self) -> &mut DataFrame {
         &mut self.df
     }
@@ -858,7 +855,7 @@ impl Grangers {
     /// Provides a reference to the [`IntervalType`] used by the Grangers instance.
     ///
     /// This method returns a read-only reference to the [`IntervalType`], which defines how genomic intervals are interpreted
-    /// within the Grangers instance.
+    /// within the [Grangers] instance.
     ///
     /// ### Returns
     ///
@@ -870,17 +867,17 @@ impl Grangers {
     /// let interval_type = grangers.interval_type();
     /// println!("Current interval type: {:?}", interval_type);
     /// ```
-
     pub fn interval_type(&self) -> &IntervalType {
         &self.interval_type
     }
-    /// Provides a reference to the optional `SeqInfo` stored within the Grangers instance.
+
+    /// Provides a reference to the optional [SeqInfo] stored within the [Grangers] instance.
     ///
-    /// This method returns an optional read-only reference to the `SeqInfo` struct, which contains reference genome information.
+    /// This method returns an optional shared reference to the [SeqInfo] struct, which contains reference genome information.
     ///
     /// ### Returns
     ///
-    /// Returns an optional reference to the `SeqInfo`.
+    /// Returns an optional reference to the [SeqInfo].
     ///
     /// ### Example
     ///
@@ -891,18 +888,17 @@ impl Grangers {
     ///     println!("No reference genome information available.");
     /// }
     /// ```
-
     pub fn seqinfo(&self) -> Option<&SeqInfo> {
         self.seqinfo.as_ref()
     }
 
-    /// Provides a mutable reference to the optional `SeqInfo` stored within the Grangers instance.
+    /// Provides a mutable reference to the optional [SeqInfo] stored within the [Grangers] instance.
     ///
-    /// This method allows for modifications to the `SeqInfo` struct, which contains reference genome information.
+    /// This method allows for modifications to the [SeqInfo] struct, which contains reference genome information.
     ///
     /// ### Returns
     ///
-    /// Returns an optional mutable reference to the `SeqInfo`.
+    /// Returns an optional mutable reference to the [SeqInfo].
     ///
     /// ### Example
     ///
@@ -911,32 +907,30 @@ impl Grangers {
     ///     seqinfo_mut.set_seqnames(vec!["chr1".to_string(), "chr2".to_string()]);
     /// }
     /// ```
-
     pub fn seqinfo_mut(&mut self) -> Option<&mut SeqInfo> {
         self.seqinfo.as_mut()
     }
 
-    /// Sorts the `DataFrame` within the Grangers instance based on specified columns.
+    /// Sorts the [DataFrame] within the Grangers instance based on specified columns.
     ///
-    /// This method sorts the internal `DataFrame` by the columns provided in the `by` argument.
+    /// This method sorts the internal [DataFrame] by the columns provided in the `by` argument.
     /// You can specify sorting order via the `descending` argument and whether to maintain the original order in case of ties with `maintain_order`.
     ///
     /// ### Arguments
     ///
     /// * `by`: A slice of strings representing the names of columns to sort by.
-    /// * `descending`: An implementation of `IntoVec<bool>` that indicates whether sorting should be in descending order for each column.
+    /// * `descending`: An implementation of [`IntoVec<bool>`] that indicates whether sorting should be in descending order for each column.
     /// * `maintain_order`: A boolean that, if set to true, maintains the original order of rows in case of ties.
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<()>` indicating the success or failure of the sorting operation.
+    /// Returns an [`anyhow::Result<()>`] indicating the success or failure of the sorting operation.
     ///
     /// ### Example
     ///
     /// ```rust
     /// grangers.sort_by(&["gene_id", "start"], vec![false, true], false)?;
     /// ```
-
     pub fn sort_by<T>(
         &mut self,
         by: &[&str],
@@ -948,9 +942,9 @@ impl Grangers {
         Ok(())
     }
 
-    /// Filters the [`DataFrame`] within the Grangers instance based on specified values in a column.
+    /// Filters the [DataFrame] within the [Grangers] instance based on specified values in a column.
     ///
-    /// This method creates a new Grangers instance containing rows from the internal `DataFrame` where values in the specified column match any of the provided values.
+    /// This method creates a new [Grangers] instance containing rows from the internal [DataFrame] where values in the specified column match any of the provided values.
     ///
     /// ### Arguments
     ///
@@ -959,14 +953,13 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns a new [`Grangers`] instance containing only the filtered rows.
+    /// Returns a new [Grangers] instance containing only the filtered rows.
     ///
     /// ### Example
     ///
     /// ```rust
     /// let filtered_grangers = grangers.filter("gene_type", &["protein_coding", "lincRNA"])?;
     /// ```
-
     pub fn filter<T: AsRef<str>>(&self, by: T, values: &[T]) -> anyhow::Result<Grangers> {
         let column = self.get_column_name(by.as_ref(), false)?;
 
@@ -990,9 +983,10 @@ impl Grangers {
             true,
         )
     }
-    /// Retrieves the signature of the Grangers instance.
+
+    /// Retrieves the signature of the [Grangers] instance.
     ///
-    /// This method returns the unique signature of the Grangers instance, which is useful for tracking changes or versions of the data.
+    /// This method returns the unique signature of the [Grangers] instance, which is useful for tracking changes or versions of the data.
     ///
     /// ### Returns
     ///
@@ -1004,48 +998,46 @@ impl Grangers {
     /// let signature = grangers.get_signature();
     /// println!("Grangers instance signature: {}", signature);
     /// ```
-
     pub fn get_signature(&self) -> u64 {
         self.signature
     }
-    /// Sets the signature of the Grangers instance.
+
+    /// Sets the signature of the [Grangers] instance.
     ///
-    /// This method allows setting a new signature for the Grangers instance. This can be useful for manual versioning or tracking specific changes.
+    /// This method allows setting a new signature for the [Grangers] instance. This can be useful for manual versioning or tracking specific changes.
     ///
     /// ### Arguments
     ///
-    /// * `other_sig`: The new signature to set for the Grangers instance.
+    /// * `other_sig`: The new signature to set for the [Grangers] instance.
     ///
     /// ### Example
     ///
     /// ```rust
     /// grangers.set_signature(new_signature);
     /// ```
-
     fn set_signature(&mut self, other_sig: u64) {
         self.signature = other_sig
     }
 
-    /// Updates a specific column in the Grangers instance's [`DataFrame`].
+    /// Updates a specific column in the [Grangers] instance's [DataFrame].
     ///
-    /// This method updates the internal [`DataFrame`] by replacing or adding the specified column.
+    /// This method updates the internal [DataFrame] by replacing or adding the specified column.
     /// It can also update the internal mapping of field columns if a field column name is provided.
     ///
     /// ### Arguments
     ///
-    /// * `column`: The new `Series` to be inserted or used to replace an existing column in the [`DataFrame`].
+    /// * `column`: The new [Series] to be inserted or used to replace an existing column in the [DataFrame].
     /// * `field_column`: An optional string reference indicating the field column to be updated with the new column's name.
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<()>` indicating the success or failure of the update operation.
+    /// Returns an [`anyhow::Result<()>`] indicating the success or failure of the update operation.
     ///
     /// ### Example
     ///
     /// ```rust
     /// grangers.update_column(new_series, Some("new_column"))?;
     /// ```
-
     pub fn update_column(
         &mut self,
         column: Series,
@@ -1096,7 +1088,6 @@ impl Grangers {
     /// ```rust
     /// grangers.update_df(new_df, true, true)?;
     /// ```
-
     pub fn update_df(&mut self, df: DataFrame, is_warn: bool, is_bail: bool) -> anyhow::Result<()> {
         // check if the dataframe has the same layout as the current one
         if df.shape() != self.df.shape() {
