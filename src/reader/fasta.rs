@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-#[derive(Clone)]
+
 /// Represents sequence information for genomic or reference datasets.
 ///
 /// This struct holds detailed information about sequences, including their names, lengths,
@@ -14,17 +14,17 @@ use std::path::Path;
 ///
 /// # Fields
 ///
-/// * `seqname`: A vector of `String` containing the names of the sequences (e.g., chromosomes).
+/// * `seqname`: A vector of [String] containing the names of the sequences (e.g., chromosomes).
 /// * `seqlengths`: An optional vector of `usize` representing the lengths of each sequence.
 /// * `is_circular`: An optional vector of `bool` indicating whether each sequence is circular.
-/// * `genome`: An optional `String` representing the name or identifier of the genome.
-/// * `extra`: An optional `HashMap` for storing additional metadata as key-value pairs.
+/// * `genome`: An optional [String] representing the name or identifier of the genome.
+/// * `extra`: An optional [HashMap] for storing additional metadata as key-value pairs.
 ///
 /// # Methods
 ///
 /// ## Constructor
 ///
-/// * `new`: Constructs a new `SeqInfo` instance from provided sequence details.
+/// * `new`: Constructs a new [SeqInfo] instance from provided sequence details.
 ///
 /// ## Accessors
 ///
@@ -36,16 +36,16 @@ use std::path::Path;
 ///
 /// ## Mutators
 ///
-/// * `set_seqnames`: Sets the sequence names for the `SeqInfo` instance.
+/// * `set_seqnames`: Sets the sequence names for the [SeqInfo] instance.
 ///
 /// ## From Fasta
 ///
-/// * `from_fasta`: Constructs a new `SeqInfo` instance by parsing a FASTA file to extract
+/// * `from_fasta`: Constructs a new [SeqInfo] instance by parsing a FASTA file to extract
 ///   sequence names and lengths.
 ///
 /// # Examples
 ///
-/// Creating a new `SeqInfo` instance:
+/// Creating a new [SeqInfo] instance:
 ///
 /// ```rust
 /// let seq_info = SeqInfo::new(
@@ -61,6 +61,7 @@ use std::path::Path;
 ///
 /// Ensure that the vectors for `seqname`, `seqlengths`, and `is_circular` (if provided) are of the same length
 /// to maintain consistency across sequence metadata. Mismatches in length will result in errors during instantiation.
+#[derive(Clone)]
 pub struct SeqInfo {
     seqname: Vec<String>,
     seqlengths: Option<Vec<usize>>,
@@ -99,25 +100,26 @@ impl SeqInfo {
     pub fn set_seqnames(&mut self, seqname: Vec<String>) {
         self.seqname = seqname;
     }
-    /// Creates a new instance of SeqInfo.
+
+    /// Creates a new instance of [SeqInfo].
     ///
-    /// This function initializes a SeqInfo struct with provided sequence information,
+    /// This function initializes a [SeqInfo] struct with provided sequence information,
     /// validating that the lengths of sequence names, sequence lengths, and circularity indicators match,
     /// ensuring data integrity and consistency.
     ///
     /// # Arguments
     ///
-    /// * `seqname`: A vector of `String` representing the names of the sequences (e.g., chromosome names).
+    /// * `seqname`: A vector of [String] representing the names of the sequences (e.g., chromosome names).
     /// * `seqlengths`: An optional vector of `usize` representing the lengths of each sequence.
     /// * `is_circular`: An optional vector of `bool` indicating whether each sequence is circular.
-    /// * `genome`: An optional `String` representing the name or identifier of the genome.
-    /// * `extra`: An optional `HashMap` for storing additional metadata as key-value pairs.
+    /// * `genome`: An optional [String] representing the name or identifier of the genome.
+    /// * `extra`: An optional [HashMap] for storing additional metadata as key-value pairs.
     ///
     /// # Returns
     ///
-    /// Returns `anyhow::Result<SeqInfo>`:
-    /// * `Ok(SeqInfo)`: If the instance is successfully created.
-    /// * `Err(anyhow::Error)`: If there is a mismatch in the lengths of provided vectors or other issues.
+    /// Returns [`anyhow::Result<SeqInfo>`](anyhow::Result):
+    /// * [Ok]`(`[SeqInfo]`)`: If the instance is successfully created.
+    /// * [Err]`(`[anyhow::Error]`)`: If there is a mismatch in the lengths of provided vectors or other issues.
     ///
     /// # Examples
     ///
@@ -135,7 +137,7 @@ impl SeqInfo {
     ///
     /// An error is returned if:
     /// * The lengths of `seqname`, `seqlengths`, `is_circular`, or any key in `extra` do not match.
-    /// * There are other issues in creating the `SeqInfo` instance.
+    /// * There are other issues in creating the [SeqInfo] instance.
     pub fn new(
         seqname: Vec<String>,
         seqlengths: Option<Vec<usize>>,
@@ -175,13 +177,13 @@ impl SeqInfo {
 
     /// ## From Fasta
     ///
-    /// * `from_fasta`: Constructs a new `SeqInfo` instance by parsing a FASTA file to extract
+    /// * `from_fasta`: Constructs a new [SeqInfo] instance by parsing a FASTA file to extract
     ///   sequence names and lengths.
     /// seqinfo can contain "seqname", "seqlengths", "isCircular", "genome", and other extra string info
     ///
     /// # Examples
     ///
-    /// Creating a new `SeqInfo` instance:
+    /// Creating a new [SeqInfo] instance:
     ///
     /// ```rust
     /// let seq_info = SeqInfo::new(
@@ -213,13 +215,13 @@ impl SeqInfo {
 
 /// Creates a FASTA file reader.
 ///
-/// This function constructs a `fasta::Reader` wrapped in a `BufReader`, ready to read
+/// This function constructs a [`fasta::Reader`] wrapped in a [`BufReader`], ready to read
 /// from the specified FASTA file. It provides buffered reading capabilities, which is
 /// efficient for large FASTA files.
 ///
 /// # Type Parameters
 ///
-/// * `T`: A type that can be referenced as a file path, implementing the `AsRef<Path>` trait.
+/// * `T`: A type that can be referenced as a file path, implementing the [`AsRef<Path>`] trait.
 ///
 /// # Arguments
 ///
@@ -227,9 +229,9 @@ impl SeqInfo {
 ///
 /// # Returns
 ///
-/// Returns `anyhow::Result<fasta::Reader<BufReader<File>>>`:
-/// * `Ok(fasta::Reader)`: A FASTA reader instance if the file is successfully opened.
-/// * `Err(anyhow::Error)`: An error if the file cannot be opened.
+/// Returns [`anyhow::Result<fasta::Reader<BufReader<File>>>`](anyhow::Result):
+/// * [Ok]`(`[fasta::Reader]`)`: A FASTA reader instance if the file is successfully opened.
+/// * [Err]`(`[anyhow::Error]`)`: An error if the file cannot be opened.
 ///
 /// # Examples
 ///
