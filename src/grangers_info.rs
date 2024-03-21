@@ -1223,7 +1223,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns a reference to the Series ([`&Series`]) corresponding to the specified column name if found.
+    /// Returns a reference to the Series (&[`Series`]) corresponding to the specified column name if found.
     ///
     /// ### Example
     ///
@@ -3904,7 +3904,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an [anyhow::Result<Pin<Box<GrangersSeqIter<R>>>>]. If successful, an iterator over extracted sequences
+    /// Returns an [`anyhow::Result<Pin<Box<GrangersSeqIter<R>>>>`]. If successful, an iterator over extracted sequences
     /// is returned; otherwise, an error is returned.
     ///
     /// ### Example
@@ -3988,7 +3988,7 @@ impl Grangers {
 
     /// Returns an iterator over sequences extracted from a reference genome provided via a file path.
     ///
-    /// This method is a convenience wrapper around [fn@iter_sequences_from_reader] that opens the reference genome file
+    /// This method is a convenience wrapper around [iter_sequences_from_reader](fn@Grangers::iter_sequences_from_reader) that opens the reference genome file
     /// and creates an iterator to lazily read and process sequences. It is suitable for processing large genomes
     /// where loading all sequences into memory is not feasible.
     ///
@@ -4160,7 +4160,7 @@ pub struct GrangersFilterOpts {
 /// * `essential_gr`: A [Grangers] instance that holds essential data fields required for processing all target sequences.
 ///    This serves as the base data structure from which specific sequences are extracted.
 ///
-/// * `chr_gr`: An optional [Granwers] instance containing only the features relevant to the current target sequence.
+/// * `chr_gr`: An optional [Grangers] instance containing only the features relevant to the current target sequence.
 ///    This is dynamically updated to match the current focus of sequence extraction.
 ///
 /// * `seq_reader`: A FASTA format reader from the `noodles` crate, wrapped in a standard Rust [BufReader].
@@ -4178,7 +4178,7 @@ pub struct GrangersFilterOpts {
 /// * `row_order_iter`: An iterator over the row indices of sequences in the dataset, providing a link between sequence data
 ///    and their corresponding metadata or annotations within the [Grangers] structure.
 ///
-/// * `chr_seq_iter`: An optional internal iterator ([ChrRowSeqIter]) that handles the iteration over individual sequence features
+/// * `chr_seq_iter`: An optional internal iterator (`ChrRowSeqIter`) that handles the iteration over individual sequence features
 ///    for a given target, such as exons within a transcript. This allows for fine-grained processing of sequences.
 ///
 /// * `def_buffer`: A local buffer used to hold sequence definitions temporarily. This can be used for building FASTA headers
