@@ -699,7 +699,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an [`anyhow::Result<()>`] indicating the outcome of the file writing operation:
+    /// Returns an [`anyhow::Result<()>`](anyhow::Result) indicating the outcome of the file writing operation:
     /// * [Ok]`(())`: Successfully wrote the GTF file.
     /// * [Err]`(...)`: An error occurred during the file creation or data writing process.
     ///
@@ -922,7 +922,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an [`anyhow::Result<()>`] indicating the success or failure of the sorting operation.
+    /// Returns an [anyhow::Result<()>](anyhow::Result) indicating the success or failure of the sorting operation.
     ///
     /// ### Example
     ///
@@ -1118,7 +1118,7 @@ impl Grangers {
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<str>`, allowing for flexible string input.
+    /// * `T`: A type that implements [`AsRef<str>`], allowing for flexible string input.
     ///
     /// ### Arguments
     ///
@@ -1135,7 +1135,6 @@ impl Grangers {
     /// let column_name = grangers.get_column_name_str("gene_id", true)?;
     /// println!("Column name: {}", column_name);
     /// ```
-
     pub fn get_column_name_str<T: AsRef<str>>(
         &self,
         name: T,
@@ -1167,7 +1166,7 @@ impl Grangers {
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<str>`, enabling various types to be used as string input.
+    /// * `T`: A type that implements [`AsRef<str>`], enabling various types to be used as string input.
     ///
     /// ### Arguments
     ///
@@ -1543,7 +1542,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns `Ok(())` if the field columns were successfully fixed or if no issues were found. Returns an error if the field columns cannot be fixed.
+    /// Returns [Ok]`(())` if the field columns were successfully fixed or if no issues were found. Returns an error if the field columns cannot be fixed.
     ///
     /// ### Example
     ///
@@ -1917,7 +1916,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an [`anyhow::Result<()>`]. The function modifies the Grangers instance in place and does not return a value.
+    /// Returns an [`anyhow::Result<()>`](anyhow::Result). The function modifies the Grangers instance in place and does not return a value.
     ///
     /// ### Example
     ///
@@ -2184,7 +2183,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an [`anyhow::Result<()>`]. The method modifies the Grangers instance in place.
+    /// Returns an [`anyhow::Result<()>`](anyhow::Result). The method modifies the Grangers instance in place.
     ///
     /// ### Example
     ///
@@ -2258,7 +2257,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an [`anyhow::Result<()>`]. The method modifies the [Grangers] instance in place by removing rows
+    /// Returns an [`anyhow::Result<()>`](anyhow::Result). The method modifies the [Grangers] instance in place by removing rows
     /// with null values in the specified fields.
     ///
     /// ### Example
@@ -2532,8 +2531,8 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an [`anyhow::Result<HashMap<[String; 2], LapperType>>`] where each key is a pair of strings (typically representing sequence name and strand)
-    /// and each value is a Lapper data structure containing the grouped intervals. The LapperType is typically [`Lapper<u64, (usize, Vec<String>)>`].
+    /// Returns an `anyhow::Result<HashMap<[String; 2], LapperType>>` where each key is a pair of strings (typically representing sequence name and strand)
+    /// and each value is a Lapper data structure containing the grouped intervals. The LapperType is typically `Lapper<u64, (usize, Vec<String>)>`.
     ///
     /// ### Example
     ///
@@ -2802,7 +2801,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an [`anyhow::Result<()>`]. If successful, transcript sequences are written to the output file; otherwise, an error is returned.
+    /// Returns an [`anyhow::Result<()>`](anyhow::Result). If successful, transcript sequences are written to the output file; otherwise, an error is returned.
     ///
     /// ### Example
     ///
@@ -2840,7 +2839,7 @@ impl Grangers {
     ///
     /// * `T`: A type that implements [`AsRef<Path>`], allowing for flexible path references to the reference genome file.
     /// * `W`: A type that implements [Write], designating the output stream for writing the transcript sequences.
-    /// * `F`: A type that implements [`FnMut(&noodles::fasta::Record) -> bool`], representing the filtering function.
+    /// * `F`: A type that implements [FnMut]`(&`[noodles::fasta::Record]`) -> bool`, representing the filtering function.
     ///
     /// ### Arguments
     ///
@@ -2852,7 +2851,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an [`anyhow::Result<()>`]. If successful, filtered transcript sequences are written to the output file; otherwise, an error is returned.
+    /// Returns an [`anyhow::Result<()>`](anyhow::Result). If successful, filtered transcript sequences are written to the output file; otherwise, an error is returned.
     ///
     /// ### Example
     ///
@@ -3058,7 +3057,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an [`anyhow::Result<()>`] indicating the outcome:
+    /// Returns an [`anyhow::Result<()>`](anyhow::Result) indicating the outcome:
     /// * [Ok]`(())`: Sequences were successfully extracted and written to the output file.
     /// * [Err]`(...)`: An error occurred during the process, such as validation failure, issues reading from the reference, or writing to the output file.
     ///
@@ -3209,7 +3208,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an [`anyhow::Result<()>`]. If successful, sequences are written to the output file; otherwise, an error is returned.
+    /// Returns an [`anyhow::Result<()>`](anyhow::Result). If successful, sequences are written to the output file; otherwise, an error is returned.
     ///
     /// ### Example
     ///
@@ -3248,7 +3247,7 @@ impl Grangers {
     ///
     /// * `T`: A type that implements [`AsRef<Path>`], allowing for flexible path references to the reference genome file.
     /// * `W`: A type that implements [Write], designating the output stream for writing the sequences.
-    /// * `F`: A type that implements [`FnMut(&noodles::fasta::Record) -> bool`], representing the filtering function.
+    /// * `F`: A type that implements [FnMut]`(&`[noodles::fasta::Record]`) -> bool`, representing the filtering function.
     ///
     /// ### Arguments
     ///
@@ -3261,7 +3260,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an [`anyhow::Result<()>`]. If successful, filtered sequences are written to the output file; otherwise, an error is returned.
+    /// Returns an [`anyhow::Result<()>`](anyhow::Result). If successful, filtered sequences are written to the output file; otherwise, an error is returned.
     ///
     /// ### Example
     ///
@@ -3720,7 +3719,7 @@ impl Grangers {
 
     /// Extracts sequences from a FASTA format reader and returns them as a [GrangersSequenceCollection].
     ///
-    /// This method reads the reference genome from a given reader implementing the `Read` trait,
+    /// This method reads the reference genome from a given reader implementing the [Read] trait,
     /// filters features based on their presence in the genome, and extracts their sequences. These sequences
     /// are then compiled into a [GrangersSequenceCollection], which includes a unique signature and a vector
     /// of records for further processing.
@@ -4519,7 +4518,7 @@ impl<'a> ChrRowSeqIter<'a> {
     ///
     /// # Returns
     ///
-    /// Returns an [`anyhow::Result<Self>`]:
+    /// Returns an [`anyhow::Result<Self>`](anyhow::Result):
     /// * [Ok]`(Self)`: If the iterator is successfully created.
     /// * [Err]`(...)`: If there is an error initializing the iterator, such as missing columns in the [Grangers] dataframe or issues accessing the sequence.
     ///
