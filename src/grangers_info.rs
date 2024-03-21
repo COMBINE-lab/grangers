@@ -362,7 +362,6 @@ impl Grangers {
     /// let df = DataFrame::new(vec![...]); // Assume DataFrame is created
     /// let grangers = Grangers::new(df, None, None, IntervalType::Inclusive, FieldColumns::default(), true)?;
     /// ```
-
     pub fn new(
         mut df: DataFrame,
         seqinfo: Option<SeqInfo>,
@@ -429,7 +428,6 @@ impl Grangers {
     /// let gstruct = reader::GStruct::from_gtf(...); // Assume GStruct is created from a GTF file
     /// let grangers = Grangers::from_gstruct(gstruct, IntervalType::Inclusive)?;
     /// ```
-
     pub fn from_gstruct(
         gstruct: reader::GStruct,
         interval_type: IntervalType,
@@ -535,7 +533,7 @@ impl Grangers {
     ///
     /// Returns an [`anyhow::Result<Grangers>`]:
     /// * [Ok]`(Grangers)`: A `Grangers` instance created from the specified GFF file.
-    /// * [Err]`(...)`: An error encapsulated within an `anyhow::Error` if there are issues reading the file or constructing the [Grangers] instance.
+    /// * [Err]`(...)`: An error encapsulated within an [`anyhow::Error`] if there are issues reading the file or constructing the [Grangers] instance.
     /// ### Example
     ///
     /// ```rust
@@ -1164,7 +1162,7 @@ impl Grangers {
 
     /// Retrieves the column name from the Grangers instance's [`DataFrame`] or [`FieldColumns`].
     ///
-    /// Similar to `get_column_name_str`, this method returns the column name as a `String`. It performs checks to ensure the column exists
+    /// Similar to `get_column_name_str`, this method returns the column name as a [String]. It performs checks to ensure the column exists
     /// and optionally verifies the absence of null values depending on `bail_null`.
     ///
     /// ### Generics
@@ -1178,7 +1176,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns the name of the column as a `String` if the column is found and passes the null check if applicable.
+    /// Returns the name of the column as a [String] if the column is found and passes the null check if applicable.
     ///
     /// ### Example
     ///
@@ -1186,7 +1184,6 @@ impl Grangers {
     /// let column_name = grangers.get_column_name("expression_level", false)?;
     /// println!("Column name: {}", column_name);
     /// ```
-
     pub fn get_column_name<T: AsRef<str>>(
         &self,
         name: T,
@@ -1218,7 +1215,7 @@ impl Grangers {
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that supports `AsRef<str>`, enabling the use of various string types as input.
+    /// * `T`: A type that supports [`AsRef<str>`], enabling the use of various string types as input.
     ///
     /// ### Arguments
     ///
@@ -1226,7 +1223,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns a reference to the Series (`&Series`) corresponding to the specified column name if found.
+    /// Returns a reference to the Series ([`&Series`]) corresponding to the specified column name if found.
     ///
     /// ### Example
     ///
@@ -1252,12 +1249,12 @@ impl Grangers {
 
     /// Retrieves a list of Series from the Grangers instance's [`DataFrame`] for the specified columns.
     ///
-    /// This method collects references to Series for each column name provided in the `names` array.
+    /// This method collects references to [Series] for each column name provided in the `names` array.
     /// It returns an error if any specified column name does not exist or if there is a problem retrieving the Series.
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<str>`, allowing for different string input types.
+    /// * `T`: A type that implements [`AsRef<str>`], allowing for different string input types.
     ///
     /// ### Arguments
     ///
@@ -1273,7 +1270,6 @@ impl Grangers {
     /// let columns = grangers.columns(&["gene_id", "expression_level"])?;
     /// println!("Retrieved columns: {:?}", columns);
     /// ```
-
     pub fn columns<T: AsRef<str>>(&self, names: &[T]) -> anyhow::Result<Vec<&Series>> {
         let mut cols = Vec::new();
         for name in names {
@@ -1297,14 +1293,13 @@ impl Grangers {
     /// let seqname_series = grangers.seqname()?;
     /// println!("Seqname Series: {:?}", seqname_series);
     /// ```
-
     pub fn seqname(&self) -> anyhow::Result<&Series> {
         self.column(self.field_columns.seqname())
     }
 
     /// Retrieves the 'start' Series from the Grangers instance's [`DataFrame`].
     ///
-    /// This method accesses the 'start' column defined in the FieldColumns of the Grangers instance,
+    /// This method accesses the 'start' column defined in the [FieldColumns] of the [Grangers] instance,
     /// returning an error if the column does not exist or cannot be retrieved.
     ///
     /// ### Returns
@@ -1317,14 +1312,13 @@ impl Grangers {
     /// let start_series = grangers.start()?;
     /// println!("Start Series: {:?}", start_series);
     /// ```
-
     pub fn start(&self) -> anyhow::Result<&Series> {
         self.column(self.field_columns.start())
     }
 
     /// Retrieves the 'end' Series from the Grangers instance's [`DataFrame`].
     ///
-    /// This method accesses the 'end' column defined in the FieldColumns of the Grangers instance,
+    /// This method accesses the 'end' column defined in the [FieldColumns] of the [Grangers] instance,
     /// returning an error if the column does not exist or cannot be retrieved.
     ///
     /// ### Returns
@@ -1337,14 +1331,13 @@ impl Grangers {
     /// let end_series = grangers.end()?;
     /// println!("End Series: {:?}", end_series);
     /// ```
-
     pub fn end(&self) -> anyhow::Result<&Series> {
         self.column(self.field_columns.end())
     }
 
     /// Retrieves the 'strand' Series from the Grangers instance's [`DataFrame`].
     ///
-    /// This method accesses the 'strand' column defined in the FieldColumns of the Grangers instance,
+    /// This method accesses the 'strand' column defined in the [FieldColumns] of the [Grangers] instance,
     /// returning an error if the column does not exist or cannot be retrieved.
     ///
     /// ### Returns
@@ -1357,10 +1350,10 @@ impl Grangers {
     /// let strand_series = grangers.strand()?;
     /// println!("Strand Series: {:?}", strand_series);
     /// ```
-
     pub fn strand(&self) -> anyhow::Result<&Series> {
         self.column(self.field_columns.strand())
     }
+
     /// Retrieves the 'score' [`Series`] from the [Grangers] instance's [DataFrame].
     ///
     /// This method accesses the 'score' column defined in the [FieldColumns] of the [Grangers] instance.
@@ -1376,7 +1369,6 @@ impl Grangers {
     /// let score_series = grangers.score()?;
     /// println!("Score Series: {:?}", score_series);
     /// ```
-
     pub fn score(&self) -> anyhow::Result<&Series> {
         self.column(
             self.field_columns
@@ -1400,7 +1392,6 @@ impl Grangers {
     /// let phase_series = grangers.phase()?;
     /// println!("Phase Series: {:?}", phase_series);
     /// ```
-
     pub fn phase(&self) -> anyhow::Result<&Series> {
         self.column(
             self.field_columns
@@ -1424,7 +1415,6 @@ impl Grangers {
     /// let feature_type_series = grangers.feature_type()?;
     /// println!("Feature Type Series: {:?}", feature_type_series);
     /// ```
-
     pub fn feature_type(&self) -> anyhow::Result<&Series> {
         self.column(
             self.field_columns
@@ -1448,7 +1438,6 @@ impl Grangers {
     /// let range_df = grangers.range()?;
     /// println!("Range DataFrame: {:?}", range_df);
     /// ```
-
     pub fn range(&self) -> anyhow::Result<DataFrame> {
         let range = self.df.select([
             self.field_columns().start(),
@@ -1480,7 +1469,6 @@ impl Grangers {
     /// let exists = grangers.is_column("gene_id");
     /// println!("Does the 'gene_id' column exist? {}", exists);
     /// ```
-
     pub fn is_column<T: AsRef<str>>(&self, name: T) -> bool {
         self.column(name).is_ok()
     }
@@ -1509,7 +1497,6 @@ impl Grangers {
     /// let is_valid = grangers.validate(true, true)?;
     /// println!("Is the Grangers instance valid? {}", is_valid);
     /// ```
-
     pub fn validate(&self, is_warn: bool, is_bail: bool) -> anyhow::Result<bool> {
         if self.df().height() == 0 {
             if is_bail {
@@ -1564,7 +1551,6 @@ impl Grangers {
     /// grangers.fix_field_columns(true)?;
     /// println!("Field columns have been fixed.");
     /// ```
-
     pub fn fix_field_columns(&mut self, is_warn: bool) -> anyhow::Result<()> {
         let mut field_columns = self.field_columns().clone();
         field_columns.fix(self.df(), is_warn)?;
@@ -1575,10 +1561,10 @@ impl Grangers {
 
 // implement GenomicFeatures for Grangers
 impl Grangers {
-    /// Computes the intronic regions from the exon annotations in the `Grangers` instance.
+    /// Computes the intronic regions from the exon annotations in the [Grangers] instance.
     ///
     /// This method calculates the genomic regions corresponding to introns based on exon records. It allows customization of the aggregation level (e.g., by transcript or gene),
-    /// the specific exon feature to filter by, and additional columns to keep in the resulting `Grangers` instance.
+    /// the specific exon feature to filter by, and additional columns to keep in the resulting [Grangers] instance.
     ///
     /// ### Arguments
     ///
@@ -1589,14 +1575,13 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<Grangers>` containing the calculated intronic regions.
+    /// Returns an [`anyhow::Result<Grangers>`] containing the calculated intronic regions.
     ///
     /// ### Example
     ///
     /// ```rust
     /// let introns = grangers.introns(Some("transcript_id"), None, None, false)?;
     /// ```
-
     pub fn introns(
         &self,
         by: Option<&str>,
@@ -1630,7 +1615,7 @@ impl Grangers {
         exon_gr.gaps(&[by_str], false, None, Some(&kc))
     }
 
-    /// Computes the boundary regions for genes from the exon annotations in the `Grangers` instance.
+    /// Computes the boundary regions for genes from the exon annotations in the [Grangers] instance.
     ///
     /// This method calculates the genomic boundary regions for genes based on exon records. It allows filtering by a specific exon feature and determines the boundaries based on the "gene_id" column.
     ///
@@ -1641,14 +1626,13 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<Grangers>` containing the calculated gene boundary regions.
+    /// Returns an [`anyhow::Result<Grangers>`] containing the calculated gene boundary regions.
     ///
     /// ### Example
     ///
     /// ```rust
     /// let gene_boundaries = grangers.genes(None, false)?;
     /// ```
-
     pub fn genes(
         &self,
         exon_feature: Option<&str>,
@@ -1659,25 +1643,24 @@ impl Grangers {
         self.boundary(gene_id, exon_feature, multithreaded)
     }
 
-    /// Computes the boundary regions for transcripts from the exon annotations in the `Grangers` instance.
+    /// Computes the boundary regions for transcripts from the exon annotations in the [Grangers] instance.
     ///
     /// This method calculates the genomic boundary regions for transcripts based on exon records. It allows filtering by a specific exon feature and determines the boundaries based on the "transcript_id" column.
     ///
     /// ### Arguments
     ///
-    /// * `exon_feature`: Optional reference to a string specifying the exon feature type to consider. If None, all exon features are considered.
+    /// * `exon_feature`: Optional reference to a string specifying the exon feature type to consider. If [None], all exon features are considered.
     /// * `multithreaded`: Boolean flag indicating whether to use multithreading for performance improvement.
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<Grangers>` containing the calculated transcript boundary regions.
+    /// Returns an [`anyhow::Result<Grangers>`] containing the calculated transcript boundary regions.
     ///
     /// ### Example
     ///
     /// ```rust
     /// let transcript_boundaries = grangers.transcripts(None, false)?;
     /// ```
-
     pub fn transcripts(
         &self,
         exon_feature: Option<&str>,
@@ -1696,19 +1679,18 @@ impl Grangers {
     /// ### Arguments
     ///
     /// * `by`: The name of the field by which to group exons before calculating boundaries (e.g., 'gene_id' or 'transcript_id').
-    /// * `exon_feature`: Optional reference to a string specifying the exon feature type to consider. If None, all exon features are considered.
+    /// * `exon_feature`: Optional reference to a string specifying the exon feature type to consider. If [None], all exon features are considered.
     /// * `multithreaded`: Boolean flag indicating whether to use multithreading for performance improvement.
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<Grangers>` containing the genomic features with their calculated boundaries.
+    /// Returns an [`anyhow::Result<Grangers>`] containing the genomic features with their calculated boundaries.
     ///
     /// ### Example
     ///
     /// ```rust
     /// let gene_boundaries = grangers.boundary("gene_id", None, false)?;
     /// ```
-
     pub fn boundary(
         &self,
         by: &str,
@@ -1761,27 +1743,26 @@ impl Grangers {
         Ok(exon_gr)
     }
 
-    /// Filters the `Grangers` instance to only include exon features, optionally filtered by a specific feature type.
+    /// Filters the [Grangers] instance to only include exon features, optionally filtered by a specific feature type.
     ///
-    /// This method reduces the current `Grangers` dataset to only include records classified as exons, optionally filtering
+    /// This method reduces the current [Grangers] dataset to only include records classified as exons, optionally filtering
     /// them by a specific exon feature type. This is primarily used as a preparatory step for other analyses such as
     /// calculating introns or feature boundaries.
     ///
     /// ### Arguments
     ///
-    /// * `exon_feature`: Optional reference to a string specifying the exon feature type to consider. If None, all exon features are considered.
+    /// * `exon_feature`: Optional reference to a string specifying the exon feature type to consider. If [None], all exon features are considered.
     /// * `multithreaded`: Boolean flag indicating whether to use multithreading for performance improvement.
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<Grangers>` containing only exon records, optionally filtered by the specified feature type.
+    /// Returns an [`anyhow::Result<Grangers>`] containing only exon records, optionally filtered by the specified feature type.
     ///
     /// ### Example
     ///
     /// ```rust
     /// let exons_only = grangers.exons(Some("coding"), false)?;
     /// ```
-
     pub fn exons(
         &self,
         exon_feature: Option<&str>,
@@ -1936,14 +1917,13 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<()>`. The function modifies the Grangers instance in place and does not return a value.
+    /// Returns an [`anyhow::Result<()>`]. The function modifies the Grangers instance in place and does not return a value.
     ///
     /// ### Example
     ///
     /// ```rust
     /// grangers.extend(1000, &ExtendOption::Both, false)?;
     /// ```
-
     pub fn extend(
         &mut self,
         length: i64,
@@ -2040,11 +2020,11 @@ impl Grangers {
     /// ### Arguments
     ///
     /// * `width`: The width of the flanking regions. Positive values generate regions upstream; negative values generate downstream regions.
-    /// * `options`: A `FlankOptions` struct that specifies how the flanking regions should be determined, including whether to ignore strand information, and whether to generate flanks on both sides.
+    /// * `options`: A [FlankOptions] struct that specifies how the flanking regions should be determined, including whether to ignore strand information, and whether to generate flanks on both sides.
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<Grangers>` containing the genomic intervals of the flanking regions.
+    /// Returns an [`anyhow::Result<Grangers>`] containing the genomic intervals of the flanking regions.
     ///
     /// ### Example
     ///
@@ -2052,7 +2032,6 @@ impl Grangers {
     /// let flank_options = FlankOptions { start: true, both: false, ignore_strand: false };
     /// let flanking_regions = grangers.flank(500, flank_options)?;
     /// ```
-
     pub fn flank(&self, width: i64, options: FlankOptions) -> anyhow::Result<Grangers> {
         self.validate(false, true)?;
         let start_s = self.get_column_name("start", true)?;
@@ -2143,12 +2122,12 @@ impl Grangers {
         _on: &str,
         _boundary_on: &str,
     ) -> anyhow::Result<Grangers> {
-        unimplemented!();
+        todo!("not yet implemented");
     }
 
     /// this function turns the seqinfo of the Grangers object into a boundary Grangers object.
     pub fn seqinfo_to_bounary(&self) -> anyhow::Result<Grangers> {
-        unimplemented!();
+        todo!("not yet implemented");
     }
 
     /// Calculates gaps between genomic intervals grouped by specified columns.
@@ -2159,7 +2138,7 @@ impl Grangers {
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<str>`, allowing for flexible string references.
+    /// * `T`: A type that implements [`AsRef<str>`], allowing for flexible string references.
     ///
     /// ### Arguments
     ///
@@ -2170,14 +2149,13 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<Grangers>` containing a new Grangers instance with the identified gaps.
+    /// Returns an [`anyhow::Result<Grangers>`] containing a new [Grangers] instance with the identified gaps.
     ///
     /// ### Example
     ///
     /// ```rust
     /// let gaps = grangers.gaps(&["gene_id"], false, None, Some(&["seqname", "source"]))?;
     /// ```
-
     pub fn gaps<T: AsRef<str>>(
         &self,
         by: &[T],
@@ -2199,21 +2177,20 @@ impl Grangers {
     ///
     /// ### Arguments
     ///
-    /// * `by`: Optional columns by which to group data before ordering. If `None`, the entire dataframe is ordered.
+    /// * `by`: Optional columns by which to group data before ordering. If [None], the entire dataframe is ordered.
     /// * `name`: Name of the new order column to be added.
     /// * `offset`: Optional starting value for the order (default is 1).
     /// * `multithreaded`: If `true`, sorting is done in parallel, improving performance on large datasets.
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<()>`. The method modifies the Grangers instance in place.
+    /// Returns an [`anyhow::Result<()>`]. The method modifies the Grangers instance in place.
     ///
     /// ### Example
     ///
     /// ```rust
     /// grangers.add_order(Some(&["gene_id", "transcript_id"]), "exon_number", None, true)?;
     /// ```
-
     pub fn add_order(
         &mut self,
         by: Option<&[&str]>,
@@ -2270,18 +2247,18 @@ impl Grangers {
         Ok(())
     }
 
-    /// Drops rows with null values in specified fields of the Grangers instance's dataframe.
+    /// Drops rows with null values in specified fields of the [Grangers] instance's dataframe.
     ///
     /// This method allows selective removal of rows where null values occur in specified fields. If no fields
     /// are specified, it removes rows where any null values are present.
     ///
     /// ### Arguments
     ///
-    /// * `fields`: Optional array of field names to check for null values. If `None`, all fields are checked.
+    /// * `fields`: Optional array of field names to check for null values. If [None], all fields are checked.
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<()>`. The method modifies the Grangers instance in place by removing rows
+    /// Returns an [`anyhow::Result<()>`]. The method modifies the [Grangers] instance in place by removing rows
     /// with null values in the specified fields.
     ///
     /// ### Example
@@ -2289,7 +2266,6 @@ impl Grangers {
     /// ```rust
     /// grangers.drop_nulls(Some(&["seqname", "start", "end"]))?;
     /// ```
-
     pub fn drop_nulls(&mut self, fields: Option<&[&str]>) -> anyhow::Result<()> {
         self.validate(false, true)?;
         // check the validity of the column names
@@ -2302,7 +2278,7 @@ impl Grangers {
         Ok(())
     }
 
-    /// Merges overlapping or adjacent genomic intervals in the Grangers instance.
+    /// Merges overlapping or adjacent genomic intervals in the [Grangers] instance.
     ///
     /// This method merges intervals that are either overlapping or adjacent within specified groupings.
     /// The merge process can consider strand information and include a slack region between intervals.
@@ -2310,7 +2286,7 @@ impl Grangers {
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<str>`, allowing for flexible string references.
+    /// * `T`: A type that implements [`AsRef<str>`], allowing for flexible string references.
     ///
     /// ### Arguments
     ///
@@ -2321,14 +2297,13 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<Grangers>` containing a new Grangers instance with merged intervals.
+    /// Returns an [`anyhow::Result<Grangers>`] containing a new [Grangers] instance with merged intervals.
     ///
     /// ### Example
     ///
     /// ```rust
     /// let merged_grangers = grangers.merge(&["gene_id"], false, Some(10), Some(&["seqname", "source"]))?;
     /// ```
-
     pub fn merge<T: AsRef<str>>(
         &self,
         by: &[T],
@@ -2542,12 +2517,12 @@ impl Grangers {
     /// Constructs lapper data structures (efficient interval trees) for fast interval queries on genomic data.
     ///
     /// This method builds a set of lappers, which are efficient data structures for interval overlap queries,
-    /// based on the genomic intervals represented in the Grangers instance. It can optionally ignore invalid
+    /// based on the genomic intervals represented in the [Grangers] instance. It can optionally ignore invalid
     /// intervals and can group intervals by specified attributes before building the lappers.
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<str>`, enabling flexible string references for grouping criteria.
+    /// * `T`: A type that implements [`AsRef<str>`], enabling flexible string references for grouping criteria.
     ///
     /// ### Arguments
     ///
@@ -2557,15 +2532,14 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<HashMap<[String; 2], LapperType>>` where each key is a pair of strings (typically representing sequence name and strand)
-    /// and each value is a Lapper data structure containing the grouped intervals. The LapperType is typically `Lapper<u64, (usize, Vec<String>)>`.
+    /// Returns an [`anyhow::Result<HashMap<[String; 2], LapperType>>`] where each key is a pair of strings (typically representing sequence name and strand)
+    /// and each value is a Lapper data structure containing the grouped intervals. The LapperType is typically [`Lapper<u64, (usize, Vec<String>)>`].
     ///
     /// ### Example
     ///
     /// ```rust
     /// let lappers = grangers.build_lappers(false, false, &["gene_id"])?;
     /// ```
-
     pub fn build_lappers<T: AsRef<str>>(
         &mut self,
         ignore_invalid: bool,
@@ -2756,7 +2730,7 @@ impl Grangers {
         _seqname: T,
         _strand: Option<Strand>,
     ) -> anyhow::Result<()> {
-        unimplemented!();
+        todo!("not yet implemented");
         // // we first check if the lappers have been built
         // let lappers = if let Some(lappers) = &self.lappers {
         //     lappers
@@ -2816,8 +2790,8 @@ impl Grangers {
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<Path>`, allowing for flexible path references to the reference genome file.
-    /// * `W`: A type that implements `Write`, designating the output stream for writing the transcript sequences.
+    /// * `T`: A type that implements [`AsRef<Path>`], allowing for flexible path references to the reference genome file.
+    /// * `W`: A type that implements [Write], designating the output stream for writing the transcript sequences.
     ///
     /// ### Arguments
     ///
@@ -2838,7 +2812,6 @@ impl Grangers {
     /// let out_file = File::create("transcript_sequences.fasta")?;
     /// grangers.write_transcript_sequences(&ref_path, out_file, None, true)?;
     /// ```
-
     pub fn write_transcript_sequences<T: AsRef<Path>, W: Write>(
         &mut self,
         ref_path: T,
@@ -2860,14 +2833,14 @@ impl Grangers {
     /// applying an optional filter to each transcript sequence before writing.
     ///
     /// This advanced method allows for filtering of transcript sequences based on custom criteria before writing.
-    /// The filter is a closure or function pointer provided by the user that accepts a `&noodles::fasta::Record`
+    /// The filter is a closure or function pointer provided by the user that accepts a `&`[`noodles::fasta::Record`]
     /// and returns a boolean indicating whether to write the sequence to the output.
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<Path>`, allowing for flexible path references to the reference genome file.
-    /// * `W`: A type that implements `Write`, designating the output stream for writing the transcript sequences.
-    /// * `F`: A type that implements `FnMut(&noodles::fasta::Record) -> bool`, representing the filtering function.
+    /// * `T`: A type that implements [`AsRef<Path>`], allowing for flexible path references to the reference genome file.
+    /// * `W`: A type that implements [Write], designating the output stream for writing the transcript sequences.
+    /// * `F`: A type that implements [`FnMut(&noodles::fasta::Record) -> bool`], representing the filtering function.
     ///
     /// ### Arguments
     ///
@@ -2879,7 +2852,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<()>`. If successful, filtered transcript sequences are written to the output file; otherwise, an error is returned.
+    /// Returns an [`anyhow::Result<()>`]. If successful, filtered transcript sequences are written to the output file; otherwise, an error is returned.
     ///
     /// ### Example
     ///
@@ -2890,7 +2863,6 @@ impl Grangers {
     /// let mut filter = |record: &noodles::fasta::Record| record.sequence().len() > 100;
     /// grangers.write_transcript_sequences_with_filter(&ref_path, out_file, None, true, &mut Some(filter))?;
     /// ```
-
     pub fn write_transcript_sequences_with_filter<T: AsRef<Path>, W: Write, F>(
         &mut self,
         ref_path: T,
@@ -3073,7 +3045,7 @@ impl Grangers {
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<Path>`, providing a flexible reference for file paths.
+    /// * `T`: A type that implements [`AsRef<Path>`], providing a flexible reference for file paths.
     ///
     /// ### Arguments
     ///
@@ -3082,13 +3054,13 @@ impl Grangers {
     /// * `ignore_strand`: A boolean indicating whether to ignore strand information when extracting sequences.
     /// * `name_column`: An optional string specifying the column name to use for naming extracted sequences.
     ///   If the column is invalid or not provided, sequences will be named based on their row order.
-    /// * `oob_option`: A reference to `OOBOption` indicating how to handle features that extend beyond the bounds of the reference sequence.
+    /// * `oob_option`: A reference to [OOBOption] indicating how to handle features that extend beyond the bounds of the reference sequence.
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<()>` indicating the outcome:
-    /// * `Ok(())`: Sequences were successfully extracted and written to the output file.
-    /// * `Err(...)`: An error occurred during the process, such as validation failure, issues reading from the reference, or writing to the output file.
+    /// Returns an [`anyhow::Result<()>`] indicating the outcome:
+    /// * [Ok]`(())`: Sequences were successfully extracted and written to the output file.
+    /// * [Err]`(...)`: An error occurred during the process, such as validation failure, issues reading from the reference, or writing to the output file.
     ///
     /// ### Errors
     ///
@@ -3224,8 +3196,8 @@ impl Grangers {
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<Path>`, allowing for flexible path references to the reference genome file.
-    /// * `W`: A type that implements `Write`, designating the output stream for writing the sequences.
+    /// * `T`: A type that implements [`AsRef<Path>`], allowing for flexible path references to the reference genome file.
+    /// * `W`: A type that implements [Write], designating the output stream for writing the sequences.
     ///
     /// ### Arguments
     ///
@@ -3237,7 +3209,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<()>`. If successful, sequences are written to the output file; otherwise, an error is returned.
+    /// Returns an [`anyhow::Result<()>`]. If successful, sequences are written to the output file; otherwise, an error is returned.
     ///
     /// ### Example
     ///
@@ -3247,7 +3219,6 @@ impl Grangers {
     /// let out_file = File::create("sequences.fasta")?;
     /// grangers.write_sequences(&ref_path, out_file, false, None, OOBOption::Skip)?;
     /// ```
-
     pub fn write_sequences<T: AsRef<Path>, W: Write, F>(
         &mut self,
         ref_path: T,
@@ -3266,7 +3237,7 @@ impl Grangers {
         )
     }
 
-    /// Writes the sequences from a reference genome to a FASTA format output file based on the Grangers instance,
+    /// Writes the sequences from a reference genome to a FASTA format output file based on the [Grangers] instance,
     /// applying an optional filter to each sequence before writing.
     ///
     /// This advanced method allows for filtering of sequences based on custom criteria before writing.
@@ -3275,9 +3246,9 @@ impl Grangers {
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<Path>`, allowing for flexible path references to the reference genome file.
-    /// * `W`: A type that implements `Write`, designating the output stream for writing the sequences.
-    /// * `F`: A type that implements `FnMut(&noodles::fasta::Record) -> bool`, representing the filtering function.
+    /// * `T`: A type that implements [`AsRef<Path>`], allowing for flexible path references to the reference genome file.
+    /// * `W`: A type that implements [Write], designating the output stream for writing the sequences.
+    /// * `F`: A type that implements [`FnMut(&noodles::fasta::Record) -> bool`], representing the filtering function.
     ///
     /// ### Arguments
     ///
@@ -3290,7 +3261,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<()>`. If successful, filtered sequences are written to the output file; otherwise, an error is returned.
+    /// Returns an [`anyhow::Result<()>`]. If successful, filtered sequences are written to the output file; otherwise, an error is returned.
     ///
     /// ### Example
     ///
@@ -3301,7 +3272,6 @@ impl Grangers {
     /// let mut filter = |record: &noodles::fasta::Record| record.sequence().len() > 100;
     /// grangers.write_sequences_with_filter(&ref_path, out_file, false, None, OOBOption::Skip, &mut Some(filter))?;
     /// ```
-
     pub fn write_sequences_with_filter<T: AsRef<Path>, W: Write, F>(
         &mut self,
         ref_path: T,
@@ -3428,16 +3398,16 @@ impl Grangers {
     }
 }
 
-// implement get sequence functions for Grangers
+// implement get sequence functions for [Grangers]
 impl Grangers {
     /// Extracts transcript sequences based on exon information from a FASTA file and returns them as a vector of FASTA records.
     ///
-    /// This method processes the exon information within the Grangers instance to extract sequences corresponding
+    /// This method processes the exon information within the [Grangers] instance to extract sequences corresponding
     /// to each transcript from a given reference genome. It then compiles these sequences into FASTA records.
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<Path>`, allowing for flexible path references to the FASTA file.
+    /// * `T`: A type that implements [`AsRef<Path>`], allowing for flexible path references to the FASTA file.
     ///
     /// ### Arguments
     ///
@@ -3447,7 +3417,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<Vec<noodles::fasta::Record>>`. If successful, a vector of transcript sequences
+    /// Returns an [`anyhow::Result<Vec<noodles::fasta::Record>>`]. If successful, a vector of transcript sequences
     /// encoded as FASTA records is returned; otherwise, an error is returned.
     ///
     /// ### Example
@@ -3465,7 +3435,6 @@ impl Grangers {
     ///
     /// This function can return an error if there are issues with reading the FASTA file,
     /// if exon records are invalid or exceed the reference sequence, or if other validation steps fail.
-
     pub fn get_transcript_sequences<T: AsRef<Path>>(
         &mut self,
         fasta_path: T,
@@ -3589,22 +3558,20 @@ impl Grangers {
         Ok(transcript_seq_vec)
     }
 
-    /// Extract the sequence of the features in the Grangers object from the provided reference file.
+    /// Extract the sequence of the features in the [Grangers] object from the provided reference file.
     /// Currently only fasta file is supported. This function four field columns: seqname, start, end, and strand.
     /// Arguments:
     /// - `genome_path`: the path to the reference genome file.
     /// - `file_format`: the format of the reference genome file. Currently only fasta is supported.
     /// - `oob_option`: the option for out-of-boundary positions. It can be either `Truncate` or `Skip`. If `Truncate`, the out-of-boundary positions will be truncated to the start or end of the sequence. If `Skip`, a None will be returned for features with OOB positions
-    /// The function outputs the extracted sequence as a vector of `Option<Sequence>`. If the feature has OOB positions and the oob_option is set as `Skip`, the corresponding element in the vector will be None. The order of the vector follows the row order of the dataframe of the Grangers object.
+    /// The function outputs the extracted sequence as a vector of `Option<Sequence>`. If the feature has OOB positions and the oob_option is set as `Skip`, the corresponding element in the vector will be None. The order of the vector follows the row order of the dataframe of the [Grangers] object.
     pub fn _get_sequences<T: AsRef<Path>>(
         &mut self,
         fasta_path: T,
         ignore_strand: bool,
         name: Option<&str>,
         oob_option: &OOBOption,
-    ) -> anyhow::Result<Vec<Option<noodles::fasta::Record>>>
-// anyhow::Result<Vec<fasta::record::Sequence>>
-    {
+    ) -> anyhow::Result<Vec<Option<noodles::fasta::Record>>> {
         self.validate(false, true)?;
 
         // if name is invalid, ignore
@@ -3700,15 +3667,15 @@ impl Grangers {
         Ok(seq_vec)
     }
 
-    /// Extracts sequences from a reference FASTA file and returns them as a `GrangersSequenceCollection`.
+    /// Extracts sequences from a reference FASTA file and returns them as a [GrangersSequenceCollection].
     ///
     /// This method reads the reference genome from a FASTA file, filters features based on their presence in the genome,
-    /// and extracts their sequences. These sequences are then compiled into a `GrangersSequenceCollection`,
+    /// and extracts their sequences. These sequences are then compiled into a [GrangersSequenceCollection],
     /// which includes a unique signature and a vector of records for further processing.
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<Path>`, allowing for flexible path references to the FASTA file.
+    /// * `T`: A type that implements [`AsRef<Path>`], allowing for flexible path references to the FASTA file.
     ///
     /// ### Arguments
     ///
@@ -3720,7 +3687,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<GrangersSequenceCollection>`. If successful, a collection of extracted sequences
+    /// Returns an [`anyhow::Result<GrangersSequenceCollection>`]. If successful, a collection of extracted sequences
     /// along with a unique signature is returned; otherwise, an error is returned.
     ///
     /// ### Example
@@ -3736,7 +3703,6 @@ impl Grangers {
     ///
     /// This function can return an error if there are issues with reading the FASTA file,
     /// if there are validation errors, or if other processing steps fail.
-
     pub fn get_sequences<T: AsRef<Path>>(
         &mut self,
         ref_path: T,
@@ -3752,16 +3718,16 @@ impl Grangers {
         )
     }
 
-    /// Extracts sequences from a FASTA format reader and returns them as a `GrangersSequenceCollection`.
+    /// Extracts sequences from a FASTA format reader and returns them as a [GrangersSequenceCollection].
     ///
     /// This method reads the reference genome from a given reader implementing the `Read` trait,
     /// filters features based on their presence in the genome, and extracts their sequences. These sequences
-    /// are then compiled into a `GrangersSequenceCollection`, which includes a unique signature and a vector
+    /// are then compiled into a [GrangersSequenceCollection], which includes a unique signature and a vector
     /// of records for further processing.
     ///
     /// ### Generics
     ///
-    /// * `R`: A type that implements `Read`, allowing for flexible reading of the FASTA data.
+    /// * `R`: A type that implements [Read], allowing for flexible reading of the FASTA data.
     ///
     /// ### Arguments
     ///
@@ -3773,7 +3739,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<GrangersSequenceCollection>`. If successful, a collection of extracted sequences
+    /// Returns an [`anyhow::Result<GrangersSequenceCollection>`]. If successful, a collection of extracted sequences
     /// along with a unique signature is returned; otherwise, an error is returned.
     ///
     /// ### Example
@@ -3789,7 +3755,6 @@ impl Grangers {
     ///
     /// This function can return an error if there are issues with reading the FASTA data,
     /// if there are validation errors, or if other processing steps fail.
-
     pub fn get_sequences_from_read<R: Read>(
         &mut self,
         reader: R,
@@ -3918,16 +3883,16 @@ impl Grangers {
         Ok(seq_coll)
     }
 
-    /// Returns an iterator over sequences extracted from a reference genome provided via a reader implementing the `Read` trait.
+    /// Returns an iterator over sequences extracted from a reference genome provided via a reader implementing the [Read] trait.
     ///
     /// This method creates an iterator that lazily reads and processes sequences from the reference genome.
-    /// It filters and extracts feature sequences based on the current `Grangers` instance's configuration
+    /// It filters and extracts feature sequences based on the current [Grangers] instance's configuration
     /// and returns them in a new iterator. This method is particularly useful for processing large genomes
     /// in a memory-efficient manner.
     ///
     /// ### Generics
     ///
-    /// * `R`: A type that implements `Read`, allowing for reading of the FASTA data from various sources.
+    /// * `R`: A type that implements [Read], allowing for reading of the FASTA data from various sources.
     ///
     /// ### Arguments
     ///
@@ -3939,7 +3904,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<Pin<Box<GrangersSeqIter<R>>>>`. If successful, an iterator over extracted sequences
+    /// Returns an [anyhow::Result<Pin<Box<GrangersSeqIter<R>>>>]. If successful, an iterator over extracted sequences
     /// is returned; otherwise, an error is returned.
     ///
     /// ### Example
@@ -3957,7 +3922,6 @@ impl Grangers {
     ///
     /// This function can return an error if there are validation errors, or if there are issues
     /// setting up the iterator or reading data from the provided reader.
-
     pub fn iter_sequences_from_reader<R: Read>(
         &mut self,
         reader: R,
@@ -4024,13 +3988,13 @@ impl Grangers {
 
     /// Returns an iterator over sequences extracted from a reference genome provided via a file path.
     ///
-    /// This method is a convenience wrapper around `iter_sequences_from_reader` that opens the reference genome file
+    /// This method is a convenience wrapper around [fn@iter_sequences_from_reader] that opens the reference genome file
     /// and creates an iterator to lazily read and process sequences. It is suitable for processing large genomes
     /// where loading all sequences into memory is not feasible.
     ///
     /// ### Generics
     ///
-    /// * `T`: A type that implements `AsRef<Path>`, allowing for flexible file path references.
+    /// * `T`: A type that implements [`AsRef<Path>`], allowing for flexible file path references.
     ///
     /// ### Arguments
     ///
@@ -4042,7 +4006,7 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<Pin<Box<GrangersSeqIter<std::fs::File>>>>`. If successful, an iterator over extracted sequences
+    /// Returns an [`anyhow::Result<Pin<Box<GrangersSeqIter<std::fs::File>>>>`]. If successful, an iterator over extracted sequences
     /// is returned; otherwise, an error is returned.
     ///
     /// ### Example
@@ -4059,7 +4023,6 @@ impl Grangers {
     ///
     /// This function can return an error if the file cannot be opened, if there are validation errors, or if there are
     /// issues setting up the iterator.
-
     pub fn iter_sequences<T: AsRef<Path>>(
         &mut self,
         ref_path: T,
@@ -4075,11 +4038,11 @@ impl Grangers {
         )
     }
 
-    /// Extracts sequences from a given FASTA record based on the feature information contained within the `Grangers` instance.
+    /// Extracts sequences from a given FASTA record based on the feature information contained within the [Grangers] instance.
     ///
-    /// This method processes a single `noodles::fasta::Record`, typically representing a chromosome or scaffold,
-    /// and extracts sequences according to the feature data (e.g., gene or exon locations) contained within the `Grangers` instance.
-    /// It supports handling sequences that exceed reference boundaries based on the specified `OOBOption`.
+    /// This method processes a single [noodles::fasta::Record], typically representing a chromosome or scaffold,
+    /// and extracts sequences according to the feature data (e.g., gene or exon locations) contained within the [Grangers] instance.
+    /// It supports handling sequences that exceed reference boundaries based on the specified [OOBOption].
     ///
     /// ### Arguments
     ///
@@ -4089,8 +4052,8 @@ impl Grangers {
     ///
     /// ### Returns
     ///
-    /// Returns an `anyhow::Result<Vec<Option<Sequence>>>`. Each element in the returned vector corresponds to a sequence extracted
-    /// from the FASTA record. The sequences are aligned with the features in the `Grangers` instance. `None` is used to represent
+    /// Returns an [`anyhow::Result<Vec<Option<Sequence>>>`]. Each element in the returned vector corresponds to a sequence extracted
+    /// from the FASTA record. The sequences are aligned with the features in the [Grangers] instance. `None` is used to represent
     /// sequences that could not be extracted (e.g., due to out-of-bound issues).
     ///
     /// ### Example
@@ -4109,10 +4072,9 @@ impl Grangers {
     /// ### Errors
     ///
     /// This function can return an error if there are issues with data validation, conversion of sequence positions,
-    /// or if the FASTA record does not match the reference name specified in the `Grangers` instance.
+    /// or if the FASTA record does not match the reference name specified in the [Grangers] instance.
     /// It also fails if the dataframe contains more than one reference name, indicating that filtering by the reference
     /// name is required prior to calling this method.
-
     pub(crate) fn get_sequences_fasta_record(
         &self,
         record: &noodles::fasta::Record,
@@ -4176,10 +4138,10 @@ impl Grangers {
 ///
 /// ### Fields
 ///
-/// * `seqname`: A `String` representing the name of the sequence (e.g., chromosome name) to which the filtering and extraction will be applied.
-/// * `name_column`: A `String` specifying the column in the `Grangers` instance's dataframe that contains names for the extracted sequences.
+/// * `seqname`: A [String] representing the name of the sequence (e.g., chromosome name) to which the filtering and extraction will be applied.
+/// * `name_column`: A [String] specifying the column in the [Grangers] instance's dataframe that contains names for the extracted sequences.
 ///               If this column is invalid or not present, a fallback mechanism such as row order might be used.
-/// * `oob_option`: An `OOBOption` enum value that determines how out-of-bound (OOB) sequences should be handled during extraction.
+/// * `oob_option`: An [OOBOption] enum value that determines how out-of-bound (OOB) sequences should be handled during extraction.
 ///                This could include options such as truncating the sequences at the reference boundaries or skipping them entirely.
 ///
 pub struct GrangersFilterOpts {
@@ -4195,28 +4157,28 @@ pub struct GrangersFilterOpts {
 ///
 /// # Fields
 ///
-/// * `essential_gr`: A `Grangers` instance that holds essential data fields required for processing all target sequences.
+/// * `essential_gr`: A [Grangers] instance that holds essential data fields required for processing all target sequences.
 ///    This serves as the base data structure from which specific sequences are extracted.
 ///
-/// * `chr_gr`: An optional `Grangers` instance containing only the features relevant to the current target sequence.
+/// * `chr_gr`: An optional [Granwers] instance containing only the features relevant to the current target sequence.
 ///    This is dynamically updated to match the current focus of sequence extraction.
 ///
-/// * `seq_reader`: A FASTA format reader from the `noodles` crate, wrapped in a standard Rust `BufReader`.
+/// * `seq_reader`: A FASTA format reader from the `noodles` crate, wrapped in a standard Rust [BufReader].
 ///    It is used for reading sequence data from a reference genome or other source.
 ///
 /// * `seq_record`: Represents the current sequence record being processed by the iterator.
 ///    It holds both the sequence identifier and the actual sequence data.
 ///
-/// * `filt_opt`: Filter options encapsulated within a `GrangersFilterOpts` structure. These options dictate how sequences
+/// * `filt_opt`: Filter options encapsulated within a [GrangersFilterOpts] structure. These options dictate how sequences
 ///    should be filtered and processed during iteration, including which sequences to include and how to handle edge cases.
 ///
 /// * `name_vec_iter`: An iterator over the names of sequences that need to be extracted based on the current dataset.
 ///    This typically corresponds to identifiers like transcript or gene IDs.
 ///
 /// * `row_order_iter`: An iterator over the row indices of sequences in the dataset, providing a link between sequence data
-///    and their corresponding metadata or annotations within the `Grangers` structure.
+///    and their corresponding metadata or annotations within the [Grangers] structure.
 ///
-/// * `chr_seq_iter`: An optional internal iterator (`ChrRowSeqIter`) that handles the iteration over individual sequence features
+/// * `chr_seq_iter`: An optional internal iterator ([ChrRowSeqIter]) that handles the iteration over individual sequence features
 ///    for a given target, such as exons within a transcript. This allows for fine-grained processing of sequences.
 ///
 /// * `def_buffer`: A local buffer used to hold sequence definitions temporarily. This can be used for building FASTA headers
@@ -4335,11 +4297,11 @@ impl<R: Read> Iterator for GrangersSeqIter<R> {
     ///
     /// # Returns
     ///
-    /// Returns `Some((GrangersRecordID, noodles::fasta::Record))` when a new sequence is successfully extracted, where:
-    /// - `GrangersRecordID` is an identifier corresponding to the row order of the sequence in the DataFrame.
-    /// - `noodles::fasta::Record` is the actual sequence extracted and formatted according to FASTA standards.
+    /// Returns [`Some((GrangersRecordID, noodles::fasta::Record))`] when a new sequence is successfully extracted, where:
+    /// - [GrangersRecordID] is an identifier corresponding to the row order of the sequence in the DataFrame.
+    /// - [noodles::fasta::Record] is the actual sequence extracted and formatted according to FASTA standards.
     ///
-    /// Returns `None` when all sequences have been iterated over or when the iterator encounters an error from which it cannot recover.
+    /// Returns [None] when all sequences have been iterated over or when the iterator encounters an error from which it cannot recover.
     ///
     /// # Panics
     ///
@@ -4359,7 +4321,7 @@ impl<R: Read> Iterator for GrangersSeqIter<R> {
     ///
     /// # Safety
     ///
-    /// This implementation uses unsafe code to extend the lifetime of references to Grangers and noodles::fasta::Record.
+    /// This implementation uses unsafe code to extend the lifetime of references to [Grangers] and [noodles::fasta::Record].
     /// It is crucial that these references remain valid for the duration of the iterator's usage.
     /// Misuse may lead to undefined behavior, such as use-after-free errors.
     fn next(&mut self) -> Option<Self::Item> {
@@ -4506,26 +4468,26 @@ impl<R: Read> Iterator for GrangersSeqIter<R> {
 
 /// Iterator for traversing over genomic feature sequences within a single chromosome or sequence record.
 ///
-/// This struct holds the iterators for different genomic feature columns from a DataFrame,
+/// This struct holds the iterators for different genomic feature columns from a [DataFrame],
 /// along with a reference to the current FASTA record representing the chromosome or sequence segment.
 /// It's designed to be used for extracting sequences for features like exons or genes, with consideration
 /// for how out-of-bounds sequences should be handled.
 ///
 /// # Lifetime
 ///
-/// * `'a`: The lifetime parameter `'a` ties `ChrRowSeqIter` to the lifetime of the FASTA record from which
+/// * `'a`: The lifetime parameter `'a` ties [ChrRowSeqIter] to the lifetime of the FASTA record from which
 ///   it extracts sequences, ensuring that the record remains valid for the duration of the iterator's use.
 ///
 /// # Fields
 ///
-/// * `iters`: A vector of `SeriesIter<'a>`, where each `SeriesIter` is an iterator over a column from a DataFrame
+/// * `iters`: A vector of [`SeriesIter<'a>`], where each [SeriesIter] is an iterator over a column from a DataFrame
 ///   associated with the genomic features (e.g., start and end positions, strand). These iterators are used to traverse
 ///   the feature data and extract corresponding sequences.
 ///
-/// * `record`: A reference to a `noodles::fasta::Record`, which contains the sequence of the current chromosome
+/// * `record`: A reference to a [noodles::fasta::Record], which contains the sequence of the current chromosome
 ///   or sequence segment. This is the reference sequence from which genomic feature sequences are extracted.
 ///
-/// * `oob_option`: An instance of `OOBOption` determining how to handle genomic features that extend beyond the bounds
+/// * `oob_option`: An instance of [OOBOption] determining how to handle genomic features that extend beyond the bounds
 ///   of the `record` sequence. This could involve truncating or skipping such out-of-bounds features.
 ///
 /// * `seqlen`: The length of the sequence within the current `record`. This is used to validate feature positions
@@ -4539,31 +4501,31 @@ struct ChrRowSeqIter<'a> {
 }
 
 impl<'a> ChrRowSeqIter<'a> {
-    /// Creates a new instance of `ChrRowSeqIter`.
+    /// Creates a new instance of [ChrRowSeqIter].
     ///
     /// This constructor sets up an iterator for processing genomic features within a single chromosome or sequence
-    /// segment, based on the data contained within a `Grangers` instance and a `noodles::fasta::Record`.
+    /// segment, based on the data contained within a [Grangers] instance and a [noodles::fasta::Record].
     ///
     /// # Arguments
     ///
-    /// * `grangers`: A reference to a `Grangers` instance containing the genomic feature data for extraction,
+    /// * `grangers`: A reference to a [Grangers] instance containing the genomic feature data for extraction,
     ///   including necessary columns like start, end, and strand of each feature.
     ///
-    /// * `record`: A reference to a `noodles::fasta::Record` representing the sequence from which the genomic features
+    /// * `record`: A reference to a [noodles::fasta::Record] representing the sequence from which the genomic features
     ///   will be extracted. This typically corresponds to a single chromosome or scaffold.
     ///
-    /// * `oob_option`: An `OOBOption` determining how to handle genomic features that extend beyond the sequence boundaries
+    /// * `oob_option`: An [OOBOption] determining how to handle genomic features that extend beyond the sequence boundaries
     ///   defined by `record`. Options may include skipping such features, truncating them to fit within bounds, or other behaviors.
     ///
     /// # Returns
     ///
-    /// Returns an `anyhow::Result<Self>`:
-    /// * `Ok(Self)`: If the iterator is successfully created.
-    /// * `Err(...)`: If there is an error initializing the iterator, such as missing columns in the `Grangers` dataframe or issues accessing the sequence.
+    /// Returns an [`anyhow::Result<Self>`]:
+    /// * [Ok]`(Self)`: If the iterator is successfully created.
+    /// * [Err]`(...)`: If there is an error initializing the iterator, such as missing columns in the [Grangers] dataframe or issues accessing the sequence.
     ///
     /// # Examples
     ///
-    /// Assuming `grangers` is an initialized `Grangers` instance and `fasta_record` is a `noodles::fasta::Record` for the relevant sequence:
+    /// Assuming `grangers` is an initialized [Grangers] instance and `fasta_record` is a [noodles::fasta::Record] for the relevant sequence:
     ///
     /// ```ignore
     /// let chr_row_seq_iter = ChrRowSeqIter::new(&grangers, &fasta_record, OOBOption::Skip)?;
@@ -4571,9 +4533,8 @@ impl<'a> ChrRowSeqIter<'a> {
     ///
     /// # Note
     ///
-    /// This method collects iterators from the specified `Grangers` instance for the start, end, and strand columns. These iterators
+    /// This method collects iterators from the specified [Grangers] instance for the start, end, and strand columns. These iterators
     /// are then used to traverse the feature data and extract corresponding sequences based on the provided FASTA record.
-
     pub fn new(
         grangers: &'a Grangers,
         record: &'a noodles::fasta::Record,
@@ -4607,18 +4568,18 @@ impl<'a> Iterator for ChrRowSeqIter<'a> {
     ///
     /// # Returns
     ///
-    /// Returns `Some(Ok(Sequence))` when a new sequence is successfully extracted and complies
+    /// Returns [`Some(Ok(Sequence))`] when a new sequence is successfully extracted and complies
     /// with the provided feature data and OOB strategy.
     ///
-    /// Returns `Some(Err(...))` when there is an issue extracting a sequence, such as invalid
+    /// Returns [`Some(Err(...))`] when there is an issue extracting a sequence, such as invalid
     /// start/end positions, null field values, or sequence indexing errors.
     ///
-    /// Returns `None` when all feature sequences have been iterated over, indicating the end
+    /// Returns [None] when all feature sequences have been iterated over, indicating the end
     /// of the genomic features in the DataFrame.
     ///
     /// # Examples
     ///
-    /// Assuming `chr_row_seq_iter` is an instance of `ChrRowSeqIter<'a>`:
+    /// Assuming `chr_row_seq_iter` is an instance of [`ChrRowSeqIter<'a>`]:
     /// ```ignore
     /// while let Some(result) = chr_row_seq_iter.next() {
     ///     match result {
@@ -4632,9 +4593,8 @@ impl<'a> Iterator for ChrRowSeqIter<'a> {
     ///
     /// This method performs several checks to ensure the integrity of the extracted sequence,
     /// including validating start/end positions and handling strand-specific sequence extraction.
-    /// It leverages the `OOBOption` settings to decide how sequences extending beyond the reference
+    /// It leverages the [`OOBOption`] settings to decide how sequences extending beyond the reference
     /// are treated, either truncating them to fit or skipping them entirely.
-
     fn next(&mut self) -> Option<Self::Item> {
         // first we check if we can extract value or not
         if let (Some(start), Some(end), Some(strand)) = (
@@ -4701,7 +4661,7 @@ impl<'a> Iterator for ChrRowSeqIter<'a> {
 ///
 /// # Type Parameters
 ///
-/// * `T`: The type of the elements in `data`. Must implement the `Ord` trait to enable sorting.
+/// * `T`: The type of the elements in `data`. Must implement the [std::cmp::Ord] trait to enable sorting.
 ///
 /// # Arguments
 ///
@@ -4713,7 +4673,7 @@ impl<'a> Iterator for ChrRowSeqIter<'a> {
 ///
 /// # Returns
 ///
-/// Returns a `Vec<usize>` containing the sorted indices of the slice's elements, starting from 1.
+/// Returns a [`Vec<usize>`] containing the sorted indices of the slice's elements, starting from 1.
 /// For example, if the highest value is at the first position of the input slice, and `descending`
 /// is `true`, the first element of the returned vector will be 1.
 ///
@@ -4750,7 +4710,7 @@ pub fn argsort1based<T: Ord>(data: &[T], descending: bool) -> Vec<usize> {
 ///
 /// # Arguments
 ///
-/// * `s`: A `Series` of structured type, expected to contain at least two fields: the start and end positions
+/// * `s`: A [Series] of structured type, expected to contain at least two fields: the start and end positions
 ///   of genomic intervals. These fields should be of integer type.
 ///
 /// * `slack`: An `i64` value representing the allowed distance between intervals to consider them for merging.
@@ -4759,15 +4719,15 @@ pub fn argsort1based<T: Ord>(data: &[T], descending: bool) -> Vec<usize> {
 ///
 /// # Returns
 ///
-/// Returns a `Result<Option<polars::prelude::Series>, PolarsError>`:
-/// * `Ok(Some(Series))`: A new `Series` where each element is a merged interval if any merging occurs.
+/// Returns a [`Result<Option<polars::prelude::Series>, PolarsError>`]:
+/// * [Ok]`(Some(Series))`: A new `Series` where each element is a merged interval if any merging occurs.
 ///   The merged intervals are represented as a Series of lists, each containing the start and end of the merged interval.
-/// * `Ok(None)`: If the input Series is empty or only contains null values.
-/// * `Err(PolarsError)`: If there are missing values in the start or end columns or other processing errors.
+/// * [Ok]`(None)`: If the input Series is empty or only contains null values.
+/// * [Err]`(PolarsError)`: If there are missing values in the start or end columns or other processing errors.
 ///
 /// # Examples
 ///
-/// Assuming `intervals` is a Polars DataFrame with a column "intervals" containing structured series
+/// Assuming `intervals` is a Polars [DataFrame] with a column "intervals" containing structured series
 /// with "start" and "end" fields:
 ///
 /// ```rust
@@ -4776,7 +4736,7 @@ pub fn argsort1based<T: Ord>(data: &[T], descending: bool) -> Vec<usize> {
 ///
 /// # Note
 ///
-/// This function requires that the input Series is sorted by the start positions of the intervals and contains
+/// This function requires that the input [Series] is sorted by the start positions of the intervals and contains
 /// no null values in the start and end fields. It's designed specifically for genomic data processing where
 /// intervals might need to be merged based on their proximity or overlap.
 fn apply_merge(s: Series, slack: i64) -> Result<Option<polars::prelude::Series>, PolarsError> {
@@ -4864,13 +4824,13 @@ fn apply_merge(s: Series, slack: i64) -> Result<Option<polars::prelude::Series>,
 
 /// Identifies gaps between adjacent genomic features based on their start and end positions.
 ///
-/// This function processes a structured Series containing genomic intervals and calculates the gaps,
+/// This function processes a structured [Series] containing genomic intervals and calculates the gaps,
 /// i.e., regions that do not overlap with any feature, between these intervals. It is particularly
 /// useful for identifying regions like intergenic spaces or introns in genomic datasets.
 ///
 /// # Arguments
 ///
-/// * `s`: A `Series` containing structured data with at least two fields: the start and end positions
+/// * `s`: A [Series] containing structured data with at least two fields: the start and end positions
 ///   of genomic features. These features should be sorted by their start positions.
 ///
 /// * `_slack`: Currently unused. Reserved for future use to possibly adjust the definition of gaps based
@@ -4878,11 +4838,11 @@ fn apply_merge(s: Series, slack: i64) -> Result<Option<polars::prelude::Series>,
 ///
 /// # Returns
 ///
-/// Returns a `Result<Option<polars::prelude::Series>, PolarsError>`:
-/// * `Ok(Some(Series))`: A new `Series` where each element represents a gap identified between features.
+/// Returns a [`Result<Option<polars::prelude::Series>, PolarsError>`]:
+/// * [Ok]`(Some(Series))`: A new `Series` where each element represents a gap identified between features.
 ///   The elements are formatted as intervals (start and end positions of the gaps) if any gaps exist.
-/// * `Ok(None)`: If the input `Series` contains only one feature or is otherwise incapable of forming gaps.
-/// * `Err(PolarsError)`: If there are missing values in the start or end columns or other issues encountered
+/// * [Ok]`(None)`: If the input `Series` contains only one feature or is otherwise incapable of forming gaps.
+/// * [Err]`(PolarsError)`: If there are missing values in the start or end columns or other issues encountered
 ///   during processing.
 ///
 /// # Examples
@@ -4896,7 +4856,7 @@ fn apply_merge(s: Series, slack: i64) -> Result<Option<polars::prelude::Series>,
 ///
 /// # Note
 ///
-/// The function assumes that the input `Series` is sorted by the start positions of the intervals. It is
+/// The function assumes that the input [Series] is sorted by the start positions of the intervals. It is
 /// important that there are no null values in the start and end fields for accurate computation. The gaps
 /// are defined as regions starting from one feature's end position plus one to the next feature's start
 /// position minus one.
