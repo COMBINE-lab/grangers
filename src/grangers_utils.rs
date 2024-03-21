@@ -45,8 +45,8 @@ impl FileFormat {
     ///
     /// # Returns
     ///
-    /// A slice of string slices (`&[&str]`):
-    /// * For `FileFormat::GTF` and `FileFormat::GFF`, it returns a reference to an array containing the names
+    /// A slice of string slices (&[`[&str]`]):
+    /// * For [FileFormat::GTF] and [FileFormat::GFF], it returns a reference to an array containing the names
     ///   of essential attributes defined in `GXFESSENTIALATTRIBUTES`.
     /// * For all other file formats, it returns an empty slice, as they do not have a predefined set of
     ///   essential attributes.
@@ -74,20 +74,15 @@ impl FileFormat {
             _ => &[],
         }
     }
-    pub fn is_gtf(&self) -> bool {
-        matches!(self, FileFormat::GTF)
-    }
-}
-impl std::str::FromStr for FileFormat {
-    type Err = anyhow::Error;
+
     /// Checks if the file format is GTF (Gene Transfer Format).
     ///
     /// This method allows for a quick verification to determine whether the current instance
-    /// of the `FileFormat` enum is set to the GTF format, which is commonly used for gene annotations.
+    /// of the [FileFormat] enum is set to the GTF format, which is commonly used for gene annotations.
     ///
     /// # Returns
     ///
-    /// * `true`: If the `FileFormat` instance is `FileFormat::GTF`.
+    /// * `true`: If the [FileFormat] instance is [FileFormat::GTF].
     /// * `false`: Otherwise.
     ///
     /// # Examples
@@ -104,6 +99,18 @@ impl std::str::FromStr for FileFormat {
     ///
     /// This method is particularly useful for conditional processing based on the file format, such as applying
     /// GTF-specific parsing logic or validation checks.
+    pub fn is_gtf(&self) -> bool {
+        matches!(self, FileFormat::GTF)
+    }
+}
+
+impl std::str::FromStr for FileFormat {
+    type Err = anyhow::Error;
+
+    /// Converts from a [&str] to an appropriate [FileFormat] type.
+    /// The result is returned in an [`anyhow::Result<FileFormat>`]
+    /// and is an error variant if there is no corresponding type for
+    /// the input argument `s`.
     fn from_str(s: &str) -> anyhow::Result<FileFormat> {
         let ft = match s.to_lowercase().as_str() {
             "gtf" => FileFormat::GTF,
@@ -122,6 +129,7 @@ impl std::str::FromStr for FileFormat {
 }
 
 impl std::fmt::Display for FileFormat {
+    /// Print the formatted description of the current [FileFormat]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FileFormat::GTF => write!(f, "GTF"),
@@ -162,6 +170,7 @@ pub fn _file_line_count<T: AsRef<Path>>(file_path: T) -> anyhow::Result<usize> {
     Ok(num_lines)
 }
 
+// Returns `true` if the input vectors are of equal length and false otherwise.
 pub fn equal_length<T, R>(vec1: &[T], vec2: &[R]) -> bool {
     vec1.len() == vec2.len()
 }
@@ -176,18 +185,18 @@ pub fn _setdiff<T: Eq + Clone>(vec1: &[T], vec2: &[T]) -> Vec<T> {
     diff
 }
 
-/// Tests if the stream underlying the BufReader `reader` is gzipped or not by examining the
+/// Tests if the stream underlying the [BufReader] `reader` is gzipped or not by examining the
 /// first 2 bytes for the magic header.  This function *requires*, but does not check, that
 /// none of the stream has yet been consumed (i.e. that no read calls have yet been issued
 /// to `reader`). It will fill the buffer to examine the first two bytes, but will not consume
 /// them.
 ///
 /// If the first 2 bytes could be succesfully read, this returns
-/// Ok(true) if the file is a gzipped file
-/// Ok(false) if it is not a gzipped file
+/// [Ok]`(true)` if the file is a gzipped file
+/// [Ok]`(false)` if it is not a gzipped file
 ///
 /// If the first 2 bytes could not be succesfully read, then this
-/// returns the relevant std::io::Error.
+/// returns the relevant [std::io::Error].
 ///
 /// Notes: implementation taken from
 /// <https://github.com/zaeleus/noodles/blob/ba1b34ce22e72c2df277b20ce4c5c7b75d75a199/noodles-util/src/variant/reader/builder.rs#L131>
@@ -262,13 +271,13 @@ pub enum IntervalType {
 impl Default for IntervalType {
     /// Provides a default interval type.
     ///
-    /// This method returns a default value for the `IntervalType` enum. The default is set to
-    /// `IntervalType::Inclusive(1)`, which is a common setting for many genomic formats like GTF, GFF, and SAM,
+    /// This method returns a default value for the [IntervalType] enum. The default is set to
+    /// [`IntervalType::Inclusive(1)`], which is a common setting for many genomic formats like GTF, GFF, and SAM,
     /// where intervals are typically inclusive, meaning they include both the start and end positions.
     ///
     /// # Returns
     ///
-    /// Returns `IntervalType::Inclusive(1)`, representing an inclusive interval with an offset of 1.
+    /// Returns [`IntervalType::Inclusive(1)`], representing an inclusive interval with an offset of 1.
     /// This offset reflects the 1-based indexing common to certain genomic data formats.
     ///
     /// # Examples
@@ -282,7 +291,6 @@ impl Default for IntervalType {
     ///
     /// This default method simplifies the initialization of interval types for common scenarios in genomic data processing,
     /// ensuring consistency and reducing the need for repetitive specification of the same interval type.
-
     fn default() -> Self {
         IntervalType::Inclusive(1)
     }
@@ -303,16 +311,16 @@ impl IntervalType {
     ///
     /// # Type Parameters
     ///
-    /// * `T`: A type that implements the `ToString` trait, which allows passing string literals,
-    ///   `String` objects, or any other type that can be converted to a string representation of the file format.
+    /// * `T`: A type that implements the [ToString] trait, which allows passing string literals,
+    ///   [String] objects, or any other type that can be converted to a string representation of the file format.
     ///
     /// # Arguments
     ///
-    /// * `file_type`: The file format for which to create the corresponding `IntervalType`.
+    /// * `file_type`: The file format for which to create the corresponding [IntervalType].
     ///
     /// # Returns
     ///
-    /// Returns an instance of `IntervalType` corresponding to the given file format:
+    /// Returns an instance of [IntervalType] corresponding to the given file format:
     /// * `IntervalType::Inclusive(1)`: For "GTF", "GFF", or "SAM" formats, which typically use inclusive intervals.
     /// * `IntervalType::RightInclusive(0)`: For "BAM" or "BED" formats, which use right-inclusive (0-based) intervals.
     ///
@@ -337,6 +345,7 @@ impl IntervalType {
             _ => panic!("The file type is not supported"),
         }
     }
+
     /// Calculates the start position offset based on the interval type.
     ///
     /// This method determines how much to adjust the start coordinate of a genomic interval
@@ -375,6 +384,7 @@ impl IntervalType {
             IntervalType::Exclusive(c) => 1 + 1 - c,
         }
     }
+
     /// Calculates the end position offset based on the interval type.
     ///
     /// This method determines the necessary adjustment to the end coordinate of a genomic interval
