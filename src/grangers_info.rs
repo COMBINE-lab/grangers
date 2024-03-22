@@ -16,7 +16,6 @@ use rust_lapper::{Interval, Lapper};
 use std::collections::{HashMap, HashSet};
 use std::convert::AsRef;
 use std::fs;
-use std::io::BufReader;
 use std::io::Read;
 use std::io::Write;
 use std::iter::IntoIterator;
@@ -3924,7 +3923,7 @@ impl Grangers {
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
-    ) -> anyhow::Result<Pin<Box<GrangersSeqIter<R>>>> {
+    ) -> anyhow::Result<Pin<Box<GrangersSeqIter>>> {
         self.validate(false, true)?;
 
         // if name is invalid, ignore
@@ -4025,7 +4024,7 @@ impl Grangers {
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
-    ) -> anyhow::Result<Pin<Box<GrangersSeqIter<std::fs::File>>>> {
+    ) -> anyhow::Result<Pin<Box<GrangersSeqIter>>> {
         self.iter_sequences_from_reader(
             std::fs::File::open(ref_path)?,
             ignore_strand,
@@ -4185,7 +4184,7 @@ pub struct GrangersFilterOpts {
 /// This iterator is designed to be used in scenarios where sequences need to be extracted and processed from a larger genomic dataset.
 /// It is particularly useful for applications that require iterating over sequences with specific filtering criteria, such as extracting
 /// all exons from a set of transcripts.
-pub struct GrangersSeqIter<R: Read> {
+pub struct GrangersSeqIter {
     // the essential grangers struct holding
     // the required fields across *all* of the
     // target sequences
@@ -4213,12 +4212,11 @@ pub struct GrangersSeqIter<R: Read> {
     // local buffer to hold the sequence definition
     // string.
     def_buffer: String,
-    _r: std::marker::PhantomData<R>,
 }
 
 use core::pin::Pin;
 
-impl<R: Read + 'static> GrangersSeqIter<R> {
+impl GrangersSeqIter {
     /// Creates a new instance of the [GrangersSeqIter].
     ///
     /// This constructor initializes a new sequence iterator for processing genomic data.
@@ -4258,7 +4256,11 @@ impl<R: Read + 'static> GrangersSeqIter<R> {
     ///
     /// The initial `seq_record` is set to a default "empty" record; actual sequence data will be populated
     /// when the iterator is advanced.
-    pub fn new(r: R, filt_opt: GrangersFilterOpts, essential_gr: Grangers) -> Pin<Box<Self>> {
+    pub fn new<R: Read + 'static>(
+        r: R,
+        filt_opt: GrangersFilterOpts,
+        essential_gr: Grangers,
+    ) -> Pin<Box<Self>> {
         let reader = grangers_utils::get_noodles_reader_from_reader(r)
             .expect("couldn't create reader from input reader");
         let definition = Definition::new("empty", None);
@@ -4266,7 +4268,7 @@ impl<R: Read + 'static> GrangersSeqIter<R> {
         let curr_record = noodles::fasta::Record::new(definition, sequence);
         let v: Vec<String> = vec![];
         let o: Vec<u32> = vec![];
-        Box::pin(GrangersSeqIter::<R> {
+        Box::pin(GrangersSeqIter {
             essential_gr,
             chr_gr: None,
             seq_reader: reader,
@@ -4276,12 +4278,11 @@ impl<R: Read + 'static> GrangersSeqIter<R> {
             row_order_iter: o.into_iter(),
             chr_seq_iter: None,
             def_buffer: String::new(),
-            _r: std::marker::PhantomData::<R>,
         })
     }
 }
 
-impl<R: Read + 'static> Iterator for GrangersSeqIter<R> {
+impl Iterator for GrangersSeqIter {
     type Item = (GrangersRecordID, noodles::fasta::Record);
 
     #[allow(clippy::question_mark)]
