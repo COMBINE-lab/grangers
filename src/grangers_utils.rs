@@ -5,6 +5,11 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use tracing::trace;
 
+/// Type alias for a noodles FASTA reader that can read from
+/// a `dyn BufRead`. It is used to allow reading from either
+/// a compressed or uncompressed FASTA file.
+pub type FastaReader = noodles::fasta::Reader<Box<dyn BufRead>>;
+
 pub(crate) const VALIDSTRANDS: [&str; 2] = ["+", "-"];
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -213,9 +218,12 @@ pub fn is_gzipped<T: BufRead>(reader: &mut T) -> std::io::Result<bool> {
     }
 }
 
-pub fn get_noodles_reader_from_path<T: AsRef<Path>>(
-    p: T,
-) -> anyhow::Result<noodles::fasta::Reader<Box<dyn BufRead>>> {
+/// Creates a [FastaReader] from the provided path. This function will automatically
+/// determine if the provided path points to a gzip compressed or an uncompressed FASTA
+/// file, and will return the appropriate reader accordingly.
+///
+/// It returns [Ok]`(`[FastaReader]`)` on success and an [anyhow::Error] on failure.
+pub fn get_noodles_reader_from_path<T: AsRef<Path>>(p: T) -> anyhow::Result<FastaReader> {
     let file = std::fs::File::open(p.as_ref())?;
     let mut inner_rdr = std::io::BufReader::new(file);
     // Now, we read the fasta file and process each reference sequence at a time
@@ -229,9 +237,15 @@ pub fn get_noodles_reader_from_path<T: AsRef<Path>>(
     }
 }
 
-pub fn get_noodles_reader_from_reader(
-    r: impl Read + 'static,
-) -> anyhow::Result<noodles::fasta::Reader<Box<dyn BufRead>>> {
+/// Creates a [FastaReader] from the provided reader. This function will automatically
+/// determine if the provided reader is reading from a gzip compressed or an uncompressed FASTA
+/// file, and will return the appropriate reader accordingly.
+///
+/// It returns [Ok]`(`[FastaReader]`)` on success and an [anyhow::Error] on failure.
+///
+/// **Note** : It is intended that this function *take ownership* of the underlying reader, which
+/// is the reason behind the `'static` lifetime bound.
+pub fn get_noodles_reader_from_reader(r: impl Read + 'static) -> anyhow::Result<FastaReader> {
     let mut inner_rdr = std::io::BufReader::new(r);
     // Now, we read the fasta file and process each reference sequence at a time
     if is_gzipped(&mut inner_rdr)? {

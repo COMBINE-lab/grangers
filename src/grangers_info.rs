@@ -7,7 +7,6 @@ use crate::reader;
 use crate::reader::fasta::SeqInfo;
 use anyhow::{bail, Context};
 use lazy_static::lazy_static;
-//use noodles::fasta::io::BufReader;
 pub(crate) use noodles::fasta::record::{Definition, Sequence};
 use nutype::nutype;
 use polars::{frame::DataFrame, lazy::prelude::*, prelude::*, series::Series};
@@ -16,8 +15,7 @@ use rust_lapper::{Interval, Lapper};
 use std::collections::{HashMap, HashSet};
 use std::convert::AsRef;
 use std::fs;
-use std::io::Read;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::iter::IntoIterator;
 use std::ops::FnMut;
 use std::ops::{Add, Mul, Sub};
@@ -3803,8 +3801,6 @@ impl Grangers {
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
         let mut reader = grangers_utils::get_noodles_reader_from_reader(reader)?;
-        //let mut reader = noodles::fasta::Reader::new(BufReader::new(reader));
-        // let mut reader = noodles::fasta::Reader::new(reader);
 
         let sig = essential_gr.get_signature();
         let num_rec = essential_gr.df().height();
@@ -3970,7 +3966,6 @@ impl Grangers {
         essential_gr.set_signature(self.get_signature());
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
-        //let reader = BufReader::new(reader);
 
         let filt_opt = GrangersFilterOpts {
             seqname: seqname.to_owned(),
@@ -4158,8 +4153,9 @@ pub struct GrangersFilterOpts {
 /// * `chr_gr`: An optional [Grangers] instance containing only the features relevant to the current target sequence.
 ///    This is dynamically updated to match the current focus of sequence extraction.
 ///
-/// * `seq_reader`: A FASTA format reader from the `noodles` crate, wrapped in a standard Rust [BufReader].
-///    It is used for reading sequence data from a reference genome or other source.
+/// * `seq_reader`: A FASTA format reader from the `noodles` crate, wrapping an underlying reader
+///    that depends on wether or not the source is compressed. It is used for reading sequence data from a reference
+///    genome or other source.
 ///
 /// * `seq_record`: Represents the current sequence record being processed by the iterator.
 ///    It holds both the sequence identifier and the actual sequence data.
@@ -4195,7 +4191,7 @@ pub struct GrangersSeqIter {
     chr_gr: Option<Grangers>,
     // a noodles Fasta reader for reading the
     // target sequences
-    seq_reader: noodles::fasta::Reader<Box<dyn std::io::BufRead>>, //std::io::BufReader<R>>,
+    seq_reader: grangers_utils::FastaReader,
     // the current seq record
     seq_record: noodles::fasta::Record,
     // the filter options that will be applied
@@ -4225,7 +4221,7 @@ impl GrangersSeqIter {
     ///
     /// # Arguments
     ///
-    /// * `breader`: A [`BufReader<R>`] wrapping a data source implementing the [`Read`] trait. This reader is used
+    /// * `breader`: A reader implementing the [`Read`] trait. This reader is used
     ///   to stream genomic sequence data from FASTA-formatted files or other readable sources.
     ///
     /// * `filt_opt`: Filter options encapsulated within a [GrangersFilterOpts] structure. These options

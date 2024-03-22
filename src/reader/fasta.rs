@@ -214,7 +214,7 @@ impl SeqInfo {
 
 /// Creates a FASTA file reader.
 ///
-/// This function constructs a [`fasta::Reader`] wrapped in a [`BufReader`], ready to read
+/// This function constructs a [`fasta::Reader`] wrapped in a [`BufReader`](std::io::BufReader), ready to read
 /// from the specified FASTA file. It provides buffered reading capabilities, which is
 /// efficient for large FASTA files.
 ///
