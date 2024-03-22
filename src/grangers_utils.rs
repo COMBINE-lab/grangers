@@ -1,7 +1,9 @@
 // use crate::grangers_info::{Grangers, GrangersSequenceCollection};
+use flate2::read::GzDecoder;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
+use tracing::trace;
 
 pub(crate) const VALIDSTRANDS: [&str; 2] = ["+", "-"];
 
@@ -208,6 +210,37 @@ pub fn is_gzipped<T: BufRead>(reader: &mut T) -> std::io::Result<bool> {
         Ok(true)
     } else {
         Ok(false)
+    }
+}
+
+pub fn get_noodles_reader_from_path<T: AsRef<Path>>(
+    p: T,
+) -> anyhow::Result<noodles::fasta::Reader<Box<dyn BufRead>>> {
+    let file = std::fs::File::open(p.as_ref())?;
+    let mut inner_rdr = std::io::BufReader::new(file);
+    // Now, we read the fasta file and process each reference sequence at a time
+    if is_gzipped(&mut inner_rdr)? {
+        trace!("auto-detected gzipped FASTA file - reading via decompression");
+        Ok(noodles::fasta::Reader::new(Box::new(BufReader::new(
+            GzDecoder::new(inner_rdr),
+        ))))
+    } else {
+        Ok(noodles::fasta::Reader::new(Box::new(inner_rdr)))
+    }
+}
+
+pub fn get_noodles_reader_from_reader(
+    r: impl Read + 'static,
+) -> anyhow::Result<noodles::fasta::Reader<Box<dyn BufRead>>> {
+    let mut inner_rdr = std::io::BufReader::new(r);
+    // Now, we read the fasta file and process each reference sequence at a time
+    if is_gzipped(&mut inner_rdr)? {
+        trace!("auto-detected gzipped FASTA file - reading via decompression");
+        Ok(noodles::fasta::Reader::new(Box::new(BufReader::new(
+            GzDecoder::new(inner_rdr),
+        ))))
+    } else {
+        Ok(noodles::fasta::Reader::new(Box::new(inner_rdr)))
     }
 }
 

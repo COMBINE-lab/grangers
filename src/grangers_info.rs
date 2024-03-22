@@ -1,3 +1,4 @@
+use crate::grangers_utils;
 // TODO:
 // 1. update write and get sequence functions to use the same implementation
 use crate::grangers_utils::*;
@@ -6,6 +7,7 @@ use crate::reader;
 use crate::reader::fasta::SeqInfo;
 use anyhow::{bail, Context};
 use lazy_static::lazy_static;
+//use noodles::fasta::io::BufReader;
 pub(crate) use noodles::fasta::record::{Definition, Sequence};
 use nutype::nutype;
 use polars::{frame::DataFrame, lazy::prelude::*, prelude::*, series::Series};
@@ -2897,10 +2899,7 @@ impl Grangers {
         let end = fc.end();
         let transcript_id = fc.transcript_id().unwrap();
 
-        // Now, we read the fasta file and process each reference sequence at a time
-        let mut reader = std::fs::File::open(ref_path)
-            .map(BufReader::new)
-            .map(noodles::fasta::Reader::new)?;
+        let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
         // we also create a fasta writer
         let mut writer = noodles::fasta::Writer::new(out_file);
 
@@ -3133,8 +3132,7 @@ impl Grangers {
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
 
-        let reader = std::fs::File::open(ref_path).map(BufReader::new)?;
-        let mut reader = noodles::fasta::Reader::new(reader);
+        let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
 
         let mut writer = noodles::fasta::Writer::new(out_file);
         let mut empty_counter = 0;
@@ -3331,8 +3329,7 @@ impl Grangers {
         let seqname_s = essential_gr.get_column_name("seqname", true)?;
         let seqname = seqname_s.as_str();
 
-        let reader = std::fs::File::open(ref_path).map(BufReader::new)?;
-        let mut reader = noodles::fasta::Reader::new(reader);
+        let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
 
         let mut writer = noodles::fasta::Writer::new(out_file);
         let mut empty_counter = 0;
@@ -3465,8 +3462,8 @@ impl Grangers {
         let transcript_id = fc.transcript_id().unwrap();
 
         // Now, we read the fasta file and process each reference sequence at a time
-        let reader = std::fs::File::open(fasta_path).map(BufReader::new)?;
-        let mut reader = noodles::fasta::Reader::new(reader);
+        let mut reader = grangers_utils::get_noodles_reader_from_path(fasta_path)?;
+
         // let mut seq_vec: Vec<Option<Sequence>> = vec![None; exon_gr.df().height()];
         let mut transcript_seq_vec: Vec<noodles::fasta::Record> =
             Vec::with_capacity(self.df().column(transcript_id)?.unique()?.len());
@@ -3609,8 +3606,7 @@ impl Grangers {
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
 
-        let reader = std::fs::File::open(fasta_path).map(BufReader::new)?;
-        let mut reader = noodles::fasta::Reader::new(reader);
+        let mut reader = grangers_utils::get_noodles_reader_from_path(fasta_path)?;
 
         let mut seq_vec: Vec<Option<noodles::fasta::Record>> =
             vec![None; essential_gr.df().height()];
@@ -3754,7 +3750,7 @@ impl Grangers {
     ///
     /// This function can return an error if there are issues with reading the FASTA data,
     /// if there are validation errors, or if other processing steps fail.
-    pub fn get_sequences_from_read<R: Read>(
+    pub fn get_sequences_from_read<R: Read + 'static>(
         &mut self,
         reader: R,
         ignore_strand: bool,
@@ -3807,7 +3803,8 @@ impl Grangers {
         essential_gr.set_signature(self.get_signature());
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
-        let mut reader = noodles::fasta::Reader::new(BufReader::new(reader));
+        let mut reader = grangers_utils::get_noodles_reader_from_reader(reader)?;
+        //let mut reader = noodles::fasta::Reader::new(BufReader::new(reader));
         // let mut reader = noodles::fasta::Reader::new(reader);
 
         let sig = essential_gr.get_signature();
@@ -3921,7 +3918,7 @@ impl Grangers {
     ///
     /// This function can return an error if there are validation errors, or if there are issues
     /// setting up the iterator or reading data from the provided reader.
-    pub fn iter_sequences_from_reader<R: Read>(
+    pub fn iter_sequences_from_reader<R: Read + 'static>(
         &mut self,
         reader: R,
         ignore_strand: bool,
@@ -3974,7 +3971,7 @@ impl Grangers {
         essential_gr.set_signature(self.get_signature());
 
         let seqname = essential_gr.get_column_name_str("seqname", true)?;
-        let reader = BufReader::new(reader);
+        //let reader = BufReader::new(reader);
 
         let filt_opt = GrangersFilterOpts {
             seqname: seqname.to_owned(),
@@ -4199,7 +4196,7 @@ pub struct GrangersSeqIter<R: Read> {
     chr_gr: Option<Grangers>,
     // a noodles Fasta reader for reading the
     // target sequences
-    seq_reader: noodles::fasta::Reader<std::io::BufReader<R>>,
+    seq_reader: noodles::fasta::Reader<Box<dyn std::io::BufRead>>, //std::io::BufReader<R>>,
     // the current seq record
     seq_record: noodles::fasta::Record,
     // the filter options that will be applied
@@ -4216,11 +4213,12 @@ pub struct GrangersSeqIter<R: Read> {
     // local buffer to hold the sequence definition
     // string.
     def_buffer: String,
+    _r: std::marker::PhantomData<R>,
 }
 
 use core::pin::Pin;
 
-impl<R: Read> GrangersSeqIter<R> {
+impl<R: Read + 'static> GrangersSeqIter<R> {
     /// Creates a new instance of the [GrangersSeqIter].
     ///
     /// This constructor initializes a new sequence iterator for processing genomic data.
@@ -4260,18 +4258,15 @@ impl<R: Read> GrangersSeqIter<R> {
     ///
     /// The initial `seq_record` is set to a default "empty" record; actual sequence data will be populated
     /// when the iterator is advanced.
-    pub fn new(
-        breader: std::io::BufReader<R>,
-        filt_opt: GrangersFilterOpts,
-        essential_gr: Grangers,
-    ) -> Pin<Box<Self>> {
-        let reader = noodles::fasta::Reader::new(breader);
+    pub fn new(r: R, filt_opt: GrangersFilterOpts, essential_gr: Grangers) -> Pin<Box<Self>> {
+        let reader = grangers_utils::get_noodles_reader_from_reader(r)
+            .expect("couldn't create reader from input reader");
         let definition = Definition::new("empty", None);
         let sequence = Sequence::from(b"A".to_vec());
         let curr_record = noodles::fasta::Record::new(definition, sequence);
         let v: Vec<String> = vec![];
         let o: Vec<u32> = vec![];
-        Box::pin(GrangersSeqIter {
+        Box::pin(GrangersSeqIter::<R> {
             essential_gr,
             chr_gr: None,
             seq_reader: reader,
@@ -4281,11 +4276,12 @@ impl<R: Read> GrangersSeqIter<R> {
             row_order_iter: o.into_iter(),
             chr_seq_iter: None,
             def_buffer: String::new(),
+            _r: std::marker::PhantomData::<R>,
         })
     }
 }
 
-impl<R: Read> Iterator for GrangersSeqIter<R> {
+impl<R: Read + 'static> Iterator for GrangersSeqIter<R> {
     type Item = (GrangersRecordID, noodles::fasta::Record);
 
     #[allow(clippy::question_mark)]

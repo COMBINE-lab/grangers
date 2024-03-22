@@ -1,9 +1,8 @@
-use crate::grangers_utils::equal_length;
+use crate::grangers_utils::{self, equal_length};
 use anyhow::bail;
 use noodles::fasta;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
 use std::path::Path;
 
 /// Represents sequence information for genomic or reference datasets.
@@ -241,6 +240,7 @@ impl SeqInfo {
 ///
 /// This function simplifies the process of setting up a FASTA reader, handling file opening and
 /// buffering internally.
+/*
 pub fn build_fasta_reader<T: AsRef<Path>, R: BufRead>(
     file_path: T,
 ) -> anyhow::Result<fasta::Reader<BufReader<File>>> {
@@ -250,6 +250,7 @@ pub fn build_fasta_reader<T: AsRef<Path>, R: BufRead>(
         .map(fasta::Reader::new)?;
     Ok(reader)
 }
+*/
 
 /// Extracts sequence names and lengths from a FASTA file.
 ///
@@ -281,9 +282,7 @@ pub fn build_fasta_reader<T: AsRef<Path>, R: BufRead>(
 /// creating an index or performing sequence length-dependent calculations.
 pub fn get_chromsize<T: AsRef<Path>>(file_path: T) -> anyhow::Result<(Vec<String>, Vec<usize>)> {
     // create reader
-    let mut reader = File::open(file_path)
-        .map(BufReader::new)
-        .map(fasta::Reader::new)?;
+    let mut reader = grangers_utils::get_noodles_reader_from_path(file_path)?;
 
     // call inner function
     _get_chromsize(&mut reader)
@@ -318,10 +317,13 @@ fn _get_chromsize<T: BufRead>(
 mod tests {
 
     use super::*;
+    use std::io::Cursor;
     #[test]
     fn test_get_chromsize() {
         let fasta_data = b">sq0 test\nACGT\n>sq1\nNNNN\nNNNN\nNN\n";
-        let mut rdr = fasta::Reader::new(&fasta_data[..]);
+        let reader = Cursor::new(fasta_data);
+        let mut rdr =
+            grangers_utils::get_noodles_reader_from_reader(reader).expect("can't construct reader");
 
         let chromsize = _get_chromsize(&mut rdr).unwrap();
         assert_eq!(chromsize.1.first().unwrap(), &4);
