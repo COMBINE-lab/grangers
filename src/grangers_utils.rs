@@ -1,5 +1,5 @@
 // use crate::grangers_info::{Grangers, GrangersSequenceCollection};
-use flate2::read::GzDecoder;
+use flate2::bufread::MultiGzDecoder;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
@@ -230,7 +230,7 @@ pub fn get_noodles_reader_from_path<T: AsRef<Path>>(p: T) -> anyhow::Result<Fast
     if is_gzipped(&mut inner_rdr)? {
         trace!("auto-detected gzipped FASTA file - reading via decompression");
         Ok(noodles::fasta::Reader::new(Box::new(BufReader::new(
-            GzDecoder::new(inner_rdr),
+            MultiGzDecoder::new(inner_rdr),
         ))))
     } else {
         Ok(noodles::fasta::Reader::new(Box::new(inner_rdr)))
@@ -251,7 +251,7 @@ pub fn get_noodles_reader_from_reader(r: impl Read + 'static) -> anyhow::Result<
     if is_gzipped(&mut inner_rdr)? {
         trace!("auto-detected gzipped FASTA file - reading via decompression");
         Ok(noodles::fasta::Reader::new(Box::new(BufReader::new(
-            GzDecoder::new(inner_rdr),
+            MultiGzDecoder::new(inner_rdr),
         ))))
     } else {
         Ok(noodles::fasta::Reader::new(Box::new(inner_rdr)))

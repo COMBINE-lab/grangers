@@ -1,6 +1,6 @@
 use crate::grangers_utils::{is_gzipped, FileFormat};
 use anyhow;
-use flate2::bufread::GzDecoder;
+use flate2::bufread::MultiGzDecoder;
 use noodles::{gff, gtf};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -379,7 +379,7 @@ impl GStruct {
         // instantiate the struct
         if is_gzipped(&mut inner_rdr)? {
             info!("auto-detected gzipped file - reading via decompression");
-            let mut rdr = gtf::Reader::new(BufReader::new(GzDecoder::new(inner_rdr)));
+            let mut rdr = gtf::Reader::new(BufReader::new(MultiGzDecoder::new(inner_rdr)));
             gr._from_gtf(&mut rdr)?;
         } else {
             let mut rdr = gtf::Reader::new(inner_rdr);
@@ -490,7 +490,7 @@ impl GStruct {
         // instantiate the struct
         if is_gzipped(&mut inner_rdr)? {
             info!("auto-detected gzipped file - reading via decompression");
-            let mut rdr = gff::Reader::new(BufReader::new(GzDecoder::new(inner_rdr)));
+            let mut rdr = gff::Reader::new(BufReader::new(MultiGzDecoder::new(inner_rdr)));
             gr._from_gff(&mut rdr)?;
         } else {
             let mut rdr = gff::Reader::new(inner_rdr);
