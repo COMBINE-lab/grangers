@@ -406,8 +406,8 @@ impl GStruct {
                     GStruct::push(&mut self.seqid, r.reference_sequence_name().to_string());
                     GStruct::push(&mut self.source, r.source().to_string());
                     GStruct::push(&mut self.feature_type, r.ty().to_string());
-                    GStruct::push(&mut self.start, r.start().get().to_owned() as i64);
-                    GStruct::push(&mut self.end, r.end().get().to_owned() as i64);
+                    GStruct::push(&mut self.start, r.start().get() as i64);
+                    GStruct::push(&mut self.end, r.end().get() as i64);
                     GStruct::push(&mut self.score, r.score());
                     GStruct::push(
                         &mut self.strand,
@@ -513,8 +513,8 @@ impl GStruct {
                     GStruct::push(&mut self.seqid, r.reference_sequence_name().to_string());
                     GStruct::push(&mut self.source, r.source().to_string());
                     GStruct::push(&mut self.feature_type, r.ty().to_string());
-                    GStruct::push(&mut self.start, r.start().get().to_owned() as i64);
-                    GStruct::push(&mut self.end, r.end().get().to_owned() as i64);
+                    GStruct::push(&mut self.start, r.start().get() as i64);
+                    GStruct::push(&mut self.end, r.end().get() as i64);
                     GStruct::push(&mut self.score, r.score());
                     GStruct::push(
                         &mut self.strand,
