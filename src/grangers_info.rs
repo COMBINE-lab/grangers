@@ -15,7 +15,7 @@ use rust_lapper::{Interval, Lapper};
 use std::collections::{HashMap, HashSet};
 use std::convert::AsRef;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufWriter, Read, Write};
 use std::iter::IntoIterator;
 use std::ops::FnMut;
 use std::ops::{Add, Mul, Sub};
@@ -445,6 +445,13 @@ impl Grangers {
             Series::new("phase", gstruct.phase),
         ];
 
+        let el = if let Some(ref extra) = gstruct.attributes.extra {
+            extra.len()
+        } else {
+                0_usize
+        };
+        df_vec.reserve(df_vec.len() + gstruct.attributes.essential.len() + el);
+
         //for essential attributes
         for (k, v) in gstruct.attributes.essential {
             if !v.is_empty() {
@@ -465,15 +472,14 @@ impl Grangers {
         }
 
         let df = DataFrame::new(df_vec)?;
-        let gr = Grangers::new(
+        Ok(Grangers::new(
             df,
             None,
             gstruct.misc,
             interval_type,
             FieldColumns::default(),
             true,
-        )?;
-        Ok(gr)
+        )?)
     }
 
     /// Constructs a [Grangers] instance from a GTF (GFF2) file.
@@ -512,8 +518,7 @@ impl Grangers {
     ) -> anyhow::Result<Grangers> {
         let am = reader::AttributeMode::from(!only_essential);
         let gstruct = reader::GStruct::from_gtf(file_path.as_ref(), am)?;
-        let gr = Grangers::from_gstruct(gstruct, IntervalType::Inclusive(1))?;
-        Ok(gr)
+        Ok(Grangers::from_gstruct(gstruct, IntervalType::Inclusive(1))?)
     }
 
     /// Constructs a [Grangers] instance from a GFF3 file.
@@ -551,8 +556,7 @@ impl Grangers {
     ) -> anyhow::Result<Grangers> {
         let am = reader::AttributeMode::from(!only_essential);
         let gstruct = reader::GStruct::from_gff(file_path, am)?;
-        let gr = Grangers::from_gstruct(gstruct, IntervalType::Inclusive(1))?;
-        Ok(gr)
+        Ok(Grangers::from_gstruct(gstruct, IntervalType::Inclusive(1))?)
     }
 
     // TODO: add the part about making/taking and checking the seqinfo
@@ -729,7 +733,8 @@ impl Grangers {
 
         let mut out_df = self.get_gtf_df()?;
 
-        let mut file = std::fs::File::create(file_path)?;
+        let file = std::fs::File::create(file_path)?;
+        let mut file = BufWriter::new(file);
         CsvWriter::new(&mut file)
             .include_header(false)
             .with_separator(b'\t')
@@ -3088,6 +3093,7 @@ impl Grangers {
                 out_path.as_os_str()
             )
         })?;
+        let out_file = BufWriter::new(out_file);
 
         self.validate(false, true)?;
 
