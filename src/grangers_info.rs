@@ -2903,7 +2903,9 @@ impl Grangers {
 
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
         // we also create a fasta writer
-        // let mut writer = noodles::fasta::Writer::new(out_file);
+        let out_writer = BufWriter::with_capacity(4194304, out_file);
+        let mut writer = noodles::fasta::writer::Builder::default().set_line_base_count(usize::MAX).build_with_writer(out_writer);
+
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
         // 1. subset the dataframe by the seqname (chromosome name)
@@ -2989,8 +2991,8 @@ impl Grangers {
                         }
 
                         if write_record {
-                            unsafe { write!(out_file, ">{curr_tx}\n{}\n", std::str::from_utf8_unchecked(&exon_u8_vec))?; }
-                                /*.write_record(rec)
+                            writer
+                                .write_record(rec)
                                 .with_context(|| {
                                     format!(
                                         "Could not write the sequence of transcript {} to the output file",
@@ -3024,15 +3026,13 @@ impl Grangers {
             }
 
             if write_record {
-                unsafe { write!(out_file, ">{curr_tx}\n{}\n", std::str::from_utf8_unchecked(&exon_u8_vec))?; }
-                /*
                 writer.write_record(rec).with_context(|| {
                     format!(
                         "Could not write the sequence of transcript {} to the output file",
                         curr_tx
                     )
                 })?;
-                */
+            
             }
             exon_u8_vec.clear();
         }
@@ -3140,7 +3140,7 @@ impl Grangers {
 
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
 
-        //let mut writer = noodles::fasta::Writer::new(out_file);
+        let mut writer = noodles::fasta::writer::Builder::default().set_line_base_count(usize::MAX).build_with_writer(out_file);
         let mut empty_counter = 0;
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
@@ -3171,9 +3171,6 @@ impl Grangers {
             for (name, sequence) in name_vec.into_iter().zip(chr_seq_vec.into_iter()) {
                 let _definition = Definition::new(name, None);
                 if let Some(sequence) = sequence {
-                    let seq = unsafe { std::str::from_utf8_unchecked(sequence.as_ref()) };
-                    write!(out_file, ">{}\n{}\n", name, seq)?;
-                    /*
                     writer
                         .write_record(&noodles::fasta::Record::new(definition, sequence))
                         .with_context(|| {
@@ -3182,7 +3179,7 @@ impl Grangers {
                                 name
                             )
                         })?;
-                    */
+                    
                 } else {
                     empty_counter += 1;
                 }
@@ -3341,7 +3338,9 @@ impl Grangers {
 
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
 
-        //let mut writer = noodles::fasta::Writer::new(out_file);
+        let out_writer = BufWriter::with_capacity(4194304, out_file);
+        let mut writer = noodles::fasta::writer::Builder::default().set_line_base_count(usize::MAX).build_with_writer(out_writer);
+
         let mut empty_counter = 0;
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
@@ -3385,15 +3384,12 @@ impl Grangers {
                     // we write if the sequence is not empty and
                     // it passes the filter (or there is no filter)
                     if write_record {
-                        let seq = unsafe { std::str::from_utf8_unchecked(rec.sequence().as_ref()) };
-                        write!(out_file, ">{feat_name}\n{}\n", seq)?;
-                        /*writer.write_record(rec).with_context(|| {
+                       writer.write_record(rec).with_context(|| {
                             format!(
                                 "Could not write sequence {} to the output file; Cannot proceed.",
                                 feat_name
                             )
                         })?;
-                        */
                     }
                 } else {
                     empty_counter += 1;
