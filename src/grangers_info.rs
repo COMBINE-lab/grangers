@@ -3282,7 +3282,7 @@ impl Grangers {
     pub fn write_sequences_with_filter<T: AsRef<Path>, W: Write, F>(
         &mut self,
         ref_path: T,
-        out_file: W,
+        mut out_file: W,
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
@@ -3341,7 +3341,7 @@ impl Grangers {
 
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
 
-        let mut writer = noodles::fasta::Writer::new(out_file);
+        //let mut writer = noodles::fasta::Writer::new(out_file);
         let mut empty_counter = 0;
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
@@ -3385,12 +3385,15 @@ impl Grangers {
                     // we write if the sequence is not empty and
                     // it passes the filter (or there is no filter)
                     if write_record {
-                        writer.write_record(rec).with_context(|| {
+                        let seq = unsafe { std::str::from_utf8_unchecked(rec.sequence().as_ref()) };
+                        write!(out_file, ">{feat_name}\n{}\n", seq)?;
+                        /*writer.write_record(rec).with_context(|| {
                             format!(
                                 "Could not write sequence {} to the output file; Cannot proceed.",
                                 feat_name
                             )
                         })?;
+                        */
                     }
                 } else {
                     empty_counter += 1;
