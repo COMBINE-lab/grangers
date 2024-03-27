@@ -2869,7 +2869,7 @@ impl Grangers {
     pub fn write_transcript_sequences_with_filter<T: AsRef<Path>, W: Write, F>(
         &mut self,
         ref_path: T,
-        out_file: W,
+        mut out_file: W,
         exon_name: Option<&str>,
         multithreaded: bool,
         record_filter: &mut Option<F>,
@@ -2998,7 +2998,7 @@ impl Grangers {
                                         "Could not write the sequence of transcript {} to the output file",
                                         curr_tx
                                     )
-                                })?;
+                                })?;*/
                         }
                         exon_u8_vec.clear();
                         exon_u8_vec.extend(seq.as_ref().iter());
@@ -3032,6 +3032,7 @@ impl Grangers {
                         curr_tx
                     )
                 })?;
+            
             }
             exon_u8_vec.clear();
         }
@@ -3095,7 +3096,7 @@ impl Grangers {
                 out_path.as_os_str()
             )
         })?;
-        let out_file = BufWriter::with_capacity(4194304, out_file);
+        let mut out_file = BufWriter::with_capacity(4194304, out_file);
 
         self.validate(false, true)?;
 
@@ -3168,7 +3169,7 @@ impl Grangers {
 
             // we push seuqence to the correct position
             for (name, sequence) in name_vec.into_iter().zip(chr_seq_vec.into_iter()) {
-                let definition = Definition::new(name, None);
+                let _definition = Definition::new(name, None);
                 if let Some(sequence) = sequence {
                     writer
                         .write_record(&noodles::fasta::Record::new(definition, sequence))
@@ -3178,6 +3179,7 @@ impl Grangers {
                                 name
                             )
                         })?;
+                    
                 } else {
                     empty_counter += 1;
                 }
@@ -3277,7 +3279,7 @@ impl Grangers {
     pub fn write_sequences_with_filter<T: AsRef<Path>, W: Write, F>(
         &mut self,
         ref_path: T,
-        out_file: W,
+        mut out_file: W,
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
@@ -3338,6 +3340,7 @@ impl Grangers {
 
         let out_writer = BufWriter::with_capacity(4194304, out_file);
         let mut writer = noodles::fasta::writer::Builder::default().set_line_base_count(usize::MAX).build_with_writer(out_writer);
+
         let mut empty_counter = 0;
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
@@ -3381,7 +3384,7 @@ impl Grangers {
                     // we write if the sequence is not empty and
                     // it passes the filter (or there is no filter)
                     if write_record {
-                        writer.write_record(rec).with_context(|| {
+                       writer.write_record(rec).with_context(|| {
                             format!(
                                 "Could not write sequence {} to the output file; Cannot proceed.",
                                 feat_name
