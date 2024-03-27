@@ -2903,7 +2903,9 @@ impl Grangers {
 
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
         // we also create a fasta writer
-        let mut writer = noodles::fasta::Writer::new(out_file);
+        let out_writer = BufWriter::with_capacity(4194304, out_file);
+        let mut writer = noodles::fasta::writer::Builder::default().set_line_base_count(usize::MAX).build_with_writer(out_writer);
+
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
         // 1. subset the dataframe by the seqname (chromosome name)
@@ -3137,7 +3139,7 @@ impl Grangers {
 
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
 
-        let mut writer = noodles::fasta::Writer::new(out_file);
+        let mut writer = noodles::fasta::writer::Builder::default().set_line_base_count(usize::MAX).build_with_writer(out_file);
         let mut empty_counter = 0;
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
@@ -3334,7 +3336,8 @@ impl Grangers {
 
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
 
-        let mut writer = noodles::fasta::Writer::new(out_file);
+        let out_writer = BufWriter::with_capacity(4194304, out_file);
+        let mut writer = noodles::fasta::writer::Builder::default().set_line_base_count(usize::MAX).build_with_writer(out_writer);
         let mut empty_counter = 0;
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
