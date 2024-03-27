@@ -2869,7 +2869,7 @@ impl Grangers {
     pub fn write_transcript_sequences_with_filter<T: AsRef<Path>, W: Write, F>(
         &mut self,
         ref_path: T,
-        mut out_file: W,
+        out_file: W,
         exon_name: Option<&str>,
         multithreaded: bool,
         record_filter: &mut Option<F>,
@@ -2998,7 +2998,7 @@ impl Grangers {
                                         "Could not write the sequence of transcript {} to the output file",
                                         curr_tx
                                     )
-                                })?;*/
+                                })?;
                         }
                         exon_u8_vec.clear();
                         exon_u8_vec.extend(seq.as_ref().iter());
@@ -3096,7 +3096,7 @@ impl Grangers {
                 out_path.as_os_str()
             )
         })?;
-        let mut out_file = BufWriter::with_capacity(4194304, out_file);
+        let out_file = BufWriter::with_capacity(4194304, out_file);
 
         self.validate(false, true)?;
 
@@ -3169,7 +3169,7 @@ impl Grangers {
 
             // we push seuqence to the correct position
             for (name, sequence) in name_vec.into_iter().zip(chr_seq_vec.into_iter()) {
-                let _definition = Definition::new(name, None);
+                let definition = Definition::new(name, None);
                 if let Some(sequence) = sequence {
                     writer
                         .write_record(&noodles::fasta::Record::new(definition, sequence))
@@ -3279,7 +3279,7 @@ impl Grangers {
     pub fn write_sequences_with_filter<T: AsRef<Path>, W: Write, F>(
         &mut self,
         ref_path: T,
-        mut out_file: W,
+        out_file: W,
         ignore_strand: bool,
         name_column: Option<&str>,
         oob_option: OOBOption,
