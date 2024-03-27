@@ -734,7 +734,7 @@ impl Grangers {
         let mut out_df = self.get_gtf_df()?;
 
         let file = std::fs::File::create(file_path)?;
-        let mut file = BufWriter::new(file);
+        let mut file = BufWriter::with_capacity(4194304, file);
         CsvWriter::new(&mut file)
             .include_header(false)
             .with_separator(b'\t')
@@ -3093,7 +3093,7 @@ impl Grangers {
                 out_path.as_os_str()
             )
         })?;
-        let out_file = BufWriter::new(out_file);
+        let out_file = BufWriter::with_capacity(4194304, out_file);
 
         self.validate(false, true)?;
 
