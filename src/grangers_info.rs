@@ -2903,7 +2903,7 @@ impl Grangers {
 
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
         // we also create a fasta writer
-        let mut writer = noodles::fasta::Writer::new(out_file);
+        // let mut writer = noodles::fasta::Writer::new(out_file);
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
         // 1. subset the dataframe by the seqname (chromosome name)
@@ -2989,14 +2989,14 @@ impl Grangers {
                         }
 
                         if write_record {
-                            writer
-                                .write_record(rec)
+                            unsafe { write!(out_file, ">{curr_tx}\n{}", std::str::from_utf8_unchecked(&exon_u8_vec)); }
+                                /*.write_record(rec)
                                 .with_context(|| {
                                     format!(
                                         "Could not write the sequence of transcript {} to the output file",
                                         curr_tx
                                     )
-                                })?;
+                                })?;*/
                         }
                         exon_u8_vec.clear();
                         exon_u8_vec.extend(seq.as_ref().iter());
@@ -3024,12 +3024,15 @@ impl Grangers {
             }
 
             if write_record {
+                unsafe { write!(out_file, ">{curr_tx}\n{}", std::str::from_utf8_unchecked(&exon_u8_vec)); }
+                /*
                 writer.write_record(rec).with_context(|| {
                     format!(
                         "Could not write the sequence of transcript {} to the output file",
                         curr_tx
                     )
                 })?;
+                */
             }
             exon_u8_vec.clear();
         }
@@ -3137,7 +3140,7 @@ impl Grangers {
 
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
 
-        let mut writer = noodles::fasta::Writer::new(out_file);
+        //let mut writer = noodles::fasta::Writer::new(out_file);
         let mut empty_counter = 0;
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
@@ -3168,6 +3171,8 @@ impl Grangers {
             for (name, sequence) in name_vec.into_iter().zip(chr_seq_vec.into_iter()) {
                 let definition = Definition::new(name, None);
                 if let Some(sequence) = sequence {
+                    unsafe { write!(out_file, ">{name}\n{}", sequence.as_ref()); }
+                    /*
                     writer
                         .write_record(&noodles::fasta::Record::new(definition, sequence))
                         .with_context(|| {
@@ -3176,6 +3181,7 @@ impl Grangers {
                                 name
                             )
                         })?;
+                    */
                 } else {
                     empty_counter += 1;
                 }
