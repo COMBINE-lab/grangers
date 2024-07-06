@@ -970,7 +970,12 @@ impl Grangers {
     /// ```rust
     /// let filtered_grangers = grangers.filter("gene_type", &["protein_coding", "lncRNA"])?;
     /// ```
-    pub fn filter<T: AsRef<str>>(&self, by: T, values: &[T], warn_empty: bool) -> anyhow::Result<Grangers> {
+    pub fn filter<T: AsRef<str>>(
+        &self,
+        by: T,
+        values: &[T],
+        warn_empty: bool,
+    ) -> anyhow::Result<Grangers> {
         let column = self.get_column_name(by.as_ref(), false)?;
 
         let df = self.df().filter(&is_in(
@@ -2192,7 +2197,7 @@ impl Grangers {
     /// Adds an order column to the dataframe based on the sorting of another column.
     ///
     /// This method sorts the dataframe based on a specified 'start' column and adds a new column indicating
-    /// the order. This can be used, for example, to assign exon numbers within transcripts. 
+    /// the order. This can be used, for example, to assign exon numbers within transcripts.
     ///
     /// ### Arguments
     ///
@@ -2927,11 +2932,16 @@ impl Grangers {
         let seqname = fc.seqname();
         let end = fc.end();
         let transcript_id = fc.transcript_id().unwrap();
-        let all_seqnames = exon_gr.seqname()?.unique()?.str()?.into_iter().map(|s| s.unwrap().to_string()).collect::<HashSet<_>>();
+        let all_seqnames = exon_gr
+            .seqname()?
+            .unique()?
+            .str()?
+            .into_iter()
+            .map(|s| s.unwrap().to_string())
+            .collect::<HashSet<_>>();
 
         // we get all seqnames
         // let all_seqnames = HashSet::from_iter(exon_gr.seqname()?.unique()?.into_iter());
-
 
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
         // we also create a fasta writer
@@ -4438,7 +4448,11 @@ impl Iterator for GrangersSeqIter {
 
                     self.chr_gr = Some(
                         self.essential_gr
-                            .filter(self.filt_opt.seqname.clone(), &[chr_name.to_string()], false)
+                            .filter(
+                                self.filt_opt.seqname.clone(),
+                                &[chr_name.to_string()],
+                                false,
+                            )
                             .expect("GrangersSeqIter: cannot filter essential_gr"),
                     );
 
