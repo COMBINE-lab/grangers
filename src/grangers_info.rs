@@ -2191,7 +2191,7 @@ impl Grangers {
     /// Adds an order column to the dataframe based on the sorting of another column.
     ///
     /// This method sorts the dataframe based on a specified 'start' column and adds a new column indicating
-    /// the order. This can be used, for example, to assign exon numbers within transcripts.
+    /// the order. This can be used, for example, to assign exon numbers within transcripts. 
     ///
     /// ### Arguments
     ///
@@ -2218,7 +2218,8 @@ impl Grangers {
     ) -> anyhow::Result<()> {
         self.validate(false, true)?;
 
-        let offset = offset.unwrap_or(1);
+        // we make the default offset 1
+        let offset = offset.unwrap_or(1 as IdxSize);
 
         if let Some(by) = by {
             let mut by_col = Vec::new();
