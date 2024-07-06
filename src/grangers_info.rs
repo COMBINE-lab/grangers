@@ -448,7 +448,7 @@ impl Grangers {
         let el = if let Some(ref extra) = gstruct.attributes.extra {
             extra.len()
         } else {
-                0_usize
+            0_usize
         };
         df_vec.reserve(df_vec.len() + gstruct.attributes.essential.len() + el);
 
@@ -472,14 +472,14 @@ impl Grangers {
         }
 
         let df = DataFrame::new(df_vec)?;
-        Ok(Grangers::new(
+        Grangers::new(
             df,
             None,
             gstruct.misc,
             interval_type,
             FieldColumns::default(),
             true,
-        )?)
+        )
     }
 
     /// Constructs a [Grangers] instance from a GTF (GFF2) file.
@@ -518,7 +518,7 @@ impl Grangers {
     ) -> anyhow::Result<Grangers> {
         let am = reader::AttributeMode::from(!only_essential);
         let gstruct = reader::GStruct::from_gtf(file_path.as_ref(), am)?;
-        Ok(Grangers::from_gstruct(gstruct, IntervalType::Inclusive(1))?)
+        Grangers::from_gstruct(gstruct, IntervalType::Inclusive(1))
     }
 
     /// Constructs a [Grangers] instance from a GFF3 file.
@@ -556,7 +556,7 @@ impl Grangers {
     ) -> anyhow::Result<Grangers> {
         let am = reader::AttributeMode::from(!only_essential);
         let gstruct = reader::GStruct::from_gff(file_path, am)?;
-        Ok(Grangers::from_gstruct(gstruct, IntervalType::Inclusive(1))?)
+        Grangers::from_gstruct(gstruct, IntervalType::Inclusive(1))
     }
 
     // TODO: add the part about making/taking and checking the seqinfo
@@ -936,10 +936,17 @@ impl Grangers {
     pub fn sort_by<T>(
         &mut self,
         by: &[&str],
-        descending: impl IntoVec<bool>,
+        descending: impl IntoIterator<Item = bool>,
         maintain_order: bool,
+        multithreaded: bool,
     ) -> anyhow::Result<()> {
-        self.df = self.df.sort(by, descending, maintain_order)?;
+        self.df = self.df.sort(
+            by,
+            SortMultipleOptions::default()
+                .with_order_descending_multi(descending)
+                .with_maintain_order(maintain_order)
+                .with_multithreaded(multithreaded),
+        )?;
         self.inc_signature();
         Ok(())
     }
@@ -1615,7 +1622,7 @@ impl Grangers {
             exon_gr.get_column_name_str("transcript_id", true)?
         };
 
-        exon_gr.gaps(&[by_str], false, None, Some(&kc))
+        exon_gr.gaps(&[by_str], false, None, Some(&kc), multithreaded)
     }
 
     /// Computes the boundary regions for genes from the exon annotations in the [Grangers] instance.
@@ -1897,7 +1904,7 @@ impl Grangers {
                         .cast(DataType::Categorical(None, CategoricalOrdering::Lexical)),
                     col(exon_number.as_str()),
                 ],
-                [false],
+                SortMultipleOptions::default().with_multithreaded(multithreaded),
             )])
             .collect()?;
 
@@ -2165,11 +2172,19 @@ impl Grangers {
         ignore_strand: bool,
         slack: Option<usize>,
         keep_columns: Option<&[&str]>,
+        multithreaded: bool,
     ) -> anyhow::Result<Grangers> {
         // merge returns a sorted and merged Grangers object
-        let mut gr = self.merge(by, ignore_strand, slack, keep_columns)?;
+        let mut gr = self.merge(by, ignore_strand, slack, keep_columns, multithreaded)?;
 
-        gr.df = gr.apply(by, None, ignore_strand, apply_gaps, keep_columns)?;
+        gr.df = gr.apply(
+            by,
+            None,
+            ignore_strand,
+            apply_gaps,
+            keep_columns,
+            multithreaded,
+        )?;
         Ok(gr)
     }
 
@@ -2182,7 +2197,7 @@ impl Grangers {
     ///
     /// * `by`: Optional columns by which to group data before ordering. If [None], the entire dataframe is ordered.
     /// * `name`: Name of the new order column to be added.
-    /// * `offset`: Optional starting value for the order (default is 1).
+    /// * `offset`: Optional starting value for the order (default is 1). When adding exon_number for example, the offset should be 1.
     /// * `multithreaded`: If `true`, sorting is done in parallel, improving performance on large datasets.
     ///
     /// ### Returns
@@ -2198,10 +2213,16 @@ impl Grangers {
         &mut self,
         by: Option<&[&str]>,
         name: &str,
-        offset: Option<u32>,
+        offset: Option<IdxSize>,
         multithreaded: bool,
     ) -> anyhow::Result<()> {
         self.validate(false, true)?;
+
+        let offset = match offset {
+            Some(o) => o,
+            None => 1,
+        };
+
         if let Some(by) = by {
             let mut by_col = Vec::new();
             for b in by.iter() {
@@ -2221,31 +2242,22 @@ impl Grangers {
                     when(col(strand).first().eq(lit("+")))
                         .then(
                             col(start)
-                                .arg_sort(SortOptions {
-                                    descending: false,
-                                    nulls_last: false,
-                                    maintain_order: false,
-                                    multithreaded,
-                                })
-                                .add(lit(1)),
+                            .arg_sort(SortOptions::default().with_multithreaded(multithreaded))
                         )
                         .otherwise(
                             col(start)
-                                .arg_sort(SortOptions {
-                                    descending: true,
-                                    nulls_last: false,
-                                    maintain_order: false,
-                                    multithreaded,
-                                })
-                                .add(lit(1)),
+                            .arg_sort(SortOptions::default()
+                            .with_order_descending(true)
+                            .with_multithreaded(multithreaded))
                         )
+                        .add(lit(offset))
                         .over(by)
                         .cast(DataType::String)
                         .alias(name),
                 )
                 .collect()?;
         } else {
-            self.df = self.df.with_row_index(name, offset)?;
+                self.df.with_row_index(name, Some(offset))?;
         }
         Ok(())
     }
@@ -2313,9 +2325,17 @@ impl Grangers {
         ignore_strand: bool,
         slack: Option<usize>,
         keep_columns: Option<&[&str]>,
+        multithreaded: bool,
     ) -> anyhow::Result<Grangers> {
         self.validate(false, true)?;
-        let df = self.apply(by, slack, ignore_strand, apply_merge, keep_columns)?;
+        let df = self.apply(
+            by,
+            slack,
+            ignore_strand,
+            apply_merge,
+            keep_columns,
+            multithreaded,
+        )?;
 
         Grangers::new(
             df,
@@ -2334,6 +2354,7 @@ impl Grangers {
         ignore_strand: bool,
         apply_fn: F,
         keep_columns: Option<&[&str]>,
+        multithreaded: bool,
     ) -> anyhow::Result<DataFrame>
     where
         F: Fn(Series, i64) -> Result<Option<polars::prelude::Series>, PolarsError>
@@ -2450,9 +2471,10 @@ impl Grangers {
             // TODO: This can be replaced by select([all().sort(essentials).over(groups)]). Not sure if it is faster
             .sort_by_exprs(
                 &sorted_by_exprs,
-                &sorted_by_desc,
-                false, /*nulls last*/
-                false, /*force stable sort*/
+                SortMultipleOptions::default().with_order_descending_multi(sorted_by_desc.clone()).with_maintain_order(multithreaded),
+                // &sorted_by_desc,
+                // false, /*nulls last*/
+                // false, /*force stable sort*/
             )
             .group_by(by.iter().map(|s| col(s)).collect::<Vec<Expr>>())
             .agg([
@@ -2472,11 +2494,11 @@ impl Grangers {
             .with_columns([
                 col("start_end_list-temp-nobody-will-use-this-name-right")
                     .list()
-                    .get(lit(0))
+                    .get(lit(0), false)
                     .alias(start),
                 col("start_end_list-temp-nobody-will-use-this-name-right")
                     .list()
-                    .get(lit(1))
+                    .get(lit(1), false)
                     .alias(end),
                 lit(".").alias(if ignore_strand {
                     strand
@@ -2505,9 +2527,10 @@ impl Grangers {
             // groupby is multithreaded, so the order do not preserve
             .sort_by_exprs(
                 sorted_by_exprs,
-                sorted_by_desc,
-                false, /*nulls last*/
-                false, /*force stable sort*/
+                SortMultipleOptions::default().with_order_descending_multi(sorted_by_desc.clone()).with_maintain_order(multithreaded),
+                // sorted_by_desc,
+                // false, /*nulls last*/
+                // false, /*force stable sort*/
             )
             .collect()?;
 
@@ -2904,8 +2927,9 @@ impl Grangers {
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
         // we also create a fasta writer
         let out_writer = BufWriter::with_capacity(4194304, out_file);
-        let mut writer = noodles::fasta::writer::Builder::default().set_line_base_count(usize::MAX).build_with_writer(out_writer);
-
+        let mut writer = noodles::fasta::writer::Builder::default()
+            .set_line_base_count(usize::MAX)
+            .build_with_writer(out_writer);
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
         // 1. subset the dataframe by the seqname (chromosome name)
@@ -3032,7 +3056,6 @@ impl Grangers {
                         curr_tx
                     )
                 })?;
-            
             }
             exon_u8_vec.clear();
         }
@@ -3140,7 +3163,9 @@ impl Grangers {
 
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
 
-        let mut writer = noodles::fasta::writer::Builder::default().set_line_base_count(usize::MAX).build_with_writer(out_file);
+        let mut writer = noodles::fasta::writer::Builder::default()
+            .set_line_base_count(usize::MAX)
+            .build_with_writer(out_file);
         let mut empty_counter = 0;
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
@@ -3179,7 +3204,6 @@ impl Grangers {
                                 name
                             )
                         })?;
-                    
                 } else {
                     empty_counter += 1;
                 }
@@ -3339,7 +3363,9 @@ impl Grangers {
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
 
         let out_writer = BufWriter::with_capacity(4194304, out_file);
-        let mut writer = noodles::fasta::writer::Builder::default().set_line_base_count(usize::MAX).build_with_writer(out_writer);
+        let mut writer = noodles::fasta::writer::Builder::default()
+            .set_line_base_count(usize::MAX)
+            .build_with_writer(out_writer);
 
         let mut empty_counter = 0;
 
@@ -3384,7 +3410,7 @@ impl Grangers {
                     // we write if the sequence is not empty and
                     // it passes the filter (or there is no filter)
                     if write_record {
-                       writer.write_record(rec).with_context(|| {
+                        writer.write_record(rec).with_context(|| {
                             format!(
                                 "Could not write sequence {} to the output file; Cannot proceed.",
                                 feat_name
@@ -5514,7 +5540,7 @@ mod tests {
 
         // default setting
         let gr1: Grangers = gr
-            .merge(&["seqname", "gene_id"], false, None, None)
+            .merge(&["seqname", "gene_id"], false, None, None, true)
             .unwrap();
 
         if SAY {
@@ -5546,7 +5572,7 @@ mod tests {
         );
 
         // test ignore strand
-        let gr1 = gr.merge(&["seqname"], true, None, None).unwrap();
+        let gr1 = gr.merge(&["seqname"], true, None, None, true).unwrap();
 
         if SAY {
             println!("gr1: {:?}", gr1.df());
@@ -5580,7 +5606,7 @@ mod tests {
         // test ignore strand
 
         let gr1: Grangers = gr
-            .merge(&["seqname", "gene_id"], false, Some(0), None)
+            .merge(&["seqname", "gene_id"], false, Some(0), None, true)
             .unwrap();
 
         if SAY {
@@ -5615,7 +5641,7 @@ mod tests {
 
         // test ignore strand
         let gr1: Grangers = gr
-            .merge(&["seqname", "gene_id"], false, Some(2), None)
+            .merge(&["seqname", "gene_id"], false, Some(2), None, true)
             .unwrap();
 
         if SAY {
@@ -5673,7 +5699,9 @@ mod tests {
         }
 
         // default setting
-        let gr1: Grangers = gr.gaps(&["seqname", "gene_id"], false, None, None).unwrap();
+        let gr1: Grangers = gr
+            .gaps(&["seqname", "gene_id"], false, None, None, true)
+            .unwrap();
 
         if SAY {
             println!("gr1: {:?}", gr1.df());
