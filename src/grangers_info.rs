@@ -959,6 +959,7 @@ impl Grangers {
     ///
     /// * `by`: The name of the column to filter by.
     /// * `values`: A slice of values to filter by.
+    /// * `warn_empty`: A boolean flag indicating whether to issue a warning if the filtered dataframe is empty.
     ///
     /// ### Returns
     ///
@@ -969,7 +970,7 @@ impl Grangers {
     /// ```rust
     /// let filtered_grangers = grangers.filter("gene_type", &["protein_coding", "lncRNA"])?;
     /// ```
-    pub fn filter<T: AsRef<str>>(&self, by: T, values: &[T]) -> anyhow::Result<Grangers> {
+    pub fn filter<T: AsRef<str>>(&self, by: T, values: &[T], warn_empty: bool) -> anyhow::Result<Grangers> {
         let column = self.get_column_name(by.as_ref(), false)?;
 
         let df = self.df().filter(&is_in(
@@ -980,7 +981,7 @@ impl Grangers {
             ),
         )?)?;
 
-        if df.is_empty() {
+        if df.is_empty() && warn_empty {
             warn!("The filtered dataframe is empty.")
         }
         Grangers::new(
@@ -1797,7 +1798,7 @@ impl Grangers {
         }
 
         // polars way to subset
-        let mut exon_gr = self.filter(feature_type, &[exon_feature])?;
+        let mut exon_gr = self.filter(feature_type, &[exon_feature], true)?;
 
         // We know fields are valid, then we need to check nulls
         let mut fc = self.field_columns().clone();
@@ -2926,6 +2927,11 @@ impl Grangers {
         let seqname = fc.seqname();
         let end = fc.end();
         let transcript_id = fc.transcript_id().unwrap();
+        let all_seqnames = exon_gr.seqname()?.unique()?.str()?.into_iter().map(|s| s.unwrap().to_string()).collect::<HashSet<_>>();
+
+        // we get all seqnames
+        // let all_seqnames = HashSet::from_iter(exon_gr.seqname()?.unique()?.into_iter());
+
 
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
         // we also create a fasta writer
@@ -2944,10 +2950,15 @@ impl Grangers {
 
             let chr_name = record_name.strip_suffix(' ').unwrap_or(record_name);
 
-            let chr_gr = exon_gr.filter(seqname, &[chr_name])?;
+            // check if the chr_name is in all_seqnames
+            // if not, we skip it
+            if !all_seqnames.contains(chr_name) {
+                continue;
+            }
+
+            let chr_gr = exon_gr.filter(seqname, &[chr_name], false)?;
 
             if chr_gr.df().height() == 0 {
-                println!("{} did not good", chr_name);
                 continue;
             }
 
@@ -3181,7 +3192,7 @@ impl Grangers {
             let record_name = std::str::from_utf8(record.name())?;
 
             let chr_name = record_name.strip_suffix(' ').unwrap_or(record_name);
-            let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
+            let chr_gr = essential_gr.filter(seqname, &[chr_name], false)?;
 
             if chr_gr.df().height() == 0 {
                 continue;
@@ -3382,7 +3393,7 @@ impl Grangers {
             let record_name = std::str::from_utf8(record.name())?;
 
             let chr_name = record_name.strip_suffix(' ').unwrap_or(record_name);
-            let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
+            let chr_gr = essential_gr.filter(seqname, &[chr_name], false)?;
 
             if chr_gr.df().height() == 0 {
                 continue;
@@ -3516,7 +3527,7 @@ impl Grangers {
             let record_name = std::str::from_utf8(record.name())?;
 
             let chr_name = record_name.strip_suffix(' ').unwrap_or(record_name);
-            let chr_gr = exon_gr.filter(seqname, &[chr_name])?;
+            let chr_gr = exon_gr.filter(seqname, &[chr_name], false)?;
 
             if chr_gr.df().height() == 0 {
                 continue;
@@ -3658,7 +3669,7 @@ impl Grangers {
             let record_name = std::str::from_utf8(record.name())?;
 
             let chr_name = record_name.strip_suffix(' ').unwrap_or(record_name);
-            let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
+            let chr_gr = essential_gr.filter(seqname, &[chr_name], false)?;
 
             if chr_gr.df().height() == 0 {
                 continue;
@@ -3859,7 +3870,7 @@ impl Grangers {
             let record_name = std::str::from_utf8(record.name())?;
 
             let chr_name = record_name.strip_suffix(' ').unwrap_or(record_name);
-            let chr_gr = essential_gr.filter(seqname, &[chr_name])?;
+            let chr_gr = essential_gr.filter(seqname, &[chr_name], false)?;
 
             if chr_gr.df().height() == 0 {
                 continue;
@@ -4427,7 +4438,7 @@ impl Iterator for GrangersSeqIter {
 
                     self.chr_gr = Some(
                         self.essential_gr
-                            .filter(self.filt_opt.seqname.clone(), &[chr_name.to_string()])
+                            .filter(self.filt_opt.seqname.clone(), &[chr_name.to_string()], false)
                             .expect("GrangersSeqIter: cannot filter essential_gr"),
                     );
 
