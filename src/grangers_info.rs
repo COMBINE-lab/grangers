@@ -2218,10 +2218,7 @@ impl Grangers {
     ) -> anyhow::Result<()> {
         self.validate(false, true)?;
 
-        let offset = match offset {
-            Some(o) => o,
-            None => 1,
-        };
+        let offset = offset.unwrap_or(1);
 
         if let Some(by) = by {
             let mut by_col = Vec::new();
@@ -2242,22 +2239,23 @@ impl Grangers {
                     when(col(strand).first().eq(lit("+")))
                         .then(
                             col(start)
-                            .arg_sort(SortOptions::default().with_multithreaded(multithreaded))
+                                .arg_sort(SortOptions::default().with_multithreaded(multithreaded)),
                         )
                         .otherwise(
-                            col(start)
-                            .arg_sort(SortOptions::default()
-                            .with_order_descending(true)
-                            .with_multithreaded(multithreaded))
+                            col(start).arg_sort(
+                                SortOptions::default()
+                                    .with_order_descending(true)
+                                    .with_multithreaded(multithreaded),
+                            ),
                         )
-                        .add(lit(offset))
+                        .add(Expr::Literal(LiteralValue::UInt32(offset)))
                         .over(by)
                         .cast(DataType::String)
                         .alias(name),
                 )
                 .collect()?;
         } else {
-                self.df.with_row_index(name, Some(offset))?;
+            self.df.with_row_index(name, Some(offset))?;
         }
         Ok(())
     }
@@ -2471,7 +2469,9 @@ impl Grangers {
             // TODO: This can be replaced by select([all().sort(essentials).over(groups)]). Not sure if it is faster
             .sort_by_exprs(
                 &sorted_by_exprs,
-                SortMultipleOptions::default().with_order_descending_multi(sorted_by_desc.clone()).with_maintain_order(multithreaded),
+                SortMultipleOptions::default()
+                    .with_order_descending_multi(sorted_by_desc.clone())
+                    .with_maintain_order(multithreaded),
                 // &sorted_by_desc,
                 // false, /*nulls last*/
                 // false, /*force stable sort*/
@@ -2527,7 +2527,9 @@ impl Grangers {
             // groupby is multithreaded, so the order do not preserve
             .sort_by_exprs(
                 sorted_by_exprs,
-                SortMultipleOptions::default().with_order_descending_multi(sorted_by_desc.clone()).with_maintain_order(multithreaded),
+                SortMultipleOptions::default()
+                    .with_order_descending_multi(sorted_by_desc.clone())
+                    .with_maintain_order(multithreaded),
                 // sorted_by_desc,
                 // false, /*nulls last*/
                 // false, /*force stable sort*/
