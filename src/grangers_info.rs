@@ -967,7 +967,7 @@ impl Grangers {
     /// ### Example
     ///
     /// ```rust
-    /// let filtered_grangers = grangers.filter("gene_type", &["protein_coding", "lincRNA"])?;
+    /// let filtered_grangers = grangers.filter("gene_type", &["protein_coding", "lncRNA"])?;
     /// ```
     pub fn filter<T: AsRef<str>>(&self, by: T, values: &[T]) -> anyhow::Result<Grangers> {
         let column = self.get_column_name(by.as_ref(), false)?;
@@ -2213,13 +2213,13 @@ impl Grangers {
         &mut self,
         by: Option<&[&str]>,
         name: &str,
-        offset: Option<IdxSize>,
+        offset: Option<u32>,
         multithreaded: bool,
     ) -> anyhow::Result<()> {
         self.validate(false, true)?;
 
         // we make the default offset 1
-        let offset = offset.unwrap_or(1 as IdxSize);
+        let offset = offset.unwrap_or(1);
 
         if let Some(by) = by {
             let mut by_col = Vec::new();
@@ -2947,6 +2947,7 @@ impl Grangers {
             let chr_gr = exon_gr.filter(seqname, &[chr_name])?;
 
             if chr_gr.df().height() == 0 {
+                println!("{} did not good", chr_name);
                 continue;
             }
 
