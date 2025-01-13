@@ -526,10 +526,10 @@ impl GStruct {
                     GStruct::push(
                         &mut self.strand,
                         match r.strand()? {
-                            gff::record::Strand::None => Some(String::from(".")),
+                            gff::record::Strand::None => Some(String::from("+")),
                             gff::record::Strand::Forward => Some(String::from("+")),
                             gff::record::Strand::Reverse => Some(String::from("-")),
-                            gff::record::Strand::Unknown => Some(String::from("?")),
+                            gff::record::Strand::Unknown => Some(String::from("+")),
                         },
                     );
 
