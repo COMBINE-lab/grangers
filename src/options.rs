@@ -344,7 +344,6 @@ pub struct GetSequenceOptions {}
 ///
 /// These handling strategies are vital for ensuring that genomic data analyses remain robust
 /// and adaptable to varying data qualities and reference sequence constraints.
-
 pub enum OOBOption {
     Truncate,
     Skip,
@@ -547,7 +546,6 @@ impl FieldColumns {
     ///
     /// # Returns
     /// An optional string slice (&str) pointing to the `transcript_id` value, if it exists.
-
     pub fn transcript_id(&self) -> Option<&str> {
         self.transcript_id.as_deref()
     }
@@ -576,7 +574,6 @@ impl FieldColumns {
     ///
     /// An optional string slice (`&str`) pointing to the `exon_number` value, if it exists.
     /// This aids in sorting exons to align with their sequential order in the corresponding transcript.
-
     pub fn exon_number(&self) -> Option<&str> {
         self.exon_number.as_deref()
     }
@@ -621,7 +618,6 @@ impl FieldColumns {
     /// let optional_fields = field_columns.optional_fields();
     /// println!("{:?}", optional_fields);
     /// ```
-
     pub fn optional_fields(&self) -> [Option<&str>; 8] {
         [
             self.source(),
@@ -652,7 +648,6 @@ impl FieldColumns {
     /// let gtf_fields = field_columns.gtf_fields();
     /// println!("{:?}", gtf_fields);
     /// ```
-
     pub fn gtf_fields(&self) -> [&str; 8] {
         [
             self.seqname(),
@@ -686,7 +681,6 @@ impl FieldColumns {
     /// let gtf_attributes = field_columns.gtf_attributes();
     /// println!("{:?}", gtf_attributes);
     /// ```
-
     pub fn gtf_attributes(&self) -> [Option<&str>; 4] {
         [
             self.gene_id(),
@@ -712,7 +706,6 @@ impl FieldColumns {
     /// let essential_fields = field_columns.essential_fields();
     /// println!("{:?}", essential_fields);
     /// ```
-
     pub fn essential_fields(&self) -> [&str; 4] {
         [self.seqname(), self.start(), self.end(), self.strand()]
     }
@@ -892,7 +885,6 @@ impl FieldColumns {
     /// let df = DataFrame::new(vec![])?; // Assume this is a populated DataFrame
     /// field_columns.fix(&df, true)?;
     /// ```
-
     pub fn fix(&mut self, df: &DataFrame, is_warn: bool) -> anyhow::Result<()> {
         // try fix required fields
         if df.column(self.seqname()).is_err() {
@@ -1171,7 +1163,6 @@ impl FieldColumns {
     /// assert_eq!(field_columns.field_checked("seqname", false).unwrap(), Some("seqname"));
     /// assert!(field_columns.field_checked("nonexistent", true).is_err());
     /// ```
-
     pub fn field_checked<T: AsRef<str>>(
         &self,
         field: T,
