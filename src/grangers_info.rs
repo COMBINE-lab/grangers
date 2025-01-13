@@ -978,11 +978,7 @@ impl Grangers {
         warn_empty: bool,
     ) -> anyhow::Result<Grangers> {
         let column = self.get_column_name(by.as_ref(), false)?;
-        let s = self
-            .df()
-            .column(&column)?
-            .as_series()
-            .with_context(|| format!("Could not parse the column: {:?}", column))?;
+        let s = self.df().column(&column)?.as_materialized_series();
         let df = self.df().filter(&is_in(
             s,
             &Series::new(
@@ -1060,7 +1056,7 @@ impl Grangers {
     /// ```
     pub fn update_column(
         &mut self,
-        column: Series,
+        column: Column,
         field_column: Option<&str>,
     ) -> anyhow::Result<()> {
         // first we warn if there are null values in the column
@@ -1830,12 +1826,8 @@ impl Grangers {
 
         // make sure that strand is valid
         if !is_in(
-            exon_gr
-                .column(strand)?
-                .unique()?
-                .as_series()
-                .with_context(|| "Cannot get unique values in the strand column")?,
-            &Series::new("valid strands".into(), ["+", "-"]),
+            &exon_gr.column(strand)?.as_materialized_series().unique()?,
+            &Series::new("valid stands".into(), VALIDSTRANDS),
         )?
         .all()
         {
@@ -1967,10 +1959,7 @@ impl Grangers {
         if (!ignore_strand) & (extend_option != &ExtendOption::Both)
             && self.column(strand)?.is_null().any()
                 | !is_in(
-                    self.column(strand)?
-                        .unique()?
-                        .as_series()
-                        .with_context(|| "Cannot get unique values in the strand column")?,
+                    &self.column(strand)?.as_materialized_series().unique()?,
                     &Series::new("valid stands".into(), VALIDSTRANDS),
                 )?
                 .all()
@@ -2383,7 +2372,7 @@ impl Grangers {
         multithreaded: bool,
     ) -> anyhow::Result<DataFrame>
     where
-        F: Fn(&Series, i64) -> Result<Option<polars::prelude::Column>, PolarsError>
+        F: Fn(Column, i64) -> Result<Option<polars::prelude::Column>, PolarsError>
             + Copy
             + std::marker::Send
             + std::marker::Sync
@@ -2499,7 +2488,7 @@ impl Grangers {
                 &sorted_by_exprs,
                 SortMultipleOptions::default()
                     .with_order_descending_multi(sorted_by_desc.clone())
-                    .with_maintain_order(multithreaded),
+                    .with_multithreaded(multithreaded),
                 // &sorted_by_desc,
                 // false, /*nulls last*/
                 // false, /*force stable sort*/
@@ -2511,7 +2500,7 @@ impl Grangers {
                 // Notice the df is sorted
                 as_struct([col(start), col(end)].to_vec())
                     .apply(
-                        move |s| apply_fn(s.as_series().expect("Failed parsing column"), slack),
+                        move |s| apply_fn(s, slack),
                         GetOutput::from_type(DataType::List((DataType::Int64).into())),
                     )
                     .alias("start_end_list-temp-nobody-will-use-this-name-right"),
@@ -2645,14 +2634,10 @@ impl Grangers {
                     .alias("pos_strand_valid"),
             ])
             .collect()?;
-        let valid_pos = valid_rows_df
-            .column("pos_valid")?
-            .as_series()
-            .with_context(|| "Could not parse position column")?;
+        let valid_pos = valid_rows_df.column("pos_valid")?.as_materialized_series();
         let valid_pos_strand = valid_rows_df
             .column("pos_strand_valid")?
-            .as_series()
-            .with_context(|| "Could not parse strand column")?;
+            .as_materialized_series();
 
         // Then we bail if ignore_invalid is false but we found invalid features
         if !ignore_invalid {
@@ -2679,18 +2664,14 @@ impl Grangers {
         let mut by_iters = df
             .columns(by)?
             .iter()
-            .map(|s| s.as_series().expect("Faild parsing columns").iter())
+            .map(|s| s.as_materialized_series().iter())
             .collect::<Vec<_>>();
 
         let mut ess_iters = self
             .df()
             .columns(selected)?
             .iter()
-            .map(|s| {
-                s.as_series()
-                    .expect("fail to parse selected columns")
-                    .iter()
-            })
+            .map(|s| s.as_materialized_series().iter())
             .collect::<Vec<_>>();
 
         let valid_rows = if ignore_strand {
@@ -3655,7 +3636,7 @@ impl Grangers {
     /// - `genome_path`: the path to the reference genome file.
     /// - `file_format`: the format of the reference genome file. Currently only fasta is supported.
     /// - `oob_option`: the option for out-of-boundary positions. It can be either `Truncate` or `Skip`. If `Truncate`, the out-of-boundary positions will be truncated to the start or end of the sequence. If `Skip`, a None will be returned for features with OOB positions
-    /// 
+    ///
     /// The function outputs the extracted sequence as a vector of `Option<Sequence>`. If the feature has OOB positions and the oob_option is set as `Skip`, the corresponding element in the vector will be None. The order of the vector follows the row order of the dataframe of the [Grangers] object.
     pub fn _get_sequences<T: AsRef<Path>>(
         &mut self,
@@ -4638,22 +4619,19 @@ impl<'a> ChrRowSeqIter<'a> {
         let fc = grangers.field_columns();
         let iters: Vec<polars::series::SeriesIter> = vec![
             grangers
-                .df
+                .df()
                 .column(fc.start())?
-                .as_series()
-                .with_context(|| "Could not parse Start column")?
+                .as_materialized_series()
                 .iter(),
             grangers
-                .df
+                .df()
                 .column(fc.end())?
-                .as_series()
-                .with_context(|| "Could not parse End column")?
+                .as_materialized_series()
                 .iter(),
             grangers
                 .df
                 .column(fc.strand())?
-                .as_series()
-                .with_context(|| "Could not parse Strand column")?
+                .as_materialized_series()
                 .iter(),
         ];
         let seqlen = record.sequence().len();
@@ -4830,7 +4808,7 @@ pub fn argsort1based<T: Ord>(data: &[T], descending: bool) -> Vec<usize> {
 ///
 /// # Returns
 ///
-/// Returns a [`Result<Option<polars::prelude::Series>, PolarsError>`]:
+/// Returns a [`Result<Option<polars::prelude::Column>, PolarsError>`]:
 /// * [Ok]`(Some(Series))`: A new `Series` where each element is a merged interval if any merging occurs.
 ///   The merged intervals are represented as a Series of lists, each containing the start and end of the merged interval.
 /// * [Ok]`(None)`: If the input Series is empty or only contains null values.
@@ -4850,7 +4828,7 @@ pub fn argsort1based<T: Ord>(data: &[T], descending: bool) -> Vec<usize> {
 /// This function requires that the input [Series] is sorted by the start positions of the intervals and contains
 /// no null values in the start and end fields. It's designed specifically for genomic data processing where
 /// intervals might need to be merged based on their proximity or overlap.
-fn apply_merge(s: &Series, slack: i64) -> Result<Option<polars::prelude::Column>, PolarsError> {
+fn apply_merge(s: Column, slack: i64) -> Result<Option<polars::prelude::Column>, PolarsError> {
     // get the two columns from the struct
     let ca: StructChunked = s.struct_()?.clone();
 
@@ -4876,7 +4854,7 @@ fn apply_merge(s: &Series, slack: i64) -> Result<Option<polars::prelude::Column>
                 ),
             );
 
-            // return Result::<Option<polars::prelude::Series>, polars::prelude::PolarsError>::Ok(Some(
+            // return Result::<Option<polars::prelude::Column>, polars::prelude::PolarsError>::Ok(Some(
             //     Series::new_empty("pos", &DataType::List((DataType::Int64).into())),
             // ));
         };
@@ -4949,10 +4927,10 @@ fn apply_merge(s: &Series, slack: i64) -> Result<Option<polars::prelude::Column>
 ///
 /// # Returns
 ///
-/// Returns a [`Result<Option<polars::prelude::Series>, PolarsError>`]:
-/// * [Ok]`(Some(Series))`: A new `Series` where each element represents a gap identified between features.
+/// Returns a [`Result<Option<polars::prelude::Column>, PolarsError>`]:
+/// * [Ok]`(Some(Column))`: A new `Column` where each element represents a gap identified between features.
 ///   The elements are formatted as intervals (start and end positions of the gaps) if any gaps exist.
-/// * [Ok]`(None)`: If the input `Series` contains only one feature or is otherwise incapable of forming gaps.
+/// * [Ok]`(None)`: If the input `Column` contains only one feature or is otherwise incapable of forming gaps.
 /// * [Err]`(PolarsError)`: If there are missing values in the start or end columns or other issues encountered
 ///   during processing.
 ///
@@ -4972,7 +4950,7 @@ fn apply_merge(s: &Series, slack: i64) -> Result<Option<polars::prelude::Column>
 /// are defined as regions starting from one feature's end position plus one to the next feature's start
 /// position minus one.
 // TODO: The implementation is now assuming the intervals are inclusive. This should be changed to be more flexible.
-fn apply_gaps(s: &Series, _slack: i64) -> Result<Option<polars::prelude::Column>, PolarsError> {
+fn apply_gaps(s: Column, _slack: i64) -> Result<Option<polars::prelude::Column>, PolarsError> {
     // get the two columns from the struct
     let ca: StructChunked = s.struct_()?.clone();
     // get the start and end series
@@ -4984,7 +4962,7 @@ fn apply_gaps(s: &Series, _slack: i64) -> Result<Option<polars::prelude::Column>
         // return an empty list
         return Result::<Option<polars::prelude::Column>, PolarsError>::Ok(None);
 
-        // return Result::<Option<polars::prelude::Series>, PolarsError>::Ok(Some(
+        // return Result::<Option<polars::prelude::Column>, PolarsError>::Ok(Some(
         //     Series::new_empty("pos", &DataType::List((DataType::Int64).into())),
         // ));
     }
@@ -6485,20 +6463,17 @@ mod tests {
         }
 
         // update a non-field column
-        let new_col = Series::new("new_col".into(), &[1i64, 2, 3, 4, 5, 6, 7]);
+        let new_col = Column::new("new_col".into(), &[1i64, 2, 3, 4, 5, 6, 7]);
         gr.update_column(new_col.clone(), None).unwrap();
-        assert_eq!(gr.column("new_col").unwrap().as_series().unwrap(), &new_col);
+        assert_eq!(gr.column("new_col").unwrap(), &new_col);
 
         // update an existing field column of the same name
-        let gene_id_col = Series::new("gene_id".into(), &["g", "g", "g", "g", "g", "g", "g"]);
+        let gene_id_col = Column::new("gene_id".into(), &["g", "g", "g", "g", "g", "g", "g"]);
         gr.update_column(gene_id_col.clone(), None).unwrap();
-        assert_eq!(
-            gr.column("gene_id").unwrap().as_series().unwrap(),
-            &gene_id_col
-        );
+        assert_eq!(gr.column("gene_id").unwrap(), &gene_id_col);
 
         // update an existing field column with a different name
-        let gene_id_col = Series::new("gene_id_new".into(), &["g", "g", "g", "g", "g", "g", "g"]);
+        let gene_id_col = Column::new("gene_id_new".into(), &["g", "g", "g", "g", "g", "g", "g"]);
 
         gr.update_column(gene_id_col.clone(), Some("gene_id"))
             .unwrap();
@@ -6506,10 +6481,7 @@ mod tests {
         assert_eq!(gr.field_columns().gene_id(), Some("gene_id_new"));
 
         assert_eq!(
-            gr.column(gr.field_columns().gene_id().unwrap())
-                .unwrap()
-                .as_series()
-                .unwrap(),
+            gr.column(gr.field_columns().gene_id().unwrap()).unwrap(),
             &gene_id_col
         );
     }

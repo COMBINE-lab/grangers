@@ -178,7 +178,7 @@ impl SeqInfo {
     ///
     /// * `from_fasta`: Constructs a new [SeqInfo] instance by parsing a FASTA file to extract
     ///   sequence names and lengths.
-    /// 
+    ///
     /// seqinfo can contain "seqname", "seqlengths", "isCircular", "genome", and other extra string info
     ///
     /// # Examples
