@@ -5,7 +5,7 @@ use noodles::{gff, gtf};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::{collections::HashMap, path::Path};
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(Copy, Clone)]
 /// Represents the modes available for selecting attributes during data processing.
@@ -502,6 +502,9 @@ impl GStruct {
         let mut rec_attr_hm: HashMap<String, String> = HashMap::with_capacity(100);
         let mut n_comments = 0usize;
         let mut n_records = 0usize;
+        let mut n_strand_none = 0usize;
+        let mut n_strand_unknown = 0usize;
+
         // parse the file
         for l in rdr.lines() {
             let line = l?;
@@ -526,10 +529,16 @@ impl GStruct {
                     GStruct::push(
                         &mut self.strand,
                         match r.strand()? {
-                            gff::record::Strand::None => Some(String::from("+")),
+                            gff::record::Strand::None => {
+                                n_strand_none += 1;
+                                Some(String::from("+"))
+                            }
+                            gff::record::Strand::Unknown => {
+                                n_strand_unknown += 1;
+                                Some(String::from("+"))
+                            }
                             gff::record::Strand::Forward => Some(String::from("+")),
                             gff::record::Strand::Reverse => Some(String::from("-")),
-                            gff::record::Strand::Unknown => Some(String::from("+")),
                         },
                     );
 
@@ -598,6 +607,21 @@ impl GStruct {
                 }
             }
         }
+
+        if n_strand_none > 0 {
+            warn!(
+                "{} records have no strand information, set to '+'",
+                n_strand_none
+            );
+        }
+
+        if n_strand_unknown > 0 {
+            warn!(
+                "{} records have unknown strand information, set to '+'",
+                n_strand_unknown
+            );
+        }
+
         info!(
             "Finished parsing the input file. Found {} comments, and {} records.",
             n_comments, n_records
