@@ -1,11 +1,11 @@
 use crate::grangers_utils::{is_gzipped, FileFormat};
-use anyhow;
+use anyhow::{self, Context};
 use flate2::bufread::MultiGzDecoder;
 use noodles::{gff, gtf};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::{collections::HashMap, path::Path};
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(Copy, Clone)]
 /// Represents the modes available for selecting attributes during data processing.
@@ -274,7 +274,6 @@ impl std::str::FromStr for FeatureType {
     /// * `Ok(FeatureType)` if the string successfully maps to a `FeatureType`.
     /// * `Err(anyhow::Error)` if there is an unexpected error during parsing, though in current implementation,
     ///   it will always return `Ok(FeatureType)` since unrecognized types default to `FeatureType::Other`.
-
     fn from_str(s: &str) -> anyhow::Result<FeatureType> {
         let ft = match s {
             "gene" => FeatureType::Gene,
@@ -481,7 +480,6 @@ impl GStruct {
     /// The function initializes the `GStruct` instance by setting up appropriate structures to store
     /// essential and, depending on the `AttributeMode`, extra attributes. It ensures the data from the
     /// GFF file is correctly interpreted and stored for downstream analysis or processing.
-
     pub fn from_gff<T: AsRef<Path>>(file_path: T, am: AttributeMode) -> anyhow::Result<GStruct> {
         let mut gr = GStruct::new(am, FileFormat::GFF)?;
 
@@ -504,42 +502,75 @@ impl GStruct {
         let mut rec_attr_hm: HashMap<String, String> = HashMap::with_capacity(100);
         let mut n_comments = 0usize;
         let mut n_records = 0usize;
+        let mut n_strand_none = 0usize;
+        let mut n_strand_unknown = 0usize;
+
         // parse the file
         for l in rdr.lines() {
             let line = l?;
-            match line {
-                gff::Line::Record(r) => {
+            match line.kind() {
+                gff::line::Kind::Record => {
+                    let r = line
+                        .as_record()
+                        .with_context(|| format!("Failed parseing a record line: {:#?}", line))??;
                     n_records += 1;
                     GStruct::push(&mut self.seqid, r.reference_sequence_name().to_string());
                     GStruct::push(&mut self.source, r.source().to_string());
                     GStruct::push(&mut self.feature_type, r.ty().to_string());
-                    GStruct::push(&mut self.start, r.start().get() as i64);
-                    GStruct::push(&mut self.end, r.end().get() as i64);
-                    GStruct::push(&mut self.score, r.score());
+                    GStruct::push(&mut self.start, r.start()?.get() as i64);
+                    GStruct::push(&mut self.end, r.end()?.get() as i64);
+
+                    if let Some(s) = r.score() {
+                        GStruct::push(&mut self.score, Some(s?));
+                    } else {
+                        GStruct::push(&mut self.score, None);
+                    }
+
                     GStruct::push(
                         &mut self.strand,
-                        match r.strand() {
-                            gff::record::Strand::Forward | gff::record::Strand::Reverse => {
-                                Some(r.strand().to_string())
+                        match r.strand()? {
+                            gff::record::Strand::None => {
+                                n_strand_none += 1;
+                                Some(String::from("+"))
                             }
-                            _ => None,
+                            gff::record::Strand::Unknown => {
+                                n_strand_unknown += 1;
+                                Some(String::from("+"))
+                            }
+                            gff::record::Strand::Forward => Some(String::from("+")),
+                            gff::record::Strand::Reverse => Some(String::from("-")),
                         },
                     );
-                    GStruct::push(&mut self.phase, r.phase().map(|ph| ph.to_string()));
+
+                    if let Some(p) = r.phase() {
+                        GStruct::push(
+                            &mut self.phase,
+                            match p? {
+                                gff::record::Phase::Zero => Some(String::from("0")),
+                                gff::record::Phase::One => Some(String::from("1")),
+                                gff::record::Phase::Two => Some(String::from("2")),
+                            },
+                        );
+                    } else {
+                        GStruct::push(&mut self.phase, None);
+                    }
 
                     // parse attributes
                     rec_attr_hm.clear();
-                    for (attrk, attrv) in r.attributes().iter() {
-                        // TODO: the updated parser properly handles multiple values associated
-                        // with a tag, but here, we are putting them in a 1 <-> 1 map. What should
-                        // we do with the value is a Vec<String> instead of a String?  For now
-                        // assume we have a single string.
+                    for attr in r.attributes().iter() {
+                        let (attrk, attrv) = attr?;
+
                         match attrv {
-                            gff::record::attributes::field::value::Value::String(val) => {
-                                rec_attr_hm.insert(attrk.to_string(), val.clone());
+                            gff::record::attributes::field::Value::String(val) => {
+                                rec_attr_hm.insert(attrk.to_string(), val.clone().to_string());
                             }
-                            gff::record::attributes::field::value::Value::Array(a) => {
-                                rec_attr_hm.insert(attrk.to_string(), a.join(","));
+                            gff::record::attributes::field::Value::Array(a) => {
+                                let mut arr = Vec::new();
+                                for s in a.iter() {
+                                    arr.push(s?.to_string());
+                                }
+
+                                rec_attr_hm.insert(attrk.to_string(), arr.join(","));
 
                                 // anyhow::bail!("Currently, having multiple values associated with a single GFF attributed is not supported.");
                             }
@@ -547,19 +578,26 @@ impl GStruct {
                     }
                     self.attributes.push(&mut rec_attr_hm);
                 }
-                gff::Line::Comment(c) => {
+                gff::line::Kind::Comment => {
+                    let c = line
+                        .as_comment()
+                        .with_context(|| format!("failed parsing a comment line: {:#?}", line))?;
                     n_comments += 1;
                     if let Some(misc) = self.misc.as_mut() {
                         misc.entry(String::from("comments"))
-                            .and_modify(|v| v.push(c.clone()))
-                            .or_insert(vec![c]);
+                            .and_modify(|v| v.push(c.to_string()))
+                            .or_insert(vec![c.to_string()]);
                     }
                     continue;
                 }
-                gff::Line::Directive(d) => {
-                    let dstring = d.to_string();
-                    // this must be Some
+                gff::line::Kind::Directive => {
+                    let d = line
+                        .as_directive()
+                        .with_context(|| format!("failed parsing a directive line: {:#?}", line))?;
+                    // we create a string containing the key and value fields separated by space for the directive
+                    let dstring = format!("{} {}", d.key(), d.value().unwrap_or(""));
 
+                    // this must be Some
                     if let Some(misc) = self.misc.as_mut() {
                         misc.entry(String::from("directives"))
                             .and_modify(|v| v.push(dstring.clone()))
@@ -569,6 +607,21 @@ impl GStruct {
                 }
             }
         }
+
+        if n_strand_none > 0 {
+            warn!(
+                "{} records have no strand information, set to '+'",
+                n_strand_none
+            );
+        }
+
+        if n_strand_unknown > 0 {
+            warn!(
+                "{} records have unknown strand information, set to '+'",
+                n_strand_unknown
+            );
+        }
+
         info!(
             "Finished parsing the input file. Found {} comments, and {} records.",
             n_comments, n_records

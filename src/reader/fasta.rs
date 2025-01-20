@@ -178,6 +178,7 @@ impl SeqInfo {
     ///
     /// * `from_fasta`: Constructs a new [SeqInfo] instance by parsing a FASTA file to extract
     ///   sequence names and lengths.
+    ///
     /// seqinfo can contain "seqname", "seqlengths", "isCircular", "genome", and other extra string info
     ///
     /// # Examples
@@ -211,46 +212,6 @@ impl SeqInfo {
         si
     }
 }
-
-/// Creates a FASTA file reader.
-///
-/// This function constructs a [`fasta::Reader`] wrapped in a [`BufReader`](std::io::BufReader), ready to read
-/// from the specified FASTA file. It provides buffered reading capabilities, which is
-/// efficient for large FASTA files.
-///
-/// # Type Parameters
-///
-/// * `T`: A type that can be referenced as a file path, implementing the [`AsRef<Path>`] trait.
-///
-/// # Arguments
-///
-/// * `file_path`: The path to the FASTA file.
-///
-/// # Returns
-///
-/// Returns [`anyhow::Result<fasta::Reader<BufReader<File>>>`](anyhow::Result):
-/// * [Ok]`(`[fasta::Reader]`)`: A FASTA reader instance if the file is successfully opened.
-/// * [Err]`(`[anyhow::Error]`)`: An error if the file cannot be opened.
-///
-/// # Examples
-///
-/// ```rust
-/// let reader = build_fasta_reader("path/to/sequence.fasta")?;
-/// ```
-///
-/// This function simplifies the process of setting up a FASTA reader, handling file opening and
-/// buffering internally.
-/*
-pub fn build_fasta_reader<T: AsRef<Path>, R: BufRead>(
-    file_path: T,
-) -> anyhow::Result<fasta::Reader<BufReader<File>>> {
-    // create reader
-    let reader: fasta::Reader<BufReader<File>> = File::open(file_path)
-        .map(BufReader::new)
-        .map(fasta::Reader::new)?;
-    Ok(reader)
-}
-*/
 
 /// Extracts sequence names and lengths from a FASTA file.
 ///
