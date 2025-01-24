@@ -29,7 +29,7 @@ anyhow = "1.0"
 flate2 = { version = "1.0.35", features = [
   "zlib-ng",
 ], default-features = false }
-noodles = { version = "0.87.0", features = ["gtf", "gff", "fasta", "core"] }
+noodles = { version = "0.89.0", features = ["gtf", "gff", "fasta", "core"] }
 tracing = "0.1.41"
 polars = { version = "0.45.1", features = [
   "lazy",
