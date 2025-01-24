@@ -1,9 +1,11 @@
 use anyhow;
+use flate2::{write::GzEncoder, Compression};
 use grangers::grangers_utils::IntervalType;
 use grangers::options::FieldColumns;
 use grangers::{options, Grangers};
 use noodles::fasta::record::Record;
 use polars::prelude::*;
+use std::io::prelude::*;
 use std::pin::Pin;
 
 #[test]
@@ -32,10 +34,14 @@ fn test_iterator() -> anyhow::Result<()> {
 
     let gene_id_s = gr.get_column_name("gene_id", false)?;
 
-    let fa_string = ">chr1\nATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCG\n";
+    let mut e = GzEncoder::new(Vec::new(), Compression::default());
+    let fa_string = b">chr1\nATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCG\n";
+    e.write_all(fa_string)
+        .expect("can't write FASTA string to encoder");
+    let compressed_fa_string = e.finish().expect("can't encode FASTA string");
 
     let siter = gr.iter_sequences_from_reader(
-        std::io::Cursor::new(fa_string),
+        std::io::Cursor::new(compressed_fa_string),
         false,
         Some(&gene_id_s),
         options::OOBOption::Truncate,
