@@ -417,7 +417,7 @@ impl GStruct {
 
                     // parse attributes
                     rec_attr_hm.clear();
-                    for attr in r.attributes().iter() {
+                    for attr in r.attributes().as_ref().iter() {
                         rec_attr_hm.insert(attr.key().to_string(), attr.value().to_string());
                     }
                     self.attributes.push(&mut rec_attr_hm);
