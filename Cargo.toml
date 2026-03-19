@@ -31,9 +31,9 @@ anyhow = "1.0"
 flate2 = { version = "1.0.35", features = [
   "zlib-ng",
 ], default-features = false }
-noodles = { version = "0.90.0", features = ["gtf", "gff", "fasta", "core"] }
+noodles = { version = "0.104.0", features = ["gtf", "gff", "fasta", "core"] }
 tracing = "0.1.41"
-polars = { version = "0.45.1", features = [
+polars = { version = "0.49.1", features = [
   "lazy",
   "dataframe_arithmetic",
   "checked_arithmetic",
@@ -45,7 +45,10 @@ polars = { version = "0.45.1", features = [
   "strings",
   "is_in",
   "abs",
+  "regex",
+  "timezones",
+  "polars-ops"
 ] }
 rust-lapper = "1.1.0"
 lazy_static = "1.5.0"
-nutype = "0.5.1"
+nutype = "0.6.2"

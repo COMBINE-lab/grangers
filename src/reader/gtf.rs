@@ -378,17 +378,17 @@ impl GStruct {
         // instantiate the struct
         if is_gzipped(&mut inner_rdr)? {
             info!("auto-detected gzipped file - reading via decompression");
-            let mut rdr = gtf::Reader::new(BufReader::new(MultiGzDecoder::new(inner_rdr)));
+            let mut rdr = gtf::io::Reader::new(BufReader::new(MultiGzDecoder::new(inner_rdr)));
             gr._from_gtf(&mut rdr)?;
         } else {
-            let mut rdr = gtf::Reader::new(inner_rdr);
+            let mut rdr = gtf::io::Reader::new(inner_rdr);
             gr._from_gtf(&mut rdr)?;
         }
 
         Ok(gr)
     }
 
-    fn _from_gtf<T: BufRead>(&mut self, rdr: &mut gtf::Reader<T>) -> anyhow::Result<()> {
+    fn _from_gtf<T: BufRead>(&mut self, rdr: &mut gtf::io::Reader<T>) -> anyhow::Result<()> {
         // initiate a reusable hashmap to take the attributes of each record
         let mut rec_attr_hm: HashMap<String, String> = HashMap::with_capacity(100);
         let mut n_comments = 0usize;
@@ -397,37 +397,73 @@ impl GStruct {
         // parse the file
         for l in rdr.lines() {
             let line = l?;
-            match line {
-                gtf::Line::Record(r) => {
+            match line.kind()    {
+                gtf::line::Kind::Record => {
+                    let r = line.as_record().with_context(|| format!("Failed parsing a record line: {:#?}", line.as_record()))?
+                    .with_context(|| format!("Failed parsing a record line: {:#?}", line.as_record()))?;
                     n_records += 1;
                     // parse essential fields
 
                     GStruct::push(&mut self.seqid, r.reference_sequence_name().to_string());
                     GStruct::push(&mut self.source, r.source().to_string());
                     GStruct::push(&mut self.feature_type, r.ty().to_string());
-                    GStruct::push(&mut self.start, r.start().get() as i64);
-                    GStruct::push(&mut self.end, r.end().get() as i64);
-                    GStruct::push(&mut self.score, r.score());
-                    GStruct::push(
-                        &mut self.strand,
-                        r.strand().map(|st| st.as_ref().to_owned()),
-                    );
+                    GStruct::push(&mut self.start, r.start()?.get() as i64);
+                    GStruct::push(&mut self.end, r.end()?.get() as i64);
+                    GStruct::push(&mut self.score, r.score().transpose()?);
+                    let strand_opt = r.strand().map(|st| {
+                        let st_debug = format!("{:?}", st);
+                        match st_debug.as_str() {
+                            "Reverse" => String::from("-"),
+                            _ => String::from("+"),
+                        }
+                    })?;
+                    GStruct::push(&mut self.strand, Some(strand_opt));
 
-                    GStruct::push(&mut self.phase, r.frame().map(|ph| ph.to_string()));
+                    if let Some(ph_result) = r.phase() {
+                        let ph = ph_result?;
+                        let ph_debug = format!("{:?}", ph);
+                        let phase_str = match ph_debug.as_str() {
+                            "Zero" => Some(String::from("0")),
+                            "One" => Some(String::from("1")),
+                            "Two" => Some(String::from("2")),
+                            _ => Some(String::from("0")),
+                        };
+                        GStruct::push(&mut self.phase, phase_str);
+                    } else {
+                        GStruct::push(&mut self.phase, None);
+                    }
 
                     // parse attributes
                     rec_attr_hm.clear();
-                    for attr in r.attributes().as_ref().iter() {
-                        rec_attr_hm.insert(attr.key().to_string(), attr.value().to_string());
+                    // In noodles-gtf, attributes().iter() returns an iterator of (key, value) tuples
+                    let attributes = r.attributes()?;
+                    for att in gff::feature::record::Attributes::iter(&attributes) {
+                        let (key, value) = att?;
+                        match value {
+                            gff::feature::record::attributes::field::Value::String(s) => {
+                                rec_attr_hm.insert(key.to_string(), s.to_string());
+                            }
+                            gff::feature::record::attributes::field::Value::Array(a) => {
+                                rec_attr_hm.insert(
+                                    key.to_string(), 
+                                    a.iter()
+                                        .map(|result| result.map(|s| s.to_string()))
+                                        .collect::<Result<Vec<_>, _>>()?
+                                        .join(",")
+                                );
+                            }
+                        }
                     }
                     self.attributes.push(&mut rec_attr_hm);
                 }
-                gtf::Line::Comment(c) => {
-                    n_comments += 1;
-                    if let Some(misc) = self.misc.as_mut() {
-                        misc.entry(String::from("comments"))
-                            .and_modify(|v| v.push(c.clone()))
-                            .or_insert(vec![c]);
+                gtf::line::Kind::Comment => {
+                    if let Some(c) = line.as_comment() {
+                        n_comments += 1;
+                        if let Some(misc) = self.misc.as_mut() {
+                            misc.entry(String::from("comments"))
+                                .and_modify(|v| v.push(c.to_string()))
+                                .or_insert(vec![c.to_string()]);
+                        }
                     }
                     continue;
                 }
@@ -488,16 +524,16 @@ impl GStruct {
         // instantiate the struct
         if is_gzipped(&mut inner_rdr)? {
             info!("auto-detected gzipped file - reading via decompression");
-            let mut rdr = gff::Reader::new(BufReader::new(MultiGzDecoder::new(inner_rdr)));
+            let mut rdr = gff::io::Reader::new(BufReader::new(MultiGzDecoder::new(inner_rdr)));
             gr._from_gff(&mut rdr)?;
         } else {
-            let mut rdr = gff::Reader::new(inner_rdr);
+            let mut rdr = gff::io::Reader::new(inner_rdr);
             gr._from_gff(&mut rdr)?;
         }
         Ok(gr)
     }
 
-    fn _from_gff<T: BufRead>(&mut self, rdr: &mut gff::Reader<T>) -> anyhow::Result<()> {
+    fn _from_gff<T: BufRead>(&mut self, rdr: &mut gff::io::Reader<T>) -> anyhow::Result<()> {
         // initiate a reusable hashmap to take the attributes of each record
         let mut rec_attr_hm: HashMap<String, String> = HashMap::with_capacity(100);
         let mut n_comments = 0usize;
@@ -526,31 +562,35 @@ impl GStruct {
                         GStruct::push(&mut self.score, None);
                     }
 
-                    GStruct::push(
-                        &mut self.strand,
-                        match r.strand()? {
-                            gff::record::Strand::None => {
+                    let strand_str = {
+                        let strand_val = r.strand()?;
+                        let strand_debug = format!("{:?}", strand_val);
+                        match strand_debug.as_str() {
+                            "Reverse" => Some(String::from("-")),
+                            "Forward" => Some(String::from("+")),
+                            "None" => {
                                 n_strand_none += 1;
                                 Some(String::from("+"))
                             }
-                            gff::record::Strand::Unknown => {
+                            "Unknown" => {
                                 n_strand_unknown += 1;
                                 Some(String::from("+"))
                             }
-                            gff::record::Strand::Forward => Some(String::from("+")),
-                            gff::record::Strand::Reverse => Some(String::from("-")),
-                        },
-                    );
+                            _ => Some(String::from("+")),
+                        }
+                    };
+                    GStruct::push(&mut self.strand, strand_str);
 
                     if let Some(p) = r.phase() {
-                        GStruct::push(
-                            &mut self.phase,
-                            match p? {
-                                gff::record::Phase::Zero => Some(String::from("0")),
-                                gff::record::Phase::One => Some(String::from("1")),
-                                gff::record::Phase::Two => Some(String::from("2")),
-                            },
-                        );
+                        let phase_val = p?;
+                        let phase_debug = format!("{:?}", phase_val);
+                        let phase_result = match phase_debug.as_str() {
+                            "Zero" => Some(String::from("0")),
+                            "One" => Some(String::from("1")),
+                            "Two" => Some(String::from("2")),
+                            _ => None,
+                        };
+                        GStruct::push(&mut self.phase, phase_result);
                     } else {
                         GStruct::push(&mut self.phase, None);
                     }
@@ -567,7 +607,7 @@ impl GStruct {
                             gff::record::attributes::field::Value::Array(a) => {
                                 let mut arr = Vec::new();
                                 for s in a.iter() {
-                                    arr.push(s?.to_string());
+                                    arr.push(s.to_string());
                                 }
 
                                 rec_attr_hm.insert(attrk.to_string(), arr.join(","));
@@ -595,7 +635,7 @@ impl GStruct {
                         .as_directive()
                         .with_context(|| format!("failed parsing a directive line: {:#?}", line))?;
                     // we create a string containing the key and value fields separated by space for the directive
-                    let dstring = format!("{} {}", d.key(), d.value().unwrap_or(""));
+                    let dstring = format!("{} {}", d.key(), d.value().map(|v| v.to_string()).unwrap_or_else(|| String::from("")));
 
                     // this must be Some
                     if let Some(misc) = self.misc.as_mut() {
@@ -736,7 +776,7 @@ mod tests {
 
     #[test]
     fn test_from_gtf() {
-        let mut rdr = gtf::Reader::new(GTF_RECORD);
+        let mut rdr = gtf::io::Reader::new(GTF_RECORD);
         let mut gr = GStruct::new(AttributeMode::Full, FileFormat::GTF).unwrap();
         gr._from_gtf(&mut rdr).unwrap();
         // check values
@@ -838,7 +878,7 @@ mod tests {
 
     #[test]
     fn test_from_gff() {
-        let mut rdr = gff::Reader::new(GFF_RECORD);
+        let mut rdr = gff::io::Reader::new(GFF_RECORD);
         let mut gr = GStruct::new(AttributeMode::Full, FileFormat::GFF).unwrap();
         gr._from_gff(&mut rdr).unwrap();
         // check values

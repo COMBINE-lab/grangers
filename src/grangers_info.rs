@@ -25,6 +25,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use tracing::debug;
 use tracing::{info, warn};
 
+
 // we give each grangers struct a unique
 // program identifier which is the order in
 // which it was created.
@@ -978,14 +979,12 @@ impl Grangers {
         warn_empty: bool,
     ) -> anyhow::Result<Grangers> {
         let column = self.get_column_name(by.as_ref(), false)?;
+        // Create a list Series for is_in
+        let values_vec: Vec<String> = values.iter().map(|s| s.as_ref().to_string()).collect();
+        let list_series = Series::new("values".into(), vec![Series::new("inner".into(), values_vec)])
+            .cast(&DataType::List(Box::new(DataType::String)))?;
         let s = self.df().column(&column)?.as_materialized_series();
-        let df = self.df().filter(&is_in(
-            s,
-            &Series::new(
-                PlSmallStr::from_str("values"),
-                values.iter().map(|s| s.as_ref()).collect::<Vec<&str>>(),
-            ),
-        )?)?;
+        let df = self.df().filter(&is_in(s, &list_series, false)?)?;
 
         if df.is_empty() && warn_empty {
             warn!("The filtered dataframe is empty.")
@@ -1661,7 +1660,7 @@ impl Grangers {
     ) -> anyhow::Result<Grangers> {
         self.validate(false, true)?;
         let gene_id = self.get_column_name_str("gene_id", true)?;
-        self.boundary(gene_id, exon_feature, multithreaded)
+        self.boundary(gene_id, exon_feature, None, multithreaded)
     }
 
     /// Computes the boundary regions for transcripts from the exon annotations in the [Grangers] instance.
@@ -1685,10 +1684,11 @@ impl Grangers {
     pub fn transcripts(
         &self,
         exon_feature: Option<&str>,
+        extra_group_by_columns: Option<&[&str]>,
         multithreaded: bool,
     ) -> anyhow::Result<Grangers> {
         let transcript_id = self.get_column_name_str("transcript_id", true)?;
-        self.boundary(transcript_id, exon_feature, multithreaded)
+        self.boundary(transcript_id, exon_feature, extra_group_by_columns, multithreaded)
     }
 
     /// Computes the boundary regions of genomic features (like genes or transcripts) based on their exons.
@@ -1716,6 +1716,7 @@ impl Grangers {
         &self,
         by: &str,
         exon_feature: Option<&str>,
+        extra_group_by_columns: Option<&[&str]>,
         multithreaded: bool,
     ) -> anyhow::Result<Grangers> {
         self.validate(false, true)?;
@@ -1727,10 +1728,17 @@ impl Grangers {
         let strand = fc.strand();
         let by = self.get_column_name_str(by, true)?;
 
+        let mut group_by_columns = vec![seqname, by, strand];
+        if let Some(extra_group_by_columns) = extra_group_by_columns {
+            for c in extra_group_by_columns {
+                group_by_columns.push(self.get_column_name_str(c, true)?);
+            }
+        }
+
         // check if genes are well defined: all features of a gene should have a valid seqname, start, end, and strand
         let any_invalid = exon_gr
             .df()
-            .select([seqname, strand, by])?
+            .select(group_by_columns.clone())?
             .lazy()
             .group_by([by])
             .agg([
@@ -1755,7 +1763,7 @@ impl Grangers {
         exon_gr.df = exon_gr
             .df
             .lazy()
-            .group_by([seqname, by, strand])
+            .group_by(group_by_columns)
             .agg([col(start).min(), col(end).max()])
             .collect()?;
 
@@ -1825,11 +1833,11 @@ impl Grangers {
         }
 
         // make sure that strand is valid
-        if !is_in(
-            &exon_gr.column(strand)?.as_materialized_series().unique()?,
-            &Series::new("valid stands".into(), VALIDSTRANDS),
-        )?
-        .all()
+        let valid_strands_vec: Vec<String> = VALIDSTRANDS.iter().map(|s| s.to_string()).collect();
+        let list_series = Series::new("values".into(), vec![Series::new("inner".into(), valid_strands_vec)])
+            .cast(&DataType::List(Box::new(DataType::String)))?;
+        if !is_in(&exon_gr.column(strand)?.as_materialized_series().unique()?, &list_series, false)?
+            .all()
         {
             bail!("Found exons that do not have a valid strand (+ or -). Cannot proceed.")
         }
@@ -1958,11 +1966,13 @@ impl Grangers {
         // if contains null value in strand, we cannot do strand-specific extension
         if (!ignore_strand) & (extend_option != &ExtendOption::Both)
             && self.column(strand)?.is_null().any()
-                | !is_in(
-                    &self.column(strand)?.as_materialized_series().unique()?,
-                    &Series::new("valid stands".into(), VALIDSTRANDS),
-                )?
-                .all()
+                | {
+                    let valid_strands_vec: Vec<String> = VALIDSTRANDS.iter().map(|s| s.to_string()).collect();
+                    let list_series = Series::new("values".into(), vec![Series::new("inner".into(), valid_strands_vec)])
+                        .cast(&DataType::List(Box::new(DataType::String)))?;
+                    !is_in(&self.column(strand)?.as_materialized_series().unique()?, &list_series, false)?
+                        .all()
+                }
         {
             bail!("The strand column contains values other than {:?}. Please remove them first or set ignore_strand to true.", VALIDSTRANDS)
         }
@@ -2256,7 +2266,7 @@ impl Grangers {
                                     .with_multithreaded(multithreaded),
                             ),
                         )
-                        .add(Expr::Literal(LiteralValue::UInt32(offset)))
+                        .add(Expr::Literal(LiteralValue::Scalar(offset.into())))
                         .over(by)
                         .cast(DataType::String)
                         .alias(name),
@@ -2962,7 +2972,7 @@ impl Grangers {
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
         // we also create a fasta writer
         let out_writer = BufWriter::with_capacity(4194304, out_file);
-        let mut writer = noodles::fasta::writer::Builder::default()
+        let mut writer = noodles::fasta::io::writer::Builder::default()
             .set_line_base_count(usize::MAX)
             .build_from_writer(out_writer);
 
@@ -3204,7 +3214,7 @@ impl Grangers {
 
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
 
-        let mut writer = noodles::fasta::writer::Builder::default()
+        let mut writer = noodles::fasta::io::writer::Builder::default()
             .set_line_base_count(usize::MAX)
             .build_from_writer(out_file);
         let mut empty_counter = 0;
@@ -3404,7 +3414,7 @@ impl Grangers {
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
 
         let out_writer = BufWriter::with_capacity(4194304, out_file);
-        let mut writer = noodles::fasta::writer::Builder::default()
+        let mut writer = noodles::fasta::io::writer::Builder::default()
             .set_line_base_count(usize::MAX)
             .build_from_writer(out_writer);
 
@@ -4570,7 +4580,10 @@ impl Iterator for GrangersSeqIter {
 ///   and handle out-of-bound situations according to `oob_option`.
 ///
 struct ChrRowSeqIter<'a> {
-    iters: Vec<polars::series::SeriesIter<'a>>,
+    starts: Vec<Option<i64>>,
+    ends: Vec<Option<i64>>,
+    is_reverse: Vec<Option<bool>>,
+    curr_idx: usize,
     record: &'a noodles::fasta::Record,
     oob_option: OOBOption,
     seqlen: usize,
@@ -4617,26 +4630,32 @@ impl<'a> ChrRowSeqIter<'a> {
         oob_option: OOBOption,
     ) -> anyhow::Result<Self> {
         let fc = grangers.field_columns();
-        let iters: Vec<polars::series::SeriesIter> = vec![
-            grangers
-                .df()
-                .column(fc.start())?
-                .as_materialized_series()
-                .iter(),
-            grangers
-                .df()
-                .column(fc.end())?
-                .as_materialized_series()
-                .iter(),
-            grangers
-                .df
-                .column(fc.strand())?
-                .as_materialized_series()
-                .iter(),
-        ];
+
+        // Retrieve Series and rechunk/cast as needed to ensure safety and correctness
+        // We collect to Vecs to avoid lifetime issues with local rechunked Series
+        let s_start = grangers.df().column(fc.start())?.as_materialized_series().rechunk();
+        let s_end = grangers.df().column(fc.end())?.as_materialized_series().rechunk();
+        let s_strand = grangers.df().column(fc.strand())?.as_materialized_series().rechunk();
+
+        // Collect starts and ends
+        // We use i64() helper which returns ChunkedArray<Int64Type>
+        let starts: Vec<Option<i64>> = s_start.i64()?.into_iter().collect();
+        let ends: Vec<Option<i64>> = s_end.i64()?.into_iter().collect();
+
+        // Handle strand
+        // Cast to String to ensure we can read it as string, then collect boolean flag
+        let s_strand_str = s_strand.cast(&DataType::String)?;
+        let ca_strand = s_strand_str.str()?;
+        let is_reverse: Vec<Option<bool>> = ca_strand.into_iter().map(|opt_s| {
+            opt_s.map(|s| s == "-")
+        }).collect();
+
         let seqlen = record.sequence().len();
         Ok(Self {
-            iters,
+            starts,
+            ends,
+            is_reverse,
+            curr_idx: 0,
             record,
             oob_option,
             seqlen,
@@ -4685,57 +4704,44 @@ impl<'a> Iterator for ChrRowSeqIter<'a> {
     /// It leverages the [`OOBOption`] settings to decide how sequences extending beyond the reference
     /// are treated, either truncating them to fit or skipping them entirely.
     fn next(&mut self) -> Option<Self::Item> {
-        // first we check if we can extract value or not
-        if let (Some(start), Some(end), Some(strand)) = (
-            self.iters[0].next(),
-            self.iters[1].next(),
-            self.iters[2].next(),
-        ) {
-            // the second if check if the start, end and strand are non-null
-            let sequence = if let (
-                AnyValue::Int64(start),
-                AnyValue::Int64(end),
-                AnyValue::String(strand),
-            ) = (start, end, strand)
-            {
-                // we need to convert the start and end to trunacated one if oob_option is Truncate
-                let (start, end) = if self.oob_option == OOBOption::Truncate {
-                    (
-                        noodles::core::Position::new(std::cmp::max(1, start as usize)),
-                        noodles::core::Position::new(std::cmp::min(self.seqlen, end as usize)),
-                    )
-                } else {
-                    (
-                        noodles::core::Position::new(start as usize),
-                        noodles::core::Position::new(end as usize),
-                    )
-                };
-                // the third if check if the start and end are non-negative
-                if let (Some(start), Some(end)) = (start, end) {
-                    let seq = self.record.sequence().get(start..=end);
-                    // the fourth if check if the sequence is valid
-                    if let Some(seq) = seq {
-                        let mut sequence = Ok(Sequence::from_iter(seq.iter().copied()));
-                        if strand == "-" {
-                            sequence = sequence.unwrap().complement().rev().collect::<Result<_, _>>().with_context(||"Could not get the reverse complement of a sequence. Please check if the alphabet is valid.");
-                        };
-                        sequence
-                    } else {
-                        // we can't get a slice from the start to the end
-                        Err(anyhow::anyhow!("Could not get the sequence from the start to the end. Please check if the start and end are valid."))
+        if self.curr_idx >= self.starts.len() {
+            return None;
+        }
+
+        let start_opt = self.starts[self.curr_idx];
+        let end_opt = self.ends[self.curr_idx];
+        let is_rev_opt = self.is_reverse[self.curr_idx];
+        self.curr_idx += 1;
+
+        if let (Some(start), Some(end), Some(is_rev)) = (start_opt, end_opt, is_rev_opt) {
+            let (start, end) = if self.oob_option == OOBOption::Truncate {
+                (
+                    noodles::core::Position::new(std::cmp::max(1, start as usize)),
+                    noodles::core::Position::new(std::cmp::min(self.seqlen, end as usize)),
+                )
+            } else {
+                (
+                    noodles::core::Position::new(start as usize),
+                    noodles::core::Position::new(end as usize),
+                )
+            };
+
+            if let (Some(start), Some(end)) = (start, end) {
+                let seq = self.record.sequence().get(start..=end);
+                if let Some(seq) = seq {
+                    let mut sequence = Ok(Sequence::from_iter(seq.iter().copied()));
+                    if is_rev {
+                         sequence = sequence.unwrap().complement().rev().collect::<Result<_, _>>().with_context(||"Could not get the reverse complement of a sequence. Please check if the alphabet is valid.");
                     }
+                    Some(sequence)
                 } else {
-                    // if start or end is negative, we return None
-                    Err(anyhow::anyhow!("Found invalid start or end. Please check if the start and end are within boundary."))
+                    Some(Err(anyhow::anyhow!("Could not get the sequence from the start to the end. Please check if the start and end are valid.")))
                 }
             } else {
-                // if we can't get valid start, end or strand, then we return None
-                Err(anyhow::anyhow!("Found null start, end or strand. Please check if the start, end and strand are valid."))
-            };
-            Some(sequence)
+                Some(Err(anyhow::anyhow!("Found invalid start or end. Please check if the start and end are within boundary.")))
+            }
         } else {
-            // if they are none, then we reach the end of the iterator
-            None
+            Some(Err(anyhow::anyhow!("Found null start, end or strand. Please check if the start, end and strand are valid.")))
         }
     }
 }

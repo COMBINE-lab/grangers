@@ -250,7 +250,7 @@ pub fn get_chromsize<T: AsRef<Path>>(file_path: T) -> anyhow::Result<(Vec<String
 }
 
 fn _get_chromsize<T: BufRead>(
-    rdr: &mut fasta::Reader<T>,
+    rdr: &mut fasta::io::Reader<T>,
 ) -> anyhow::Result<(Vec<String>, Vec<usize>)> {
     // get chromsize
     let mut seqname: Vec<String> = Vec::new();

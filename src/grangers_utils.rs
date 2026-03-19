@@ -4,11 +4,12 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use tracing::trace;
+use noodles::fasta::io::Reader as NoodlesFastaReader;
 
 /// Type alias for a noodles FASTA reader that can read from
 /// a `dyn BufRead`. It is used to allow reading from either
 /// a compressed or uncompressed FASTA file.
-pub type FastaReader = noodles::fasta::Reader<Box<dyn BufRead>>;
+pub type FastaReader = NoodlesFastaReader<Box<dyn BufRead>>;
 
 pub(crate) const VALIDSTRANDS: [&str; 2] = ["+", "-"];
 
@@ -229,11 +230,11 @@ pub fn get_noodles_reader_from_path<T: AsRef<Path>>(p: T) -> anyhow::Result<Fast
     // Now, we read the fasta file and process each reference sequence at a time
     if is_gzipped(&mut inner_rdr)? {
         trace!("auto-detected gzipped FASTA file - reading via decompression");
-        Ok(noodles::fasta::Reader::new(Box::new(BufReader::new(
+        Ok(NoodlesFastaReader::new(Box::new(BufReader::new(
             MultiGzDecoder::new(inner_rdr),
         ))))
     } else {
-        Ok(noodles::fasta::Reader::new(Box::new(inner_rdr)))
+        Ok(NoodlesFastaReader::new(Box::new(inner_rdr)))
     }
 }
 
@@ -250,11 +251,11 @@ pub fn get_noodles_reader_from_reader(r: impl Read + 'static) -> anyhow::Result<
     // Now, we read the fasta file and process each reference sequence at a time
     if is_gzipped(&mut inner_rdr)? {
         trace!("auto-detected gzipped FASTA file - reading via decompression");
-        Ok(noodles::fasta::Reader::new(Box::new(BufReader::new(
+        Ok(NoodlesFastaReader::new(Box::new(BufReader::new(
             MultiGzDecoder::new(inner_rdr),
         ))))
     } else {
-        Ok(noodles::fasta::Reader::new(Box::new(inner_rdr)))
+        Ok(NoodlesFastaReader::new(Box::new(inner_rdr)))
     }
 }
 
