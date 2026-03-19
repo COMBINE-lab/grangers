@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0](https://github.com/COMBINE-lab/grangers/compare/v0.4.0...v0.5.0) (2025-01-24)
+
+
+### Features
+
+* allow reading from gzipped fasta, think more about static lifetime bound ([b235c03](https://github.com/COMBINE-lab/grangers/commit/b235c03d9430da0532960f72d56f2b9877e6d019))
+* upgrade deps ([89af5b9](https://github.com/COMBINE-lab/grangers/commit/89af5b9d6a5b7419b7d23b071086cd7e0eba0e99))
+
+
+### Bug Fixes
+
+* GZDecoder to MultiGZDecoder ([0d00fd1](https://github.com/COMBINE-lab/grangers/commit/0d00fd1624b963c6509ea459a43d72b40bc49a4e))
+
 ## [0.4.0](https://github.com/COMBINE-lab/grangers/compare/v0.3.1...v0.4.0) (2023-10-28)
 
 
