@@ -1,6 +1,6 @@
 [package]
 name = "grangers"
-version = "0.6.1"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.88"
 authors = ["Dongze He <dhe17@umd.edu>", "Rob Patro <rob@cs.umd.edu>"]

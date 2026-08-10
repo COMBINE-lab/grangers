@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [conventional commits](https://www.conventionalcommits.org); entries are
 generated from commit messages by [git-cliff](https://git-cliff.org).
 
+## [1.0.0](https://github.com/COMBINE-lab/grangers/compare/v0.5.0...v1.0.0) (2026-08-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* polars 0.53, noodles 0.115, and drop the flate2 backend pin
+
+### Features
+
+* polars 0.53, noodles 0.115, and drop the flate2 backend pin ([a586ada](https://github.com/COMBINE-lab/grangers/commit/a586ada7288a8b4efcffab595eb245a30afed835))
+
+
+### Bug Fixes
+
+* request the zlib-rs flate2 backend explicitly ([0191df5](https://github.com/COMBINE-lab/grangers/commit/0191df5d0699f474956edcd846c23460f8449a84))
+
 ## [0.6.1](https://github.com/COMBINE-lab/grangers/compare/v0.6.0...v0.6.1) (2026-08-10)
 
 
@@ -132,5 +148,3 @@ generated from commit messages by [git-cliff](https://git-cliff.org).
 
 * Implemented eture sequence iterator. ([7ac8332](https://github.com/COMBINE-lab/grangers/commit/7ac83320c5a36ea341e450a51b9353dd0f599138))
 * Implemented eture sequence iterator. ([3395199](https://github.com/COMBINE-lab/grangers/commit/33951993e9bba08b234a793382ad333d35f14cff))
-
-
