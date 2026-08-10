@@ -29,13 +29,21 @@ doctest = false
 
 [dependencies]
 anyhow = "1.0"
-# NOTE: deliberately no backend feature. grangers only ever *decompresses*, and a
-# library that hard-selects a flate2 backend forces that choice on every consumer
-# (cargo features are additive) -- that is exactly what pinned the whole
-# alevin-fry ecosystem to zlib-ng. With plain defaults, a downstream binary is
-# free to select `zlib-rs` by depending on flate2 itself; flate2's `any_zlib`
-# precedence then makes that the live backend here too.
-flate2 = "1.1.9"
+# The whole alevin-fry ecosystem standardises on the pure-Rust `zlib-rs` backend,
+# and every crate in it requests that backend explicitly rather than relying on
+# the top-level binary to remember. Selecting it here is safe in a way that
+# selecting `zlib-ng` was not: `zlib-rs` pulls no system library and needs no
+# cmake, so it cannot make grangers unbuildable anywhere. Leaving it unset is the
+# thing to avoid -- grangers would silently fall back to miniz_oxide, which is
+# both slower and a second decompressor in any tree that also wants zlib-rs.
+#
+# `default-features = false` means we do not ask for flate2's default
+# `rust_backend`. That does not remove miniz_oxide from the tree -- polars-utils
+# requests flate2 with default features, and cargo unions features graph-wide --
+# but it does not matter which crate asks: flate2 gates the pure-Rust path on
+# `not(any_zlib)`, and `zlib-rs` sets `any_zlib`, so zlib-rs is the live backend
+# and miniz_oxide is compiled but unused.
+flate2 = { version = "1.1.9", default-features = false, features = ["zlib-rs"] }
 noodles = { version = "0.115.0", features = ["gtf", "gff", "fasta", "core"] }
 tracing = "0.1.41"
 polars = { version = "0.53", features = [

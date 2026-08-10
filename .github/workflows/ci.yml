@@ -41,16 +41,20 @@ jobs:
       - name: Run tests
         run: cargo test --verbose
 
-      # grangers deliberately does not select a flate2 backend, so that consumers
-      # are free to choose one (see the note in Cargo.toml). Assert we did not
-      # accidentally reintroduce a backend pin: a system zlib in the graph here
-      # would force that choice on every downstream crate.
-      - name: Assert no zlib backend is forced
+      # The ecosystem standardises on the pure-Rust `zlib-rs` flate2 backend (see
+      # the note in Cargo.toml). Assert that it is what we actually resolve, and
+      # that no C zlib has crept back in -- those need a system library or cmake,
+      # which is what made grangers unbuildable on hosts without them.
+      - name: Assert the flate2 backend is zlib-rs
         shell: bash
         run: |
           cargo tree -e normal > tree.txt
-          if grep -qE 'libz-(ng|rs)-sys|libz-sys' tree.txt; then
-            echo "::error::a zlib backend leaked into the default dependency tree"
-            grep -E 'libz-(ng|rs)-sys|libz-sys' tree.txt
+          if ! grep -qE '\bzlib-rs v[0-9]' tree.txt; then
+            echo "::error::zlib-rs is not in the dependency tree; the flate2 backend pin was lost"
+            exit 1
+          fi
+          if grep -qE 'libz-ng-sys|libz-sys|cloudflare-zlib-sys' tree.txt; then
+            echo "::error::a C zlib backend crept into the dependency tree"
+            grep -E 'libz-ng-sys|libz-sys|cloudflare-zlib-sys' tree.txt
             exit 1
           fi
