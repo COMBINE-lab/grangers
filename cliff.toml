@@ -1,0 +1,86 @@
+# git-cliff configuration — generates CHANGELOG.md from conventional commits.
+#
+# Invoked by ./bump_and_publish.sh, which regenerates the whole file on every
+# release rather than appending. Regeneration is idempotent and keeps one
+# consistent format across the file; appending would leave each release in
+# whatever style was current when it was cut.
+#
+# Preview what the next release would look like without writing anything:
+#   git-cliff --tag v0.17.0 --unreleased
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to this project are documented here. The format follows
+[conventional commits](https://www.conventionalcommits.org); entries are
+generated from commit messages by [git-cliff](https://git-cliff.org).\n
+"""
+
+body = """
+{% if version %}\
+    ## [{{ version | trim_start_matches(pat="v") }}]\
+    {% if previous.version %}\
+        (https://github.com/COMBINE-lab/grangers/compare/{{ previous.version }}...{{ version }})\
+    {% else %}\
+        (https://github.com/COMBINE-lab/grangers/releases/tag/{{ version }})\
+    {% endif %}\
+    {% if timestamp %} ({{ timestamp | date(format="%Y-%m-%d") }}){% endif %}
+{% else %}\
+    ## Unreleased
+{% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+* {{ commit.message | upper_first }}\
+    {% if commit.remote.pr_number %} (#{{ commit.remote.pr_number }})\
+    {% else %} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/COMBINE-lab/grangers/commit/{{ commit.id }}))\
+    {% endif %}\
+{% endfor %}
+{% endfor %}\n
+"""
+
+footer = ""
+trim = true
+
+postprocessors = [
+  # Bare issue/PR references become links.
+  { pattern = '\(#([0-9]+)\)', replace = "([#${1}](https://github.com/COMBINE-lab/grangers/issues/${1}))" },
+]
+
+[changelog.remote.github]
+owner = "COMBINE-lab"
+repo = "grangers"
+
+[git]
+conventional_commits = true
+# Commits that do not parse as conventional are dropped rather than dumped into
+# a catch-all section. The history predates the convention, so keeping them
+# would bury the entries that matter under years of unstructured messages.
+filter_unconventional = true
+split_commits = false
+
+commit_parsers = [
+  # Release bumps are bookkeeping — the version heading already says it happened.
+  { message = "^chore\\(release\\)", skip = true },
+  # release-please used to cut these; they are bookkeeping too.
+  { message = "^chore\\(main\\): release", skip = true },
+  { message = "^chore\\(deps\\)", skip = true },
+  { message = "^[Mm]erge (pull request|branch|remote-tracking)", skip = true },
+
+  { message = "^feat", group = "Features" },
+  { message = "^fix", group = "Bug Fixes" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Refactor" },
+  { message = "^doc", group = "Documentation" },
+  { message = "^test", group = "Testing" },
+  { message = "^(build|ci)", group = "Build & CI" },
+  { message = "^chore", group = "Miscellaneous" },
+  { message = "^revert", group = "Reverted" },
+]
+
+protect_breaking_commits = true
+filter_commits = false
+tag_pattern = "v[0-9].*"
+topo_order = false
+sort_commits = "oldest"
