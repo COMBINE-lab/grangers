@@ -6,7 +6,6 @@ use crate::options::*;
 use crate::reader;
 use crate::reader::fasta::SeqInfo;
 use anyhow::{bail, Context};
-use lazy_static::lazy_static;
 pub(crate) use noodles::fasta::record::{Definition, Sequence};
 use nutype::nutype;
 use polars::{frame::DataFrame, lazy::prelude::*, prelude::*, series::Series};
@@ -17,6 +16,7 @@ use std::convert::AsRef;
 use std::fs;
 use std::io::{BufWriter, Read, Write};
 use std::iter::IntoIterator;
+use std::num::NonZeroUsize;
 use std::ops::FnMut;
 use std::ops::{Add, Mul, Sub};
 use std::path::Path;
@@ -25,13 +25,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use tracing::debug;
 use tracing::{info, warn};
 
-
 // we give each grangers struct a unique
 // program identifier which is the order in
 // which it was created.
-lazy_static! {
-    static ref GRANGERS_COUNTER: AtomicU32 = AtomicU32::new(0);
-}
+static GRANGERS_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 type LapperType = Lapper<u64, (usize, Vec<String>)>;
 
@@ -48,12 +45,12 @@ pub struct GrangersRecordID(u32);
 /// ### Fields
 ///
 /// * `records` - A vector of tuples, each containing a [`GrangersRecordID`] and a [`noodles::fasta::Record`].
-///    The [`GrangersRecordID`] serves as a unique identifier for each genomic sequence, while the
-///    [`noodles::fasta::Record`] contains the actual sequence data and related metadata as defined by
-///    the `noodles` crate, a Rust library for handling bioinformatics formats.
+///   The [`GrangersRecordID`] serves as a unique identifier for each genomic sequence, while the
+///   [`noodles::fasta::Record`] contains the actual sequence data and related metadata as defined by
+///   the `noodles` crate, a Rust library for handling bioinformatics formats.
 ///
 /// * `signature` - A 64-bit unsigned integer used as a unique signature for the entire collection.
-///    This can be used to verify the integrity of the data or to quickly compare this collection with others.
+///   This can be used to verify the integrity of the data or to quickly compare this collection with others.
 ///
 pub struct GrangersSequenceCollection {
     pub records: Vec<(GrangersRecordID, noodles::fasta::Record)>,
@@ -136,7 +133,7 @@ impl GrangersSequenceCollection {
     /// ```
     /// let collection = GrangersSequenceCollection::new_with_signature_and_capacity(123456789, 10);
     /// for (rec_id, rec) in collection.records_iter() {
-    ///     println!("Record ID: {}, Sequence: {}", rec_id, std::str::from_utf8(rec.sequence()).unwrap());
+    ///   println!("Record ID: {}, Sequence: {}", rec_id, std::str::from_utf8(rec.sequence()).unwrap());
     /// }
     /// ```
     pub fn records_iter(&self) -> std::slice::Iter<'_, (GrangersRecordID, noodles::fasta::Record)> {
@@ -160,9 +157,9 @@ impl GrangersSequenceCollection {
     /// ```
     /// let mut collection = GrangersSequenceCollection::new_with_signature_and_capacity(123456789, 10);
     /// for (rec_id, rec) in collection.records_iter_mut() {
-    ///     if rec_id == &GrangersRecordID::new(1) {
-    ///         rec.set_sequence("GATC".as_bytes());
-    ///     }
+    ///   if rec_id == &GrangersRecordID::new(1) {
+    ///   rec.set_sequence("GATC".as_bytes());
+    ///   }
     /// }
     /// ```
     pub fn records_iter_mut(
@@ -349,7 +346,7 @@ impl Grangers {
     /// Returns an [`Result<Grangers>`]:
     /// * [Ok]`(Grangers)`: A new [`Grangers`] instance if all validations pass and no critical errors occur.
     /// * [Err]`(...)`: An error encapsulated within an [`anyhow::Error`] if validations fail or if adjustments
-    ///    to the data frame encounter issues.
+    ///   to the data frame encounter issues.
     ///
     /// ### Example
     ///
@@ -467,7 +464,7 @@ impl Grangers {
             }
         }
 
-        let df = DataFrame::new(df_vec)?;
+        let df = DataFrame::new_infer_height(df_vec)?;
         Grangers::new(
             df,
             None,
@@ -488,7 +485,7 @@ impl Grangers {
     ///
     /// * `file_path`: An [`AsRef<std::path::Path>`] specifying the location of the GTF file to be read.
     /// * `only_essential`: A boolean flag indicating whether only essential attributes should be included in the final [Grangers] object.
-    ///    If `true`, only essential genomic attributes are included, reducing memory usage and potentially improving performance.
+    ///   If `true`, only essential genomic attributes are included, reducing memory usage and potentially improving performance.
     ///
     /// ### Returns
     ///
@@ -527,7 +524,7 @@ impl Grangers {
     ///
     /// * `file_path`: An [`AsRef<std::path::Path>`] specifying the location of the GTF file to be read.
     /// * `only_essential`: A boolean flag indicating whether only essential attributes should be included in the final [Grangers] object.
-    ///    If `true`, only essential genomic attributes are included, reducing memory usage and potentially improving peformance.
+    ///   If `true`, only essential genomic attributes are included, reducing memory usage and potentially improving peformance.
     ///
     /// ### Returns
     ///
@@ -738,7 +735,7 @@ impl Grangers {
         CsvWriter::new(&mut file)
             .include_header(false)
             .with_separator(b'\t')
-            .with_null_value(".".to_string())
+            .with_null_value(".".into())
             .finish(&mut out_df)?;
 
         Ok(())
@@ -805,8 +802,8 @@ impl Grangers {
     ///
     /// ```rust
     /// match grangers.field_columns_checked(true, true) {
-    ///     Ok(field_columns) => println!("Valid field columns: {:?}", field_columns),
-    ///     Err(e) => println!("Error validating field columns: {}", e),
+    ///   Ok(field_columns) => println!("Valid field columns: {:?}", field_columns),
+    ///   Err(e) => println!("Error validating field columns: {}", e),
     /// }
     /// ```
     pub fn field_columns_checked(
@@ -885,9 +882,9 @@ impl Grangers {
     ///
     /// ```rust
     /// if let Some(seqinfo) = grangers.seqinfo() {
-    ///     println!("Reference genome information available.");
+    ///   println!("Reference genome information available.");
     /// } else {
-    ///     println!("No reference genome information available.");
+    ///   println!("No reference genome information available.");
     /// }
     /// ```
     pub fn seqinfo(&self) -> Option<&SeqInfo> {
@@ -906,7 +903,7 @@ impl Grangers {
     ///
     /// ```rust
     /// if let Some(seqinfo_mut) = grangers.seqinfo_mut() {
-    ///     seqinfo_mut.set_seqnames(vec!["chr1".to_string(), "chr2".to_string()]);
+    ///   seqinfo_mut.set_seqnames(vec!["chr1".to_string(), "chr2".to_string()]);
     /// }
     /// ```
     pub fn seqinfo_mut(&mut self) -> Option<&mut SeqInfo> {
@@ -981,12 +978,15 @@ impl Grangers {
         let column = self.get_column_name(by.as_ref(), false)?;
         // Create a list Series for is_in
         let values_vec: Vec<String> = values.iter().map(|s| s.as_ref().to_string()).collect();
-        let list_series = Series::new("values".into(), vec![Series::new("inner".into(), values_vec)])
-            .cast(&DataType::List(Box::new(DataType::String)))?;
+        let list_series = Series::new(
+            "values".into(),
+            vec![Series::new("inner".into(), values_vec)],
+        )
+        .cast(&DataType::List(Box::new(DataType::String)))?;
         let s = self.df().column(&column)?.as_materialized_series();
         let df = self.df().filter(&is_in(s, &list_series, false)?)?;
 
-        if df.is_empty() && warn_empty {
+        if df.height() == 0 && warn_empty {
             warn!("The filtered dataframe is empty.")
         }
         Grangers::new(
@@ -1688,7 +1688,12 @@ impl Grangers {
         multithreaded: bool,
     ) -> anyhow::Result<Grangers> {
         let transcript_id = self.get_column_name_str("transcript_id", true)?;
-        self.boundary(transcript_id, exon_feature, extra_group_by_columns, multithreaded)
+        self.boundary(
+            transcript_id,
+            exon_feature,
+            extra_group_by_columns,
+            multithreaded,
+        )
     }
 
     /// Computes the boundary regions of genomic features (like genes or transcripts) based on their exons.
@@ -1834,10 +1839,17 @@ impl Grangers {
 
         // make sure that strand is valid
         let valid_strands_vec: Vec<String> = VALIDSTRANDS.iter().map(|s| s.to_string()).collect();
-        let list_series = Series::new("values".into(), vec![Series::new("inner".into(), valid_strands_vec)])
-            .cast(&DataType::List(Box::new(DataType::String)))?;
-        if !is_in(&exon_gr.column(strand)?.as_materialized_series().unique()?, &list_series, false)?
-            .all()
+        let list_series = Series::new(
+            "values".into(),
+            vec![Series::new("inner".into(), valid_strands_vec)],
+        )
+        .cast(&DataType::List(Box::new(DataType::String)))?;
+        if !is_in(
+            &exon_gr.column(strand)?.as_materialized_series().unique()?,
+            &list_series,
+            false,
+        )?
+        .all()
         {
             bail!("Found exons that do not have a valid strand (+ or -). Cannot proceed.")
         }
@@ -1895,12 +1907,7 @@ impl Grangers {
             // update exon number in fc
             fc.exon_number = Some("exon_number".to_string());
 
-            exon_gr.add_order(
-                Some(&[transcript_id]),
-                "exon_number",
-                Some(1),
-                multithreaded,
-            )?;
+            exon_gr.add_order(Some(&[transcript_id]), "exon_number", Some(1))?;
 
             "exon_number".to_string()
         };
@@ -1911,12 +1918,11 @@ impl Grangers {
             .df
             .lazy()
             .with_column(col(exon_number.as_str()).cast(DataType::UInt32))
-            .select([all().sort_by(
+            .select([all().as_expr().sort_by(
                 [
-                    col(seqname).cast(DataType::Categorical(None, CategoricalOrdering::Lexical)),
-                    col(strand).cast(DataType::Categorical(None, CategoricalOrdering::Lexical)),
-                    col(transcript_id)
-                        .cast(DataType::Categorical(None, CategoricalOrdering::Lexical)),
+                    col(seqname).cast(DataType::from_categories(Categories::global())),
+                    col(strand).cast(DataType::from_categories(Categories::global())),
+                    col(transcript_id).cast(DataType::from_categories(Categories::global())),
                     col(exon_number.as_str()),
                 ],
                 SortMultipleOptions::default().with_multithreaded(multithreaded),
@@ -1965,14 +1971,21 @@ impl Grangers {
 
         // if contains null value in strand, we cannot do strand-specific extension
         if (!ignore_strand) & (extend_option != &ExtendOption::Both)
-            && self.column(strand)?.is_null().any()
-                | {
-                    let valid_strands_vec: Vec<String> = VALIDSTRANDS.iter().map(|s| s.to_string()).collect();
-                    let list_series = Series::new("values".into(), vec![Series::new("inner".into(), valid_strands_vec)])
-                        .cast(&DataType::List(Box::new(DataType::String)))?;
-                    !is_in(&self.column(strand)?.as_materialized_series().unique()?, &list_series, false)?
-                        .all()
-                }
+            && self.column(strand)?.is_null().any() | {
+                let valid_strands_vec: Vec<String> =
+                    VALIDSTRANDS.iter().map(|s| s.to_string()).collect();
+                let list_series = Series::new(
+                    "values".into(),
+                    vec![Series::new("inner".into(), valid_strands_vec)],
+                )
+                .cast(&DataType::List(Box::new(DataType::String)))?;
+                !is_in(
+                    &self.column(strand)?.as_materialized_series().unique()?,
+                    &list_series,
+                    false,
+                )?
+                .all()
+            }
         {
             bail!("The strand column contains values other than {:?}. Please remove them first or set ignore_strand to true.", VALIDSTRANDS)
         }
@@ -2109,7 +2122,7 @@ impl Grangers {
             )
             .select([
                 // everything except end and start_flags
-                all().exclude([end, "start_flags_temp"]),
+                all().exclude_cols([end, "start_flags_temp"]).as_expr(),
                 // new_ends.append(tstart + (width * (2 if both else 1) - 1))
                 col(start)
                     .add(
@@ -2224,14 +2237,17 @@ impl Grangers {
     /// ### Example
     ///
     /// ```rust
-    /// grangers.add_order(Some(&["gene_id", "transcript_id"]), "exon_number", None, true)?;
+    /// grangers.add_order(Some(&["gene_id", "transcript_id"]), "exon_number", None)?;
     /// ```
+    ///
+    /// NOTE: this method used to take a `multithreaded: bool` hint. polars 0.53
+    /// removed that knob from `arg_sort`, so the parameter became a no-op and was
+    /// dropped rather than left in the signature doing nothing.
     pub fn add_order(
         &mut self,
         by: Option<&[&str]>,
         name: &str,
         offset: Option<u32>,
-        multithreaded: bool,
     ) -> anyhow::Result<()> {
         self.validate(false, true)?;
 
@@ -2254,18 +2270,11 @@ impl Grangers {
                 .clone()
                 .lazy()
                 .with_column(
+                    // NOTE: polars 0.53 narrowed `arg_sort` to (descending, nulls_last);
+                    // these values match the previous `SortOptions::default()` behavior.
                     when(col(strand).first().eq(lit("+")))
-                        .then(
-                            col(start)
-                                .arg_sort(SortOptions::default().with_multithreaded(multithreaded)),
-                        )
-                        .otherwise(
-                            col(start).arg_sort(
-                                SortOptions::default()
-                                    .with_order_descending(true)
-                                    .with_multithreaded(multithreaded),
-                            ),
-                        )
+                        .then(col(start).arg_sort(false, false))
+                        .otherwise(col(start).arg_sort(true, false))
                         .add(Expr::Literal(LiteralValue::Scalar(offset.into())))
                         .over(by)
                         .cast(DataType::String)
@@ -2382,7 +2391,7 @@ impl Grangers {
         multithreaded: bool,
     ) -> anyhow::Result<DataFrame>
     where
-        F: Fn(Column, i64) -> Result<Option<polars::prelude::Column>, PolarsError>
+        F: Fn(Column, i64) -> Result<polars::prelude::Column, PolarsError>
             + Copy
             + std::marker::Send
             + std::marker::Sync
@@ -2505,17 +2514,31 @@ impl Grangers {
             )
             .group_by(by.iter().map(|&s| col(s)).collect::<Vec<Expr>>())
             .agg([
-                all().exclude([start, end]).first(),
+                all().exclude_cols([start, end]).as_expr().first(),
                 // process two columns at once
                 // Notice the df is sorted
                 as_struct([col(start), col(end)].to_vec())
                     .apply(
                         move |s| apply_fn(s, slack),
-                        GetOutput::from_type(DataType::List((DataType::Int64).into())),
+                        // polars 0.53 dropped `GetOutput`; the output type is now given as a
+                        // closure over the input schema and field.
+                        |_schema: &Schema, field: &Field| {
+                            Ok(Field::new(
+                                field.name().clone(),
+                                DataType::List((DataType::Int64).into()),
+                            ))
+                        },
                     )
                     .alias("start_end_list-temp-nobody-will-use-this-name-right"),
             ])
-            .explode(["start_end_list-temp-nobody-will-use-this-name-right"])
+            .explode(
+                cols(["start_end_list-temp-nobody-will-use-this-name-right"]),
+                // these are the semantics `explode` had before polars 0.53 made them explicit
+                ExplodeOptions {
+                    empty_as_null: true,
+                    keep_nulls: true,
+                },
+            )
             // with_columns returns all columns and adds extra
             // as we can't drop a non-existing column, we need to add a dummy column
             .with_columns([
@@ -2533,23 +2556,25 @@ impl Grangers {
                     "ignore_strand-temp-nobody-will-use-this-name-right"
                 }),
             ])
-            .drop_nulls(Some(vec![cols([start, end])]))
+            .drop_nulls(Some(cols([start, end])))
             .with_column(
                 lit(".")
                     .cast(DataType::String)
                     .alias("ignore_strand-temp-nobody-will-use-this-name-right"),
             )
-            .select([all().exclude([
-                "start_end_list-temp-nobody-will-use-this-name-right",
-                "ignore_strand-temp-nobody-will-use-this-name-right",
-            ])])
+            .select([all()
+                .exclude_cols([
+                    "start_end_list-temp-nobody-will-use-this-name-right",
+                    "ignore_strand-temp-nobody-will-use-this-name-right",
+                ])
+                .as_expr()])
             // rearrange the columns
             .select([
                 col(seqname),
                 col(start),
                 col(end),
                 col(strand),
-                all().exclude([seqname, start, end, strand]),
+                all().exclude_cols([seqname, start, end, strand]).as_expr(),
             ])
             // groupby is multithreaded, so the order do not preserve
             .sort_by_exprs(
@@ -2671,18 +2696,17 @@ impl Grangers {
         // we define start and end as u64, and we use Vec<String> to store group_by column values
         type Iv = Interval<u64, (usize, Vec<String>)>;
 
-        let mut by_iters = df
-            .columns(by)?
+        // NOTE: polars 0.53 repurposed `DataFrame::columns()` to return every column, so
+        // selecting a named subset is now done by looking each one up individually.
+        let mut by_iters = by
             .iter()
-            .map(|s| s.as_materialized_series().iter())
-            .collect::<Vec<_>>();
+            .map(|n| Ok(df.column(n)?.as_materialized_series().iter()))
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
-        let mut ess_iters = self
-            .df()
-            .columns(selected)?
+        let mut ess_iters = selected
             .iter()
-            .map(|s| s.as_materialized_series().iter())
-            .collect::<Vec<_>>();
+            .map(|n| Ok(self.df().column(n)?.as_materialized_series().iter()))
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         let valid_rows = if ignore_strand {
             valid_pos
@@ -2973,7 +2997,7 @@ impl Grangers {
         // we also create a fasta writer
         let out_writer = BufWriter::with_capacity(4194304, out_file);
         let mut writer = noodles::fasta::io::writer::Builder::default()
-            .set_line_base_count(usize::MAX)
+            .set_line_base_count(NonZeroUsize::MAX)
             .build_from_writer(out_writer);
 
         // we iterate the fasta reader. For each fasta reacord (usually chromosome), we do
@@ -3045,7 +3069,7 @@ impl Grangers {
 
             let mut exon_u8_vec: Vec<u8> = Vec::new();
 
-            for (tx_id, seq) in tx_id_iter.zip(chr_seq_vec.into_iter()) {
+            for (tx_id, seq) in tx_id_iter.zip(chr_seq_vec) {
                 if let (Some(tx_id), Some(seq)) = (tx_id, seq) {
                     // first we want to check if the transcript id is the same as the previous one
                     if tx_id == curr_tx {
@@ -3195,14 +3219,14 @@ impl Grangers {
 
         let mut df = self.df.select(selection)?;
 
-        df.with_column(Series::new(
+        df.with_column(Column::new(
             "row_order".into(),
             (0..df.height() as u32).collect::<Vec<u32>>(),
         ))?;
 
         // if ignore strand, set the strand to +
         if ignore_strand {
-            df.with_column(Series::new(fc.strand().into(), vec!["+"; df.height()]))?;
+            df.with_column(Column::new(fc.strand().into(), vec!["+"; df.height()]))?;
         }
 
         fc.fix(&df, false)?;
@@ -3215,7 +3239,7 @@ impl Grangers {
         let mut reader = grangers_utils::get_noodles_reader_from_path(ref_path)?;
 
         let mut writer = noodles::fasta::io::writer::Builder::default()
-            .set_line_base_count(usize::MAX)
+            .set_line_base_count(NonZeroUsize::MAX)
             .build_from_writer(out_file);
         let mut empty_counter = 0;
 
@@ -3244,7 +3268,7 @@ impl Grangers {
             let chr_seq_vec = chr_gr.get_sequences_fasta_record(&record, oob_option)?;
 
             // we push seuqence to the correct position
-            for (name, sequence) in name_vec.into_iter().zip(chr_seq_vec.into_iter()) {
+            for (name, sequence) in name_vec.into_iter().zip(chr_seq_vec) {
                 let definition = Definition::new(name, None);
                 if let Some(sequence) = sequence {
                     writer
@@ -3400,7 +3424,7 @@ impl Grangers {
 
         // if ignore strand, set the strand to +
         if ignore_strand {
-            df.with_column(Series::new(fc.strand().into(), vec!["+"; df.height()]))?;
+            df.with_column(Column::new(fc.strand().into(), vec!["+"; df.height()]))?;
         }
 
         fc.fix(&df, false)?;
@@ -3415,7 +3439,7 @@ impl Grangers {
 
         let out_writer = BufWriter::with_capacity(4194304, out_file);
         let mut writer = noodles::fasta::io::writer::Builder::default()
-            .set_line_base_count(usize::MAX)
+            .set_line_base_count(NonZeroUsize::MAX)
             .build_from_writer(out_writer);
 
         let mut empty_counter = 0;
@@ -3509,7 +3533,7 @@ impl Grangers {
     /// let fasta_path = "reference.fasta";
     /// let transcript_sequences = grangers.get_transcript_sequences(&fasta_path, None, false)?;
     /// for seq in transcript_sequences {
-    ///     println!("{}", seq);
+    ///   println!("{}", seq);
     /// }
     /// ```
     ///
@@ -3616,7 +3640,7 @@ impl Grangers {
 
             let mut exon_u8_vec: Vec<u8> = Vec::new();
 
-            for (tx_id, seq) in tx_id_iter.zip(chr_seq_vec.into_iter()) {
+            for (tx_id, seq) in tx_id_iter.zip(chr_seq_vec) {
                 if let (Some(tx_id), Some(seq)) = (tx_id, seq) {
                     // first we want to check if the transcript id is the same as the previous one
                     if tx_id == curr_tx {
@@ -3657,15 +3681,22 @@ impl Grangers {
     ) -> anyhow::Result<Vec<Option<noodles::fasta::Record>>> {
         self.validate(false, true)?;
 
-        // if name is invalid, ignore
-        let name = if name.is_some() && self.get_column_name(name.unwrap(), true).is_ok() {
-            warn!(
-                "The provided name column {:?} is not in the dataframe. Ignored.",
-                name
-            );
-            Some(self.get_column_name(name.unwrap(), false)?)
-        } else {
-            None
+        // if name is invalid, ignore it (and say so)
+        // NOTE: this previously logged the "not in the dataframe" warning on the branch
+        // where the column *was* valid, and then used it anyway -- the message and the
+        // condition were inverted.
+        let name = match name {
+            Some(n) if self.get_column_name(n, true).is_ok() => {
+                Some(self.get_column_name(n, false)?)
+            }
+            Some(n) => {
+                warn!(
+                    "The provided name column {:?} is not in the dataframe. Ignored.",
+                    n
+                );
+                None
+            }
+            None => None,
         };
 
         let mut fc = self.field_columns().clone();
@@ -3731,7 +3762,7 @@ impl Grangers {
                 .column("row_order")?
                 .u32()?
                 .into_iter()
-                .zip(chr_seq_vec.into_iter())
+                .zip(chr_seq_vec)
             {
                 let idx: usize = idx.unwrap() as usize;
                 let seq_name = if name.is_some() {
@@ -3764,7 +3795,7 @@ impl Grangers {
     /// * `ref_path`: The path to the reference genome FASTA file.
     /// * `ignore_strand`: Boolean flag indicating whether to ignore the strand information during sequence extraction.
     /// * `name_column`: Optional parameter specifying the column name to use for naming the extracted sequences.
-    ///                   If not provided, sequences will be named based on their row order.
+    ///   If not provided, sequences will be named based on their row order.
     /// * `oob_option`: Specifies how to handle features that go out of the reference sequence bounds.
     ///
     /// ### Returns
@@ -3816,7 +3847,7 @@ impl Grangers {
     /// * `reader`: A reader instance from which the reference genome will be read.
     /// * `ignore_strand`: Boolean flag indicating whether to ignore the strand information during sequence extraction.
     /// * `name_column`: Optional parameter specifying the column name to use for naming the extracted sequences.
-    ///                   If not provided, sequences will be named based on their row order.
+    ///   If not provided, sequences will be named based on their row order.
     /// * `oob_option`: Specifies how to handle features that go out of the reference sequence bounds.
     ///
     /// ### Returns
@@ -3980,7 +4011,7 @@ impl Grangers {
     /// * `reader`: A reader instance from which the reference genome will be read.
     /// * `ignore_strand`: Boolean flag indicating whether to ignore strand information during sequence extraction.
     /// * `name_column`: Optional parameter specifying the column name to use for naming the extracted sequences.
-    ///                   If not provided, sequences will be named based on their row order.
+    ///   If not provided, sequences will be named based on their row order.
     /// * `oob_option`: Specifies how to handle features that go out of the reference sequence bounds.
     ///
     /// ### Returns
@@ -3995,7 +4026,7 @@ impl Grangers {
     /// let reader = BufReader::new(File::open("reference.fasta")?);
     /// let sequence_iterator = grangers.iter_sequences_from_reader(reader, false, None, OOBOption::Trim)?;
     /// for sequence in sequence_iterator {
-    ///     println!("{:?}", sequence);
+    ///   println!("{:?}", sequence);
     /// }
     /// ```
     ///
@@ -4081,7 +4112,7 @@ impl Grangers {
     /// * `ref_path`: The path to the reference genome FASTA file.
     /// * `ignore_strand`: Boolean flag indicating whether to ignore strand information during sequence extraction.
     /// * `name_column`: Optional parameter specifying the column name to use for naming the extracted sequences.
-    ///                   If not provided, sequences will be named based on their row order.
+    ///   If not provided, sequences will be named based on their row order.
     /// * `oob_option`: Specifies how to handle features that go out of the reference sequence bounds.
     ///
     /// ### Returns
@@ -4095,7 +4126,7 @@ impl Grangers {
     /// let mut grangers = Grangers::new(...);
     /// let sequence_iterator = grangers.iter_sequences("reference.fasta", false, None, OOBOption::Trim)?;
     /// for sequence in sequence_iterator {
-    ///     println!("{:?}", sequence);
+    ///   println!("{:?}", sequence);
     /// }
     /// ```
     ///
@@ -4128,7 +4159,7 @@ impl Grangers {
     ///
     /// * `record`: A reference to a `noodles::fasta::Record` from which sequences will be extracted.
     /// * `oob_option`: A reference to an `OOBOption` enum determining how out-of-bound sequences should be handled.
-    ///                 Options include truncating sequences at the reference boundaries or skipping them entirely.
+    ///   Options include truncating sequences at the reference boundaries or skipping them entirely.
     ///
     /// ### Returns
     ///
@@ -4142,10 +4173,10 @@ impl Grangers {
     /// let fasta_record = noodles::fasta::Record::new(...);
     /// let sequences = grangers.get_sequences_fasta_record(&fasta_record, &OOBOption::Truncate)?;
     /// for seq_option in sequences {
-    ///     match seq_option {
-    ///         Some(seq) => println!("{:?}", seq),
-    ///         None => println!("Sequence out of bounds"),
-    ///     }
+    ///   match seq_option {
+    ///   Some(seq) => println!("{:?}", seq),
+    ///   None => println!("Sequence out of bounds"),
+    ///   }
     /// }
     /// ```
     ///
@@ -4173,12 +4204,15 @@ impl Grangers {
         }
 
         let mut seq_vec = Vec::with_capacity(df.height());
-        let ses = df.columns([start, end, strand])?;
+        let ses = [&start, &end, &strand]
+            .iter()
+            .map(|n| df.column(n))
+            .collect::<PolarsResult<Vec<_>>>()?;
         for ((start, end), strand) in ses[0]
             .i64()?
             .into_iter()
-            .zip(ses[1].i64()?.into_iter())
-            .zip(ses[2].str()?.into_iter())
+            .zip(ses[1].i64()?)
+            .zip(ses[2].str()?)
         {
             if let (Some(start), Some(end)) = (start, end) {
                 let (start, end) = if oob_option == &OOBOption::Truncate {
@@ -4220,9 +4254,9 @@ impl Grangers {
 ///
 /// * `seqname`: A [String] representing the name of the sequence (e.g., chromosome name) to which the filtering and extraction will be applied.
 /// * `name_column`: A [String] specifying the column in the [Grangers] instance's dataframe that contains names for the extracted sequences.
-///               If this column is invalid or not present, a fallback mechanism such as row order might be used.
+///   If this column is invalid or not present, a fallback mechanism such as row order might be used.
 /// * `oob_option`: An [OOBOption] enum value that determines how out-of-bound (OOB) sequences should be handled during extraction.
-///                This could include options such as truncating the sequences at the reference boundaries or skipping them entirely.
+///   This could include options such as truncating the sequences at the reference boundaries or skipping them entirely.
 ///
 pub struct GrangersFilterOpts {
     seqname: String,
@@ -4238,32 +4272,32 @@ pub struct GrangersFilterOpts {
 /// # Fields
 ///
 /// * `essential_gr`: A [Grangers] instance that holds essential data fields required for processing all target sequences.
-///    This serves as the base data structure from which specific sequences are extracted.
+///   This serves as the base data structure from which specific sequences are extracted.
 ///
 /// * `chr_gr`: An optional [Grangers] instance containing only the features relevant to the current target sequence.
-///    This is dynamically updated to match the current focus of sequence extraction.
+///   This is dynamically updated to match the current focus of sequence extraction.
 ///
 /// * `seq_reader`: A FASTA format reader from the `noodles` crate, wrapping an underlying reader
-///    that depends on wether or not the source is compressed. It is used for reading sequence data from a reference
-///    genome or other source.
+///   that depends on wether or not the source is compressed. It is used for reading sequence data from a reference
+///   genome or other source.
 ///
 /// * `seq_record`: Represents the current sequence record being processed by the iterator.
-///    It holds both the sequence identifier and the actual sequence data.
+///   It holds both the sequence identifier and the actual sequence data.
 ///
 /// * `filt_opt`: Filter options encapsulated within a [GrangersFilterOpts] structure. These options dictate how sequences
-///    should be filtered and processed during iteration, including which sequences to include and how to handle edge cases.
+///   should be filtered and processed during iteration, including which sequences to include and how to handle edge cases.
 ///
 /// * `name_vec_iter`: An iterator over the names of sequences that need to be extracted based on the current dataset.
-///    This typically corresponds to identifiers like transcript or gene IDs.
+///   This typically corresponds to identifiers like transcript or gene IDs.
 ///
 /// * `row_order_iter`: An iterator over the row indices of sequences in the dataset, providing a link between sequence data
-///    and their corresponding metadata or annotations within the [Grangers] structure.
+///   and their corresponding metadata or annotations within the [Grangers] structure.
 ///
 /// * `chr_seq_iter`: An optional internal iterator (`ChrRowSeqIter`) that handles the iteration over individual sequence features
-///    for a given target, such as exons within a transcript. This allows for fine-grained processing of sequences.
+///   for a given target, such as exons within a transcript. This allows for fine-grained processing of sequences.
 ///
 /// * `def_buffer`: A local buffer used to hold sequence definitions temporarily. This can be used for building FASTA headers
-///    or other metadata strings associated with each sequence.
+///   or other metadata strings associated with each sequence.
 ///
 /// # Usage
 ///
@@ -4295,9 +4329,10 @@ pub struct GrangersSeqIter {
     // the "inner" iterator that iterates over the sequence
     // features of an individual target.
     chr_seq_iter: Option<ChrRowSeqIter<'static>>,
-    // local buffer to hold the sequence definition
-    // string.
-    def_buffer: String,
+    // local buffer to hold the sequence definition.
+    // NOTE: as of noodles-fasta 0.66, `read_definition` parses directly into a
+    // `Definition` rather than filling a `String` that the caller then parses.
+    def_buffer: Definition,
 }
 
 use core::pin::Pin;
@@ -4363,7 +4398,7 @@ impl GrangersSeqIter {
             name_vec_iter: v.into_iter(),
             row_order_iter: o.into_iter(),
             chr_seq_iter: None,
-            def_buffer: String::new(),
+            def_buffer: Definition::default(),
         })
     }
 }
@@ -4397,7 +4432,7 @@ impl Iterator for GrangersSeqIter {
     /// Assuming `grangers_seq_iter` is an instance of `GrangersSeqIter<R>`:
     /// ```ignore
     /// while let Some((id, record)) = grangers_seq_iter.next() {
-    ///     println!("ID: {:?}, Sequence: {:?}", id, record);
+    ///   println!("ID: {:?}, Sequence: {:?}", id, record);
     /// }
     /// ```
     ///
@@ -4439,7 +4474,7 @@ impl Iterator for GrangersSeqIter {
                 // 2. get the sequence of the features in the dataframe on that fasta record
                 // 3. yield the iterator over that data frame
                 loop {
-                    self.def_buffer.clear();
+                    self.def_buffer = Definition::default();
                     let def_bytes = self
                         .seq_reader
                         .read_definition(&mut self.def_buffer)
@@ -4450,10 +4485,7 @@ impl Iterator for GrangersSeqIter {
                         return None;
                     }
 
-                    let definition = match self.def_buffer.parse() {
-                        Ok(d) => d,
-                        Err(e) => panic!("could not parse sequence definition: error {}", e),
-                    };
+                    let definition = self.def_buffer.clone();
 
                     let mut seq_buffer = Vec::<u8>::new();
                     let seq_bytes = self
@@ -4633,9 +4665,21 @@ impl<'a> ChrRowSeqIter<'a> {
 
         // Retrieve Series and rechunk/cast as needed to ensure safety and correctness
         // We collect to Vecs to avoid lifetime issues with local rechunked Series
-        let s_start = grangers.df().column(fc.start())?.as_materialized_series().rechunk();
-        let s_end = grangers.df().column(fc.end())?.as_materialized_series().rechunk();
-        let s_strand = grangers.df().column(fc.strand())?.as_materialized_series().rechunk();
+        let s_start = grangers
+            .df()
+            .column(fc.start())?
+            .as_materialized_series()
+            .rechunk();
+        let s_end = grangers
+            .df()
+            .column(fc.end())?
+            .as_materialized_series()
+            .rechunk();
+        let s_strand = grangers
+            .df()
+            .column(fc.strand())?
+            .as_materialized_series()
+            .rechunk();
 
         // Collect starts and ends
         // We use i64() helper which returns ChunkedArray<Int64Type>
@@ -4646,9 +4690,10 @@ impl<'a> ChrRowSeqIter<'a> {
         // Cast to String to ensure we can read it as string, then collect boolean flag
         let s_strand_str = s_strand.cast(&DataType::String)?;
         let ca_strand = s_strand_str.str()?;
-        let is_reverse: Vec<Option<bool>> = ca_strand.into_iter().map(|opt_s| {
-            opt_s.map(|s| s == "-")
-        }).collect();
+        let is_reverse: Vec<Option<bool>> = ca_strand
+            .into_iter()
+            .map(|opt_s| opt_s.map(|s| s == "-"))
+            .collect();
 
         let seqlen = record.sequence().len();
         Ok(Self {
@@ -4690,10 +4735,10 @@ impl<'a> Iterator for ChrRowSeqIter<'a> {
     /// Assuming `chr_row_seq_iter` is an instance of [`ChrRowSeqIter<'a>`]:
     /// ```ignore
     /// while let Some(result) = chr_row_seq_iter.next() {
-    ///     match result {
-    ///         Ok(sequence) => println!("Extracted sequence: {:?}", sequence),
-    ///         Err(e) => println!("Error extracting sequence: {}", e),
-    ///     }
+    ///   match result {
+    ///   Ok(sequence) => println!("Extracted sequence: {:?}", sequence),
+    ///   Err(e) => println!("Error extracting sequence: {}", e),
+    ///   }
     /// }
     /// ```
     ///
@@ -4731,7 +4776,7 @@ impl<'a> Iterator for ChrRowSeqIter<'a> {
                 if let Some(seq) = seq {
                     let mut sequence = Ok(Sequence::from_iter(seq.iter().copied()));
                     if is_rev {
-                         sequence = sequence.unwrap().complement().rev().collect::<Result<_, _>>().with_context(||"Could not get the reverse complement of a sequence. Please check if the alphabet is valid.");
+                        sequence = sequence.unwrap().complement().rev().collect::<Result<_, _>>().with_context(||"Could not get the reverse complement of a sequence. Please check if the alphabet is valid.");
                     }
                     Some(sequence)
                 } else {
@@ -4814,7 +4859,7 @@ pub fn argsort1based<T: Ord>(data: &[T], descending: bool) -> Vec<usize> {
 ///
 /// # Returns
 ///
-/// Returns a [`Result<Option<polars::prelude::Column>, PolarsError>`]:
+/// Returns a [`Result<polars::prelude::Column, PolarsError>`]:
 /// * [Ok]`(Some(Series))`: A new `Series` where each element is a merged interval if any merging occurs.
 ///   The merged intervals are represented as a Series of lists, each containing the start and end of the merged interval.
 /// * [Ok]`(None)`: If the input Series is empty or only contains null values.
@@ -4834,7 +4879,7 @@ pub fn argsort1based<T: Ord>(data: &[T], descending: bool) -> Vec<usize> {
 /// This function requires that the input [Series] is sorted by the start positions of the intervals and contains
 /// no null values in the start and end fields. It's designed specifically for genomic data processing where
 /// intervals might need to be merged based on their proximity or overlap.
-fn apply_merge(s: Column, slack: i64) -> Result<Option<polars::prelude::Column>, PolarsError> {
+fn apply_merge(s: Column, slack: i64) -> Result<polars::prelude::Column, PolarsError> {
     // get the two columns from the struct
     let ca: StructChunked = s.struct_()?.clone();
 
@@ -4854,15 +4899,9 @@ fn apply_merge(s: Column, slack: i64) -> Result<Option<polars::prelude::Column>,
         } else {
             // this should not happen as we dropped all null values
             // rust will always use anyhow result by default
-            return Result::<Option<polars::prelude::Column>, PolarsError>::Err(
-                PolarsError::ComputeError(
-                    "Found missing value in the start or end column. Cannot proceed.".into(),
-                ),
-            );
-
-            // return Result::<Option<polars::prelude::Column>, polars::prelude::PolarsError>::Ok(Some(
-            //     Series::new_empty("pos", &DataType::List((DataType::Int64).into())),
-            // ));
+            return Err(PolarsError::ComputeError(
+                "Found missing value in the start or end column. Cannot proceed.".into(),
+            ));
         };
     // initialize variables for new features
     let mut out_list: Vec<Series> = Vec::with_capacity(start_series.len());
@@ -4874,12 +4913,9 @@ fn apply_merge(s: Column, slack: i64) -> Result<Option<polars::prelude::Column>,
             (start, end)
         } else {
             // rust will always use anyhow result by default
-            return Result::<Option<polars::prelude::Column>, polars::prelude::PolarsError>::Err(
-                polars::prelude::PolarsError::ComputeError(
-                    "Found missing value in the start or end column. This should not happen."
-                        .into(),
-                ),
-            );
+            return Err(polars::prelude::PolarsError::ComputeError(
+                "Found missing value in the start or end column. This should not happen.".into(),
+            ));
         };
 
         // we know the df is sorted and the window starts from the leftmost feature
@@ -4914,7 +4950,7 @@ fn apply_merge(s: Column, slack: i64) -> Result<Option<polars::prelude::Column>,
     out_list.push(Series::new("one more".into(), [window_start, window_end]));
 
     let ls = Column::new("pos".into(), out_list);
-    Result::<Option<polars::prelude::Column>, PolarsError>::Ok(Some(ls))
+    Ok(ls)
 }
 
 /// Identifies gaps between adjacent genomic features based on their start and end positions.
@@ -4933,7 +4969,7 @@ fn apply_merge(s: Column, slack: i64) -> Result<Option<polars::prelude::Column>,
 ///
 /// # Returns
 ///
-/// Returns a [`Result<Option<polars::prelude::Column>, PolarsError>`]:
+/// Returns a [`Result<polars::prelude::Column, PolarsError>`]:
 /// * [Ok]`(Some(Column))`: A new `Column` where each element represents a gap identified between features.
 ///   The elements are formatted as intervals (start and end positions of the gaps) if any gaps exist.
 /// * [Ok]`(None)`: If the input `Column` contains only one feature or is otherwise incapable of forming gaps.
@@ -4956,21 +4992,23 @@ fn apply_merge(s: Column, slack: i64) -> Result<Option<polars::prelude::Column>,
 /// are defined as regions starting from one feature's end position plus one to the next feature's start
 /// position minus one.
 // TODO: The implementation is now assuming the intervals are inclusive. This should be changed to be more flexible.
-fn apply_gaps(s: Column, _slack: i64) -> Result<Option<polars::prelude::Column>, PolarsError> {
+fn apply_gaps(s: Column, _slack: i64) -> Result<polars::prelude::Column, PolarsError> {
     // get the two columns from the struct
     let ca: StructChunked = s.struct_()?.clone();
     // get the start and end series
     let start_series = &ca.fields_as_series()[0];
     let end_series = &ca.fields_as_series()[1];
 
-    // if we have only one feature, we return an empty list
+    // if we have only one feature there are no gaps, so we return an empty list.
+    // NOTE: polars 0.53 changed `Expr::apply` to require `PolarsResult<Column>` rather than
+    // `PolarsResult<Option<Column>>`. An empty list is the equivalent sentinel: the caller
+    // explodes this column with `empty_as_null: true`, which turns it back into a null row
+    // that the subsequent `drop_nulls` removes -- exactly what returning `None` used to do.
     if start_series.len() == 1 {
-        // return an empty list
-        return Result::<Option<polars::prelude::Column>, PolarsError>::Ok(None);
-
-        // return Result::<Option<polars::prelude::Column>, PolarsError>::Ok(Some(
-        //     Series::new_empty("pos", &DataType::List((DataType::Int64).into())),
-        // ));
+        return Ok(Column::new_empty(
+            "pos".into(),
+            &DataType::List((DataType::Int64).into()),
+        ));
     }
 
     // downcast the `Series` to their known type and turn them into iterators
@@ -4995,12 +5033,9 @@ fn apply_gaps(s: Column, _slack: i64) -> Result<Option<polars::prelude::Column>,
             (prev_feat_end + 1, next_feat_start - 1)
         } else {
             // rust will always use anyhow result by default
-            return Result::<Option<polars::prelude::Column>, polars::prelude::PolarsError>::Err(
-                polars::prelude::PolarsError::ComputeError(
-                    "Found missing value in the start or end column. This should not happen."
-                        .into(),
-                ),
-            );
+            return Err(polars::prelude::PolarsError::ComputeError(
+                "Found missing value in the start or end column. This should not happen.".into(),
+            ));
         };
 
         out_list.push(Series::new(
@@ -5010,7 +5045,7 @@ fn apply_gaps(s: Column, _slack: i64) -> Result<Option<polars::prelude::Column>,
     }
 
     let ls = Column::new("pos".into(), out_list).cast(&DataType::List((DataType::Int64).into()))?;
-    Result::<Option<polars::prelude::Column>, PolarsError>::Ok(Some(ls))
+    Ok(ls)
 }
 
 #[cfg(test)]
@@ -5110,7 +5145,7 @@ mod tests {
             vec![
                 None,
                 Some(String::from("t1")),
-                Some(String::from(String::from("t1"))),
+                Some(String::from("t1")),
                 Some(String::from("t1")),
                 None,
                 Some(String::from("t2")),
@@ -5560,7 +5595,7 @@ mod tests {
             vec![
                 None,
                 Some(String::from("t1")),
-                Some(String::from(String::from("t1"))),
+                Some(String::from("t1")),
                 Some(String::from("t1")),
                 None,
                 Some(String::from("t2")),

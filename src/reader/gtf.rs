@@ -7,6 +7,69 @@ use std::io::{BufRead, BufReader};
 use std::{collections::HashMap, path::Path};
 use tracing::{info, warn};
 
+/// Counts of strand values that were not `+` or `-` and therefore had to be coerced.
+///
+/// GTF and GFF both allow `.` (no strand) and `?` (unknown strand), but the rest of
+/// grangers models strand as `+`/`-`. We coerce those records to `+` and report how
+/// many we coerced, rather than silently rewriting the annotation.
+#[derive(Default)]
+struct StrandCoercionCounts {
+    none: usize,
+    unknown: usize,
+}
+
+impl StrandCoercionCounts {
+    fn warn_if_any(&self) {
+        if self.none > 0 {
+            warn!(
+                "{} records have no strand information, set to '+'",
+                self.none
+            );
+        }
+        if self.unknown > 0 {
+            warn!(
+                "{} records have unknown strand information, set to '+'",
+                self.unknown
+            );
+        }
+    }
+}
+
+/// Renders a noodles strand as the `+`/`-` string grangers stores.
+///
+/// NOTE: `noodles-gtf` re-uses `noodles-gff`'s `Strand` type, so this one helper
+/// serves both parsers. The match is exhaustive on purpose: an earlier version of
+/// this code matched on `format!("{:?}", strand)` and used a `_ => "+"` fallback,
+/// which silently swallowed `.` and `?` without counting them.
+fn strand_to_string(
+    strand: gff::feature::record::Strand,
+    counts: &mut StrandCoercionCounts,
+) -> String {
+    use gff::feature::record::Strand;
+    match strand {
+        Strand::Forward => String::from("+"),
+        Strand::Reverse => String::from("-"),
+        Strand::None => {
+            counts.none += 1;
+            String::from("+")
+        }
+        Strand::Unknown => {
+            counts.unknown += 1;
+            String::from("+")
+        }
+    }
+}
+
+/// Renders a noodles phase as the `0`/`1`/`2` string grangers stores.
+fn phase_to_string(phase: gff::feature::record::Phase) -> String {
+    use gff::feature::record::Phase;
+    match phase {
+        Phase::Zero => String::from("0"),
+        Phase::One => String::from("1"),
+        Phase::Two => String::from("2"),
+    }
+}
+
 #[derive(Copy, Clone)]
 /// Represents the modes available for selecting attributes during data processing.
 ///
@@ -393,14 +456,22 @@ impl GStruct {
         let mut rec_attr_hm: HashMap<String, String> = HashMap::with_capacity(100);
         let mut n_comments = 0usize;
         let mut n_records = 0usize;
+        let mut strand_counts = StrandCoercionCounts::default();
 
         // parse the file
         for l in rdr.lines() {
             let line = l?;
-            match line.kind()    {
+            match line.kind() {
                 gtf::line::Kind::Record => {
-                    let r = line.as_record().with_context(|| format!("Failed parsing a record line: {:#?}", line.as_record()))?
-                    .with_context(|| format!("Failed parsing a record line: {:#?}", line.as_record()))?;
+                    // NOTE: `gtf::Line` does not implement `Debug`, so we cannot echo the
+                    // offending line here the way the GFF parser does.
+                    let r = line
+                        .as_record()
+                        .context(
+                            "line kind was `Record` but `as_record()` yielded nothing; \
+                             this indicates an inconsistency in the GTF reader",
+                        )?
+                        .context("failed to parse a GTF record line")?;
                     n_records += 1;
                     // parse essential fields
 
@@ -410,25 +481,11 @@ impl GStruct {
                     GStruct::push(&mut self.start, r.start()?.get() as i64);
                     GStruct::push(&mut self.end, r.end()?.get() as i64);
                     GStruct::push(&mut self.score, r.score().transpose()?);
-                    let strand_opt = r.strand().map(|st| {
-                        let st_debug = format!("{:?}", st);
-                        match st_debug.as_str() {
-                            "Reverse" => String::from("-"),
-                            _ => String::from("+"),
-                        }
-                    })?;
-                    GStruct::push(&mut self.strand, Some(strand_opt));
+                    let strand_str = strand_to_string(r.strand()?, &mut strand_counts);
+                    GStruct::push(&mut self.strand, Some(strand_str));
 
                     if let Some(ph_result) = r.phase() {
-                        let ph = ph_result?;
-                        let ph_debug = format!("{:?}", ph);
-                        let phase_str = match ph_debug.as_str() {
-                            "Zero" => Some(String::from("0")),
-                            "One" => Some(String::from("1")),
-                            "Two" => Some(String::from("2")),
-                            _ => Some(String::from("0")),
-                        };
-                        GStruct::push(&mut self.phase, phase_str);
+                        GStruct::push(&mut self.phase, Some(phase_to_string(ph_result?)));
                     } else {
                         GStruct::push(&mut self.phase, None);
                     }
@@ -445,11 +502,11 @@ impl GStruct {
                             }
                             gff::feature::record::attributes::field::Value::Array(a) => {
                                 rec_attr_hm.insert(
-                                    key.to_string(), 
+                                    key.to_string(),
                                     a.iter()
                                         .map(|result| result.map(|s| s.to_string()))
                                         .collect::<Result<Vec<_>, _>>()?
-                                        .join(",")
+                                        .join(","),
                                 );
                             }
                         }
@@ -469,6 +526,8 @@ impl GStruct {
                 }
             }
         }
+        strand_counts.warn_if_any();
+
         info!(
             "Finished parsing the input file. Found {} comments and {} records.",
             n_comments, n_records
@@ -538,8 +597,7 @@ impl GStruct {
         let mut rec_attr_hm: HashMap<String, String> = HashMap::with_capacity(100);
         let mut n_comments = 0usize;
         let mut n_records = 0usize;
-        let mut n_strand_none = 0usize;
-        let mut n_strand_unknown = 0usize;
+        let mut strand_counts = StrandCoercionCounts::default();
 
         // parse the file
         for l in rdr.lines() {
@@ -562,35 +620,11 @@ impl GStruct {
                         GStruct::push(&mut self.score, None);
                     }
 
-                    let strand_str = {
-                        let strand_val = r.strand()?;
-                        let strand_debug = format!("{:?}", strand_val);
-                        match strand_debug.as_str() {
-                            "Reverse" => Some(String::from("-")),
-                            "Forward" => Some(String::from("+")),
-                            "None" => {
-                                n_strand_none += 1;
-                                Some(String::from("+"))
-                            }
-                            "Unknown" => {
-                                n_strand_unknown += 1;
-                                Some(String::from("+"))
-                            }
-                            _ => Some(String::from("+")),
-                        }
-                    };
-                    GStruct::push(&mut self.strand, strand_str);
+                    let strand_str = strand_to_string(r.strand()?, &mut strand_counts);
+                    GStruct::push(&mut self.strand, Some(strand_str));
 
                     if let Some(p) = r.phase() {
-                        let phase_val = p?;
-                        let phase_debug = format!("{:?}", phase_val);
-                        let phase_result = match phase_debug.as_str() {
-                            "Zero" => Some(String::from("0")),
-                            "One" => Some(String::from("1")),
-                            "Two" => Some(String::from("2")),
-                            _ => None,
-                        };
-                        GStruct::push(&mut self.phase, phase_result);
+                        GStruct::push(&mut self.phase, Some(phase_to_string(p?)));
                     } else {
                         GStruct::push(&mut self.phase, None);
                     }
@@ -635,7 +669,13 @@ impl GStruct {
                         .as_directive()
                         .with_context(|| format!("failed parsing a directive line: {:#?}", line))?;
                     // we create a string containing the key and value fields separated by space for the directive
-                    let dstring = format!("{} {}", d.key(), d.value().map(|v| v.to_string()).unwrap_or_else(|| String::from("")));
+                    let dstring = format!(
+                        "{} {}",
+                        d.key(),
+                        d.value()
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| String::from(""))
+                    );
 
                     // this must be Some
                     if let Some(misc) = self.misc.as_mut() {
@@ -648,19 +688,7 @@ impl GStruct {
             }
         }
 
-        if n_strand_none > 0 {
-            warn!(
-                "{} records have no strand information, set to '+'",
-                n_strand_none
-            );
-        }
-
-        if n_strand_unknown > 0 {
-            warn!(
-                "{} records have unknown strand information, set to '+'",
-                n_strand_unknown
-            );
-        }
+        strand_counts.warn_if_any();
 
         info!(
             "Finished parsing the input file. Found {} comments, and {} records.",
@@ -780,98 +808,96 @@ mod tests {
         let mut gr = GStruct::new(AttributeMode::Full, FileFormat::GTF).unwrap();
         gr._from_gtf(&mut rdr).unwrap();
         // check values
-        match gr {
-            GStruct {
-                seqid,
-                source,
+        let GStruct {
+            seqid,
+            source,
+            feature_type,
+            start,
+            end,
+            score,
+            strand,
+            phase,
+            attributes,
+            misc: _,
+        } = gr;
+        {
+            assert_eq!(seqid, vec![String::from("chr1"); 5]);
+            assert_eq!(source, vec![String::from("HAVANA"); 5]);
+            assert_eq!(
                 feature_type,
-                start,
-                end,
-                score,
-                strand,
-                phase,
-                attributes,
-                misc: _,
-            } => {
-                assert_eq!(seqid, vec![String::from("chr1"); 5]);
-                assert_eq!(source, vec![String::from("HAVANA"); 5]);
+                vec![
+                    String::from("gene"),
+                    String::from("transcript"),
+                    String::from("exon"),
+                    String::from("exon"),
+                    String::from("transcript")
+                ]
+            );
+            assert_eq!(start, vec![29554, 29554, 29554, 30564, 30267]);
+            assert_eq!(end, vec![31109, 31097, 30039, 30667, 31109]);
+            assert_eq!(score, vec![None; 5]);
+            assert_eq!(strand, vec![Some(String::from("+")); 5]);
+            assert_eq!(phase, vec![None; 5]);
+            let Attributes {
+                file_type,
+                essential,
+                extra,
+                tally,
+            } = attributes;
+            {
+                assert!(file_type == FileFormat::GTF);
+                assert!(essential
+                    .get("gene_id")
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.clone().unwrap().eq(&String::from("ENSG00000243485")))
+                    .collect::<Vec<bool>>()
+                    .iter()
+                    .all(|v| *v));
+
+                assert!(essential
+                    .get("gene_name")
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.clone().unwrap().eq(&String::from("MIR1302-2HG")))
+                    .collect::<Vec<bool>>()
+                    .iter()
+                    .all(|v| *v));
+
                 assert_eq!(
-                    feature_type,
+                    essential
+                        .get("transcript_id")
+                        .unwrap()
+                        .iter()
+                        .map(|v| if let Some(id) = v.clone() {
+                            id
+                        } else {
+                            String::from("none")
+                        })
+                        .collect::<Vec<String>>(),
                     vec![
-                        String::from("gene"),
-                        String::from("transcript"),
-                        String::from("exon"),
-                        String::from("exon"),
-                        String::from("transcript")
+                        String::from("none"),
+                        String::from("ENST00000473358"),
+                        String::from("ENST00000473358"),
+                        String::from("ENST00000473358"),
+                        String::from("ENST00000469289")
                     ]
                 );
-                assert_eq!(start, vec![29554, 29554, 29554, 30564, 30267]);
-                assert_eq!(end, vec![31109, 31097, 30039, 30667, 31109]);
-                assert_eq!(score, vec![None; 5]);
-                assert_eq!(strand, vec![Some(String::from("+")); 5]);
-                assert_eq!(phase, vec![None; 5]);
-                match attributes {
-                    Attributes {
-                        file_type,
-                        essential,
-                        extra,
-                        tally,
-                    } => {
-                        assert!(file_type == FileFormat::GTF);
-                        assert!(essential
-                            .get("gene_id")
-                            .unwrap()
-                            .iter()
-                            .map(|v| v.clone().unwrap().eq(&String::from("ENSG00000243485")))
-                            .collect::<Vec<bool>>()
-                            .iter()
-                            .all(|v| *v));
-
-                        assert!(essential
-                            .get("gene_name")
-                            .unwrap()
-                            .iter()
-                            .map(|v| v.clone().unwrap().eq(&String::from("MIR1302-2HG")))
-                            .collect::<Vec<bool>>()
-                            .iter()
-                            .all(|v| *v));
-
-                        assert_eq!(
-                            essential
-                                .get("transcript_id")
-                                .unwrap()
-                                .iter()
-                                .map(|v| if let Some(id) = v.clone() {
-                                    id
-                                } else {
-                                    String::from("none")
-                                })
-                                .collect::<Vec<String>>(),
-                            vec![
-                                String::from("none"),
-                                String::from("ENST00000473358"),
-                                String::from("ENST00000473358"),
-                                String::from("ENST00000473358"),
-                                String::from("ENST00000469289")
-                            ]
-                        );
-                        assert_eq!(
-                            extra
-                                .unwrap()
-                                .get("gene_type")
-                                .unwrap()
-                                .iter()
-                                .map(|v| if let Some(id) = v.clone() {
-                                    id
-                                } else {
-                                    String::from("none")
-                                })
-                                .collect::<Vec<String>>(),
-                            vec![String::from("lncRNA"); 5]
-                        );
-                        assert_eq!(tally, 5);
-                    }
-                }
+                assert_eq!(
+                    extra
+                        .unwrap()
+                        .get("gene_type")
+                        .unwrap()
+                        .iter()
+                        .map(|v| if let Some(id) = v.clone() {
+                            id
+                        } else {
+                            String::from("none")
+                        })
+                        .collect::<Vec<String>>(),
+                    vec![String::from("lncRNA"); 5]
+                );
+                assert_eq!(tally, 5);
             }
         }
     }
@@ -882,98 +908,96 @@ mod tests {
         let mut gr = GStruct::new(AttributeMode::Full, FileFormat::GFF).unwrap();
         gr._from_gff(&mut rdr).unwrap();
         // check values
-        match gr {
-            GStruct {
-                seqid,
-                source,
+        let GStruct {
+            seqid,
+            source,
+            feature_type,
+            start,
+            end,
+            score,
+            strand,
+            phase,
+            attributes,
+            misc: _,
+        } = gr;
+        {
+            assert_eq!(seqid, vec![String::from("chr1"); 5]);
+            assert_eq!(source, vec![String::from("HAVANA"); 5]);
+            assert_eq!(
                 feature_type,
-                start,
-                end,
-                score,
-                strand,
-                phase,
-                attributes,
-                misc: _,
-            } => {
-                assert_eq!(seqid, vec![String::from("chr1"); 5]);
-                assert_eq!(source, vec![String::from("HAVANA"); 5]);
+                vec![
+                    String::from("gene"),
+                    String::from("transcript"),
+                    String::from("exon"),
+                    String::from("exon"),
+                    String::from("exon")
+                ]
+            );
+            assert_eq!(start, vec![11869, 11869, 11869, 12613, 13221]);
+            assert_eq!(end, vec![14409, 14409, 12227, 12721, 14409]);
+            assert_eq!(score, vec![None; 5]);
+            assert_eq!(strand, vec![Some(String::from("+")); 5]);
+            assert_eq!(phase, vec![None; 5]);
+            let Attributes {
+                file_type,
+                essential,
+                extra,
+                tally,
+            } = attributes;
+            {
+                assert!(file_type == FileFormat::GFF);
+                assert!(essential
+                    .get("gene_id")
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.clone().unwrap().eq(&String::from("ENSG00000290825.1")))
+                    .collect::<Vec<bool>>()
+                    .iter()
+                    .all(|v| *v));
+
+                assert!(essential
+                    .get("gene_name")
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.clone().unwrap().eq(&String::from("DDX11L2")))
+                    .collect::<Vec<bool>>()
+                    .iter()
+                    .all(|v| *v));
+
                 assert_eq!(
-                    feature_type,
+                    essential
+                        .get("transcript_id")
+                        .unwrap()
+                        .iter()
+                        .map(|v| if let Some(id) = v.clone() {
+                            id
+                        } else {
+                            String::from("none")
+                        })
+                        .collect::<Vec<String>>(),
                     vec![
-                        String::from("gene"),
-                        String::from("transcript"),
-                        String::from("exon"),
-                        String::from("exon"),
-                        String::from("exon")
+                        String::from("none"),
+                        String::from("ENST00000456328.2"),
+                        String::from("ENST00000456328.2"),
+                        String::from("ENST00000456328.2"),
+                        String::from("ENST00000456328.2")
                     ]
                 );
-                assert_eq!(start, vec![11869, 11869, 11869, 12613, 13221]);
-                assert_eq!(end, vec![14409, 14409, 12227, 12721, 14409]);
-                assert_eq!(score, vec![None; 5]);
-                assert_eq!(strand, vec![Some(String::from("+")); 5]);
-                assert_eq!(phase, vec![None; 5]);
-                match attributes {
-                    Attributes {
-                        file_type,
-                        essential,
-                        extra,
-                        tally,
-                    } => {
-                        assert!(file_type == FileFormat::GFF);
-                        assert!(essential
-                            .get("gene_id")
-                            .unwrap()
-                            .iter()
-                            .map(|v| v.clone().unwrap().eq(&String::from("ENSG00000290825.1")))
-                            .collect::<Vec<bool>>()
-                            .iter()
-                            .all(|v| *v));
-
-                        assert!(essential
-                            .get("gene_name")
-                            .unwrap()
-                            .iter()
-                            .map(|v| v.clone().unwrap().eq(&String::from("DDX11L2")))
-                            .collect::<Vec<bool>>()
-                            .iter()
-                            .all(|v| *v));
-
-                        assert_eq!(
-                            essential
-                                .get("transcript_id")
-                                .unwrap()
-                                .iter()
-                                .map(|v| if let Some(id) = v.clone() {
-                                    id
-                                } else {
-                                    String::from("none")
-                                })
-                                .collect::<Vec<String>>(),
-                            vec![
-                                String::from("none"),
-                                String::from("ENST00000456328.2"),
-                                String::from("ENST00000456328.2"),
-                                String::from("ENST00000456328.2"),
-                                String::from("ENST00000456328.2")
-                            ]
-                        );
-                        assert_eq!(
-                            extra
-                                .unwrap()
-                                .get("gene_type")
-                                .unwrap()
-                                .iter()
-                                .map(|v| if let Some(id) = v.clone() {
-                                    id
-                                } else {
-                                    String::from("none")
-                                })
-                                .collect::<Vec<String>>(),
-                            vec![String::from("lncRNA"); 5]
-                        );
-                        assert_eq!(tally, 5);
-                    }
-                }
+                assert_eq!(
+                    extra
+                        .unwrap()
+                        .get("gene_type")
+                        .unwrap()
+                        .iter()
+                        .map(|v| if let Some(id) = v.clone() {
+                            id
+                        } else {
+                            String::from("none")
+                        })
+                        .collect::<Vec<String>>(),
+                    vec![String::from("lncRNA"); 5]
+                );
+                assert_eq!(tally, 5);
             }
         }
     }

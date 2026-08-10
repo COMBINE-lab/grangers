@@ -1,10 +1,10 @@
 // use crate::grangers_info::{Grangers, GrangersSequenceCollection};
 use flate2::bufread::MultiGzDecoder;
+use noodles::fasta::io::Reader as NoodlesFastaReader;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use tracing::trace;
-use noodles::fasta::io::Reader as NoodlesFastaReader;
 
 /// Type alias for a noodles FASTA reader that can read from
 /// a `dyn BufRead`. It is used to allow reading from either
@@ -488,25 +488,3 @@ pub static FIELDCOLUMNS: [&str; 12] = [
     "transcript_id",
     "exon_number",
 ];
-
-// --- Grangers struct related utility functionality
-
-/*
-pub struct TestIter<'a, 'b> {
-    grangers: &'a Grangers,
-    seq_coll: &'b GrangersSequenceCollection
-}
-
-impl<'a, 'b> Iterator for TestIter<'a, 'b> {
-    type Item = (polars::frame::DataFrame::)
-}
-
-impl Grangers {
-    pub fn iter_with_sequences<'a, 'b>(&'a self, seq_collection: &'b GrangersSequenceCollection) -> TestIter<'a, 'b>{
-        TestIter {
-            grangers: &self,
-            seq_coll: seq_collection
-        }
-    }
-}
-*/

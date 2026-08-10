@@ -1,4 +1,3 @@
-use anyhow;
 use flate2::{write::GzEncoder, Compression};
 use grangers::grangers_utils::IntervalType;
 use grangers::options::FieldColumns;
