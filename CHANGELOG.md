@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [conventional commits](https://www.conventionalcommits.org); entries are
 generated from commit messages by [git-cliff](https://git-cliff.org).
 
+## [0.6.1](https://github.com/COMBINE-lab/grangers/compare/v0.6.0...v0.6.1) (2026-08-10)
+
+
+### Bug Fixes
+
+* Request the zlib-rs flate2 backend explicitly ([0191df5](https://github.com/COMBINE-lab/grangers/commit/0191df5d0699f474956edcd846c23460f8449a84))
+
 ## [0.6.0](https://github.com/COMBINE-lab/grangers/compare/v0.5.0...v0.6.0) (2026-08-10)
 
 
