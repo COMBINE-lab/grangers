@@ -1,0 +1,56 @@
+name: grangers-check
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build_and_test:
+    if: "!contains(github.event.head_commit.message, 'skip ci')"
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Cheap and compiles nothing, so it runs first.
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --verbose
+
+      # Covers the GTF/GFF parse path, which is the part of this crate that has
+      # historically broken silently across noodles and polars upgrades.
+      - name: Run tests
+        run: cargo test --verbose
+
+      # grangers deliberately does not select a flate2 backend, so that consumers
+      # are free to choose one (see the note in Cargo.toml). Assert we did not
+      # accidentally reintroduce a backend pin: a system zlib in the graph here
+      # would force that choice on every downstream crate.
+      - name: Assert no zlib backend is forced
+        shell: bash
+        run: |
+          cargo tree -e normal > tree.txt
+          if grep -qE 'libz-(ng|rs)-sys|libz-sys' tree.txt; then
+            echo "::error::a zlib backend leaked into the default dependency tree"
+            grep -E 'libz-(ng|rs)-sys|libz-sys' tree.txt
+            exit 1
+          fi

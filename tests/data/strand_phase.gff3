@@ -1,0 +1,16 @@
+##gff-version 3
+#!annotation TEST fixture for grangers GFF3 parsing
+chr1	TEST	gene	100	2000	.	+	.	ID=g1;gene_id=g1;gene_name=GENE1
+chr1	TEST	transcript	100	2000	.	+	.	ID=t1;Parent=g1;gene_id=g1;transcript_id=t1;gene_name=GENE1
+chr1	TEST	exon	100	300	.	+	.	Parent=t1;gene_id=g1;transcript_id=t1;gene_name=GENE1
+chr1	TEST	exon	800	1000	.	+	.	Parent=t1;gene_id=g1;transcript_id=t1;gene_name=GENE1
+chr1	TEST	CDS	100	300	.	+	0	Parent=t1;gene_id=g1;transcript_id=t1;gene_name=GENE1
+chr1	TEST	CDS	800	1000	.	+	1	Parent=t1;gene_id=g1;transcript_id=t1;gene_name=GENE1
+chr1	TEST	CDS	1800	2000	.	+	2	Parent=t1;gene_id=g1;transcript_id=t1;gene_name=GENE1
+chr2	TEST	gene	500	1500	100	-	.	ID=g2;gene_id=g2;gene_name=GENE2
+chr2	TEST	transcript	500	1500	100	-	.	ID=t2;Parent=g2;gene_id=g2;transcript_id=t2;gene_name=GENE2
+chr2	TEST	exon	500	700	100	-	.	Parent=t2;gene_id=g2;transcript_id=t2;gene_name=GENE2
+chr3	TEST	gene	10	200	.	.	.	ID=g4;gene_id=g4;gene_name=GENE4_NO_STRAND
+chr3	TEST	exon	10	200	.	.	.	Parent=g4;gene_id=g4;transcript_id=t4;gene_name=GENE4_NO_STRAND
+chr3	TEST	gene	400	600	.	?	.	ID=g5;gene_id=g5;gene_name=GENE5_UNKNOWN_STRAND
+chr3	TEST	exon	400	600	.	?	.	Parent=g5;gene_id=g5;transcript_id=t5;gene_name=GENE5_UNKNOWN_STRAND

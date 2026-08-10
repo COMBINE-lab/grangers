@@ -320,12 +320,12 @@ impl Default for IntervalType {
     /// Provides a default interval type.
     ///
     /// This method returns a default value for the [IntervalType] enum. The default is set to
-    /// [`IntervalType::Inclusive(1)`], which is a common setting for many genomic formats like GTF, GFF, and SAM,
+    /// `IntervalType::Inclusive(1)`, which is a common setting for many genomic formats like GTF, GFF, and SAM,
     /// where intervals are typically inclusive, meaning they include both the start and end positions.
     ///
     /// # Returns
     ///
-    /// Returns [`IntervalType::Inclusive(1)`], representing an inclusive interval with an offset of 1.
+    /// Returns `IntervalType::Inclusive(1)`, representing an inclusive interval with an offset of 1.
     /// This offset reflects the 1-based indexing common to certain genomic data formats.
     ///
     /// # Examples

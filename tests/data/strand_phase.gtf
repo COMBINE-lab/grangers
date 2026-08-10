@@ -1,0 +1,17 @@
+#!genome-build TEST
+#!annotation TEST fixture for grangers GTF parsing
+chr1	TEST	gene	100	2000	.	+	.	gene_id "g1"; gene_name "GENE1";
+chr1	TEST	transcript	100	2000	.	+	.	gene_id "g1"; transcript_id "t1"; gene_name "GENE1";
+chr1	TEST	exon	100	300	.	+	.	gene_id "g1"; transcript_id "t1"; gene_name "GENE1"; exon_number "1";
+chr1	TEST	exon	800	1000	.	+	.	gene_id "g1"; transcript_id "t1"; gene_name "GENE1"; exon_number "2";
+chr1	TEST	exon	1800	2000	.	+	.	gene_id "g1"; transcript_id "t1"; gene_name "GENE1"; exon_number "3";
+chr1	TEST	CDS	100	300	.	+	0	gene_id "g1"; transcript_id "t1"; gene_name "GENE1";
+chr1	TEST	CDS	800	1000	.	+	1	gene_id "g1"; transcript_id "t1"; gene_name "GENE1";
+chr1	TEST	CDS	1800	2000	.	+	2	gene_id "g1"; transcript_id "t1"; gene_name "GENE1";
+chr2	TEST	gene	500	1500	100	-	.	gene_id "g2"; gene_name "GENE2";
+chr2	TEST	transcript	500	1500	100	-	.	gene_id "g2"; transcript_id "t2"; gene_name "GENE2";
+chr2	TEST	exon	500	700	100	-	.	gene_id "g2"; transcript_id "t2"; gene_name "GENE2"; exon_number "1";
+chr2	TEST	exon	1200	1500	100	-	.	gene_id "g2"; transcript_id "t2"; gene_name "GENE2"; exon_number "2";
+chr2	TEST	gene	3000	3600	.	-	.	gene_id "g3"; gene_name "GENE3";
+chr2	TEST	transcript	3000	3600	.	-	.	gene_id "g3"; transcript_id "t3"; gene_name "GENE3";
+chr2	TEST	exon	3000	3600	.	-	.	gene_id "g3"; transcript_id "t3"; gene_name "GENE3"; exon_number "1";
