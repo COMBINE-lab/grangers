@@ -46,21 +46,21 @@ anyhow = "1.0"
 flate2 = { version = "1.1.9", default-features = false, features = ["zlib-rs"] }
 noodles = { version = "0.115.0", features = ["gtf", "gff", "fasta", "core"] }
 tracing = "0.1.41"
-polars = { version = "0.53", features = [
+# Keep this list tied to operations used by grangers and its roers consumer.
+# Polars 0.53's `strings` feature compiles an unconditional `polars_time`
+# import without activating that optional dependency, so `temporal` is needed
+# as a compatibility workaround even though grangers has no temporal columns.
+polars = { version = "0.53", default-features = false, features = [
+  "csv",
   "lazy",
-  "dataframe_arithmetic",
-  "checked_arithmetic",
   "rows",
   "dtype-struct",
   "dtype-categorical",
-  "list_eval",
   "concat_str",
   "strings",
   "is_in",
   "abs",
-  "regex",
-  "timezones",
-  "polars-ops"
+  "temporal",
 ] }
 rust-lapper = "1.3.0"
 nutype = "0.7.0"
